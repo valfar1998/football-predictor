@@ -28,7 +28,7 @@ class FeatureEngineer:
         last_played: dict[str, pd.Timestamp] = {}
         rows = []
 
-        for _, m in df.iterrows():
+        for i, (_, m) in enumerate(df.iterrows(), start=1):
             home, away = m["home_team"], m["away_team"]
             h_stats = self._team_stats(history[home])
             a_stats = self._team_stats(history[away])
@@ -41,6 +41,7 @@ class FeatureEngineer:
                     "home_team": home,
                     "away_team": away,
                     "league": m.get("league", "unknown"),
+                    "country": m.get("country", "unknown"),
                     "season": m.get("season", ""),
                     "home_goals": m["home_goals"],
                     "away_goals": m["away_goals"],
@@ -85,8 +86,11 @@ class FeatureEngineer:
             self._update_elo(elo, home, away, m["home_goals"], m["away_goals"])
             last_played[home] = m["date"]
             last_played[away] = m["date"]
+            if i % 15000 == 0:
+                print(f"feature {i}/{len(df)}")
 
         feat = pd.DataFrame(rows)
+        print(f"feature rows raw={len(feat)}")
         # scarta le prime giornate senza storia sufficiente
         feat = feat[(feat["n_home_hist"] >= 3) & (feat["n_away_hist"] >= 3)].reset_index(drop=True)
         return feat

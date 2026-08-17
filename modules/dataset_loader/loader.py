@@ -68,8 +68,9 @@ COLUMN_MAP = {
 
 
 def normalize_team(name: str) -> str:
-    key = " ".join(str(name).strip().lower().split())
-    return TEAM_ALIASES.get(key, str(name).strip().title())
+    raw = str(name).strip()
+    key = " ".join(raw.lower().split())
+    return TEAM_ALIASES.get(key, raw)
 
 
 def _first_present(df: pd.DataFrame, candidates: list[str]) -> str | None:
@@ -93,7 +94,7 @@ def standardize_frame(df: pd.DataFrame, source: str = "") -> pd.DataFrame:
     for canonical, col in mapping.items():
         out[canonical] = df[col]
     if "date" in out:
-        out["date"] = pd.to_datetime(out["date"], errors="coerce")
+        out["date"] = pd.to_datetime(out["date"], errors="coerce", dayfirst=True)
     if "home_team" in out:
         out["home_team"] = out["home_team"].map(normalize_team)
     if "away_team" in out:
@@ -108,6 +109,8 @@ def standardize_frame(df: pd.DataFrame, source: str = "") -> pd.DataFrame:
             out[xg] = pd.NA
     if "league" not in out:
         out["league"] = "unknown"
+    if "country" not in out:
+        out["country"] = "unknown"
     if "season" not in out:
         out["season"] = out["date"].dt.year if "date" in out else pd.NA
     out["source"] = source
@@ -149,8 +152,12 @@ class DatasetLoader:
             "home_xg": "mean",
             "away_xg": "mean",
             "league": "first",
+            "country": "first",
             "season": "first",
             "source": lambda s: "+".join(sorted(set(s.astype(str)))),
+            "odd_home": "mean",
+            "odd_draw": "mean",
+            "odd_away": "mean",
         }
         merged = (
             combined.groupby(["date", "home_team", "away_team"], as_index=False)
@@ -161,11 +168,19 @@ class DatasetLoader:
     def clean(self, df: pd.DataFrame) -> pd.DataFrame:
         out = df.copy()
         out = out.dropna(subset=["date", "home_team", "away_team"])
-        # xG mancante: stima dai gol con rumore minimo (solo per training demo)
-        if "home_xg" in out:
-            out["home_xg"] = out["home_xg"].fillna(out["home_goals"].clip(lower=0) * 0.95 + 0.15)
-        if "away_xg" in out:
-            out["away_xg"] = out["away_xg"].fillna(out["away_goals"].clip(lower=0) * 0.95 + 0.15)
+        if "home_xg" not in out:
+            out["home_xg"] = pd.NA
+        if "away_xg" not in out:
+            out["away_xg"] = pd.NA
+        if "country" not in out:
+            out["country"] = "unknown"
+        if "league" not in out:
+            out["league"] = "unknown"
+        # xG mancante: stima dai gol (football-data.co.uk non pubblica xG)
+        out["home_xg"] = pd.to_numeric(out["home_xg"], errors="coerce")
+        out["away_xg"] = pd.to_numeric(out["away_xg"], errors="coerce")
+        out["home_xg"] = out["home_xg"].fillna(out["home_goals"].clip(lower=0) * 0.95 + 0.15)
+        out["away_xg"] = out["away_xg"].fillna(out["away_goals"].clip(lower=0) * 0.95 + 0.15)
         out["home_goals"] = out["home_goals"].round().astype("Int64")
         out["away_goals"] = out["away_goals"].round().astype("Int64")
         out = out.dropna(subset=["home_goals", "away_goals"])
@@ -185,7 +200,15 @@ class DatasetLoader:
         return dest
 
     def run(self, output_name: str = "matches.csv") -> tuple[pd.DataFrame, Path]:
-        raw = self.load_raw_folder()
+        from modules.data_update.parse import load_historical
+
+        fd_main = ROOT / "data" / "raw" / "fd" / "main"
+        if fd_main.exists() and any(fd_main.glob("*/*.csv")):
+            raw = load_historical()
+            if raw.empty:
+                raise FileNotFoundError("Nessun risultato in data/raw/fd. Lancia python main.py --update")
+        else:
+            raw = self.load_raw_folder()
         clean = self.clean(raw)
         path = self.save_processed(clean, output_name)
         return clean, path

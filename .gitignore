@@ -5,6 +5,8 @@ __pycache__/
 data/processed/*.csv
 data/models/*.joblib
 data/models/*.json
-!data/raw/.gitkeep
+data/raw/fd/
+data/raw/fixtures/
+data/processed/upcoming_predictions.json
 !data/processed/.gitkeep
 !data/models/.gitkeep

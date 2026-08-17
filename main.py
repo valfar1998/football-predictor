@@ -10,23 +10,68 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from modules.advisor import advise, format_advice
+from modules.advisor.advise import advise, format_advice
+from modules.data_update import build_upcoming, download_all, fetch_asian_odds, save_asian_odds
+from modules.data_update.download import download_fixtures, download_season_zip
+from modules.data_update.leagues import SEASON_ZIPS
 from modules.dataset_loader import DatasetLoader
 from modules.feature_engineering import FeatureEngineer
 from modules.model_training import ModelTrainer
 from modules.montecarlo import MonteCarloSimulator
+from modules.calibration import run_full_calibration
 from modules.predictor import MatchPredictor
 
 OUT_DIR = ROOT / "data" / "processed"
 
 
 def ensure_raw_sample() -> None:
-    raw = ROOT / "data" / "raw"
-    if any(raw.glob("*.csv")):
+    fd = ROOT / "data" / "raw" / "fd" / "main"
+    if fd.exists() and any(fd.glob("*/*.csv")):
         return
-    from scripts.generate_sample_data import main as gen
+    raw = ROOT / "data" / "raw"
+    if any(p for p in raw.glob("*.csv") if "synthetic" not in p.name.lower()):
+        return
+    print("Nessun dato reale: scarico football-data.co.uk...")
+    download_all()
 
-    gen()
+
+def update_pipeline(*, retrain: bool = True) -> dict:
+    info = download_all()
+    train_info: dict = {}
+    if retrain or not (ROOT / "data" / "models" / "best_model.joblib").exists():
+        train_info = train_pipeline()
+    upcoming = build_upcoming()
+    return {
+        **info,
+        **{k: v for k, v in train_info.items() if k != "path"},
+        "n_upcoming": len(upcoming),
+        "model": train_info.get("path"),
+    }
+
+
+def refresh_odds_pipeline(*, asian: bool = True) -> dict:
+    download_fixtures()
+    download_season_zip(SEASON_ZIPS[-1])
+    asian_info: dict = {}
+    if asian:
+        rows = fetch_asian_odds(days=7, book="bet365")
+        path = save_asian_odds(rows)
+        asian_info = {"n_asian": len(rows), "asian_cache": str(path)}
+    upcoming = build_upcoming()
+    return {"n_upcoming": len(upcoming), "source": "football-data.co.uk + asianbetsoccer", **asian_info}
+
+
+def asian_odds_pipeline(*, days: int = 7, book: str = "bet365") -> dict:
+    rows = fetch_asian_odds(days=days, book=book)
+    path = save_asian_odds(rows)
+    upcoming = build_upcoming()
+    return {
+        "n_asian": len(rows),
+        "asian_cache": str(path),
+        "n_upcoming": len(upcoming),
+        "book": book,
+        "days": days,
+    }
 
 
 def train_pipeline() -> dict:
@@ -38,12 +83,29 @@ def train_pipeline() -> dict:
     feat_path = engineer.save(features, "features.csv")
     trainer = ModelTrainer()
     train_info = trainer.train(features)
+    cal_info: dict = {}
+    try:
+        cal_info = run_full_calibration()
+    except Exception as exc:
+        cal_info = {"calibration_error": str(exc)}
     return {
         "n_matches": int(len(matches)),
         "n_features_rows": int(len(features)),
         "matches_path": str(matches_path),
         "features_path": str(feat_path),
         **train_info,
+        "calibration": {
+            k: cal_info.get(k)
+            for k in (
+                "temperature",
+                "min_ev_play",
+                "brier_favorite_raw",
+                "brier_favorite_calibrated",
+                "path",
+                "calibration_error",
+            )
+            if k in cal_info
+        },
     }
 
 
@@ -71,6 +133,51 @@ def predict_pipeline(home: str, away: str, n_sims: int = 10_000) -> dict:
     return out
 
 
+def _has_streamlit(python_exe: Path) -> bool:
+    import subprocess
+
+    probe = subprocess.run(
+        [str(python_exe), "-c", "import streamlit"],
+        capture_output=True,
+        text=True,
+    )
+    return probe.returncode == 0
+
+
+def _ui_python() -> Path:
+    candidates = [
+        Path(sys.executable),
+        ROOT / ".venv" / "Scripts" / "python.exe",
+        ROOT / ".venv" / "bin" / "python",
+    ]
+    seen: set[str] = set()
+    for exe in candidates:
+        key = str(exe.resolve()) if exe.exists() else str(exe)
+        if key in seen or not exe.exists():
+            continue
+        seen.add(key)
+        if _has_streamlit(exe):
+            return exe
+    print(
+        "Streamlit non è in questo Python.\n"
+        "Usa l'ambiente del progetto:\n"
+        "  .\\.venv\\Scripts\\Activate.ps1\n"
+        "  python main.py --ui\n"
+        "oppure:\n"
+        "  .\\.venv\\Scripts\\python.exe main.py --ui",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
+def _launch_ui() -> int:
+    import subprocess
+
+    python_exe = _ui_python()
+    print(f"UI con: {python_exe}")
+    return subprocess.call([str(python_exe), "-m", "streamlit", "run", str(ROOT / "app.py")])
+
+
 def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         try:
@@ -79,6 +186,10 @@ def main() -> None:
             pass
     parser = argparse.ArgumentParser(description="Football predictor")
     parser.add_argument("--train", action="store_true", help="ricostruisce dataset, feature e modello")
+    parser.add_argument("--update", action="store_true", help="scarica dati mondiali + quote, allena, calendario")
+    parser.add_argument("--odds-update", action="store_true", help="aggiorna fixtures/quote (incluso AsianBetSoccer) e pronostici")
+    parser.add_argument("--calibrate", action="store_true", help="calibra probabilità e taratura EV su storico")
+    parser.add_argument("--asian-odds", action="store_true", help="scarica quote AsianBetSoccer e ricalcola calendario")
     parser.add_argument("--predict", nargs=2, metavar=("HOME", "AWAY"), help="es. --predict Inter Milan")
     parser.add_argument("--odds", nargs=3, type=float, metavar=("ODD_1", "ODD_X", "ODD_2"), help="quote decimali 1 X 2")
     parser.add_argument("--advise", action="store_true", help="consiglio 1X2 sulla ultima predizione (o su --predict)")
@@ -87,9 +198,31 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.ui:
-        import subprocess
+        raise SystemExit(_launch_ui())
 
-        raise SystemExit(subprocess.call([sys.executable, "-m", "streamlit", "run", str(ROOT / "app.py")]))
+    if args.update:
+        info = update_pipeline(retrain=True)
+        print(json.dumps({k: v for k, v in info.items() if k != "model"}, indent=2, default=str))
+        if info.get("model"):
+            print("modello:", info["model"])
+        return
+
+    if args.calibrate:
+        if not (ROOT / "data" / "models" / "best_model.joblib").exists():
+            train_pipeline()
+        else:
+            ensure_raw_sample()
+        info = run_full_calibration()
+        print(json.dumps({k: v for k, v in info.items() if k != "reliability_1x2" and k != "reliability_ou25"}, indent=2, default=str))
+        return
+
+    if args.asian_odds:
+        print(json.dumps(asian_odds_pipeline(), indent=2))
+        return
+
+    if args.odds_update:
+        print(json.dumps(refresh_odds_pipeline(), indent=2))
+        return
 
     if args.train or not (ROOT / "data" / "models" / "best_model.joblib").exists():
         info = train_pipeline()
@@ -113,7 +246,7 @@ def main() -> None:
         advice = advise(result, odds)
         print(format_advice(advice))
         print(json.dumps(advice["play"], indent=2))
-    elif not args.train and not args.predict:
+    elif not args.train and not args.predict and not args.calibrate:
         parser.print_help()
 
 

@@ -8,7 +8,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from modules.dataset_loader import TEAM_ALIASES
+from modules.dataset_loader.loader import normalize_team
 from modules.feature_engineering import FeatureEngineer
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,8 +17,7 @@ PROCESSED = ROOT / "data" / "processed"
 
 
 def _norm(name: str) -> str:
-    key = " ".join(name.strip().lower().split())
-    return TEAM_ALIASES.get(key, name.strip().title())
+    return normalize_team(name)
 
 
 class MatchPredictor:
@@ -30,18 +29,42 @@ class MatchPredictor:
         self.encoder = bundle["encoder"]
         self.feature_cols = bundle["feature_cols"]
         self.features = pd.read_csv(self.features_path, parse_dates=["date"])
+        self._index_last_seen()
+        self._temperature = self._load_temperature()
+
+    def _load_temperature(self) -> float:
+        try:
+            from modules.calibration.config import load_calibration
+
+            return float(load_calibration().get("temperature", 1.0))
+        except Exception:
+            return 1.0
+
+    def _calibrate_probs(self, p_h: float, p_d: float, p_a: float) -> tuple[float, float, float]:
+        if abs(self._temperature - 1.0) < 1e-6:
+            return p_h, p_d, p_a
+        try:
+            from modules.calibration.calibrate import apply_temperature_dict
+
+            return apply_temperature_dict(p_h, p_d, p_a, self._temperature)
+        except Exception:
+            return p_h, p_d, p_a
+
+    def _index_last_seen(self) -> None:
+        df = self.features.reset_index(drop=False)
+        home = df[["index", "date", "home_team"]].rename(columns={"home_team": "team"})
+        away = df[["index", "date", "away_team"]].rename(columns={"away_team": "team"})
+        last = pd.concat([home, away], ignore_index=True).sort_values("date").groupby("team").tail(1)
+        self.last_idx = dict(zip(last["team"], last["index"]))
 
     def _latest_row(self, home: str, away: str) -> pd.Series:
         """Usa l'ultima riga in cui ciascuna squadra compare, poi ricompone un vettore pre-match."""
         home, away = _norm(home), _norm(away)
-        h = self.features[(self.features["home_team"] == home) | (self.features["away_team"] == home)]
-        a = self.features[(self.features["home_team"] == away) | (self.features["away_team"] == away)]
-        if h.empty or a.empty:
-            known = sorted(set(self.features["home_team"]) | set(self.features["away_team"]))
-            raise KeyError(f"Squadra non trovata. Disponibili: {known}")
-
-        h_last = h.sort_values("date").iloc[-1]
-        a_last = a.sort_values("date").iloc[-1]
+        if home not in self.last_idx or away not in self.last_idx:
+            missing = [t for t in (home, away) if t not in self.last_idx]
+            raise KeyError(f"Squadra non nel dataset: {', '.join(missing)}")
+        h_last = self.features.iloc[int(self.last_idx[home])]
+        a_last = self.features.iloc[int(self.last_idx[away])]
 
         def side(row: pd.Series, team: str, prefix_if_home: str, prefix_if_away: str) -> dict:
             if row["home_team"] == team:
@@ -111,6 +134,7 @@ class MatchPredictor:
         p_h = mapping.get("H", 0.0)
         p_d = mapping.get("D", 0.0)
         p_a = mapping.get("A", 0.0)
+        p_h, p_d, p_a = self._calibrate_probs(p_h, p_d, p_a)
         total = p_h + p_d + p_a
         p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
         lam_h = float(max(0.35, row["home_xg_avg"] * 0.7 + (1.35 - row["away_xga_avg"]) * 0.15 + 0.25))
@@ -131,6 +155,19 @@ def list_known_teams(features_path: str | Path | None = None) -> list[str]:
     path = Path(features_path) if features_path else PROCESSED / "features.csv"
     df = pd.read_csv(path, usecols=["home_team", "away_team"])
     return sorted(set(df["home_team"].dropna()) | set(df["away_team"].dropna()))
+
+
+def list_team_meta(features_path: str | Path | None = None) -> pd.DataFrame:
+    path = Path(features_path) if features_path else PROCESSED / "features.csv"
+    cols = ["home_team", "away_team", "league"]
+    extra = pd.read_csv(path, nrows=0).columns
+    if "country" in extra:
+        cols.append("country")
+    df = pd.read_csv(path, usecols=cols)
+    home = df.rename(columns={"home_team": "team"})[["team"] + [c for c in cols if c not in ("home_team", "away_team")]]
+    away = df.rename(columns={"away_team": "team"})[["team"] + [c for c in cols if c not in ("home_team", "away_team")]]
+    meta = pd.concat([home, away], ignore_index=True).drop_duplicates("team")
+    return meta.sort_values("team").reset_index(drop=True)
 
 
 def predict_match(home_team: str, away_team: str) -> dict:

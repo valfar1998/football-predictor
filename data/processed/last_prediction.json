@@ -1,63 +1,111 @@
 {
   "match": "Inter vs Milan",
   "model_probabilities": {
-    "home_win": 0.671,
-    "draw": 0.177,
-    "away_win": 0.152
+    "home_win": 0.614,
+    "draw": 0.2337,
+    "away_win": 0.1523
   },
   "expected_goals": {
-    "home": 1.56,
-    "away": 0.923
+    "home": 1.827,
+    "away": 0.835
   },
   "montecarlo": {
-    "n_sims": 10000,
-    "lambda_home": 1.56,
-    "lambda_away": 0.923,
-    "home_win": 0.5716,
-    "draw": 0.2282,
-    "away_win": 0.2002,
-    "btts": 0.4774,
-    "avg_home_goals": 1.556,
-    "avg_away_goals": 0.939,
-    "avg_total_goals": 2.494,
-    "over_1.5": 0.7097,
-    "over_2.5": 0.4542,
-    "over_3.5": 0.2426,
-    "under_1.5": 0.2903,
-    "under_2.5": 0.5458,
-    "under_3.5": 0.7574,
+    "n_sims": 2000,
+    "lambda_home": 1.827,
+    "lambda_away": 0.835,
+    "home_win": 0.601,
+    "draw": 0.2339,
+    "away_win": 0.1651,
+    "dc_1x": 0.8349,
+    "dc_12": 0.7661,
+    "dc_x2": 0.399,
+    "dnb_1": 0.7845,
+    "dnb_2": 0.2155,
+    "btts": 0.4675,
+    "btts_no": 0.5325,
+    "home_cs": 0.439,
+    "away_cs": 0.17,
+    "home_win_to_nil": 0.3625,
+    "away_win_to_nil": 0.0935,
+    "avg_home_goals": 1.772,
+    "avg_away_goals": 0.832,
+    "avg_total_goals": 2.604,
+    "over_0.5": 0.9235,
+    "over_1.5": 0.729,
+    "over_2.5": 0.488,
+    "over_3.5": 0.2615,
+    "over_4.5": 0.122,
+    "under_0.5": 0.0765,
+    "under_1.5": 0.271,
+    "under_2.5": 0.512,
+    "under_3.5": 0.7385,
+    "under_4.5": 0.878,
+    "home_over_0.5": 0.83,
+    "home_under_0.5": 0.17,
+    "home_over_1.5": 0.5225,
+    "home_under_1.5": 0.4775,
+    "home_over_2.5": 0.2595,
+    "home_under_2.5": 0.7405,
+    "away_over_0.5": 0.561,
+    "away_under_0.5": 0.439,
+    "away_over_1.5": 0.204,
+    "away_under_1.5": 0.796,
+    "away_over_2.5": 0.0525,
+    "away_under_2.5": 0.9475,
+    "combo_1_o25": 0.348,
+    "combo_1_u25": 0.246,
+    "combo_x_o25": 0.051,
+    "combo_x_u25": 0.183,
+    "combo_2_o25": 0.089,
+    "combo_2_u25": 0.083,
+    "combo_1_o15": 0.46,
+    "combo_1_u15": 0.134,
+    "combo_2_o15": 0.1115,
+    "combo_2_u15": 0.0605,
+    "combo_1_gol": 0.2315,
+    "combo_1_nogol": 0.3625,
+    "combo_2_gol": 0.0785,
+    "combo_2_nogol": 0.0935,
+    "combo_x_gol": 0.1575,
+    "combo_x_nogol": 0.0765,
+    "combo_1x_o25": 0.399,
+    "combo_1x_u25": 0.429,
+    "combo_x2_o25": 0.14,
+    "combo_x2_u25": 0.266,
+    "combo_12_o25": 0.437,
+    "combo_12_u25": 0.329,
     "most_likely_scores": [
       {
         "score": "1-0",
-        "prob": 0.1294
-      },
-      {
-        "score": "1-1",
-        "prob": 0.119
+        "prob": 0.134
       },
       {
         "score": "2-0",
-        "prob": 0.0992
+        "prob": 0.112
+      },
+      {
+        "score": "1-1",
+        "prob": 0.1065
       },
       {
         "score": "2-1",
-        "prob": 0.0945
+        "prob": 0.097
       },
       {
         "score": "0-0",
-        "prob": 0.0841
-      },
-      {
-        "score": "0-1",
-        "prob": 0.0768
-      },
-      {
-        "score": "1-2",
-        "prob": 0.055
+        "prob": 0.0765
       },
       {
         "score": "3-0",
-        "prob": 0.0504
+        "prob": 0.072
+      },
+      {
+        "score": "0-1",
+        "prob": 0.0605
+      },
+      {
+        "score": "3-1",
+        "prob": 0.051
       }
     ]
   }
