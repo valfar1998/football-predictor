@@ -1,0 +1,64 @@
+{
+  "match": "Inter vs Milan",
+  "model_probabilities": {
+    "home_win": 0.671,
+    "draw": 0.177,
+    "away_win": 0.152
+  },
+  "expected_goals": {
+    "home": 1.56,
+    "away": 0.923
+  },
+  "montecarlo": {
+    "n_sims": 10000,
+    "lambda_home": 1.56,
+    "lambda_away": 0.923,
+    "home_win": 0.5716,
+    "draw": 0.2282,
+    "away_win": 0.2002,
+    "btts": 0.4774,
+    "avg_home_goals": 1.556,
+    "avg_away_goals": 0.939,
+    "avg_total_goals": 2.494,
+    "over_1.5": 0.7097,
+    "over_2.5": 0.4542,
+    "over_3.5": 0.2426,
+    "under_1.5": 0.2903,
+    "under_2.5": 0.5458,
+    "under_3.5": 0.7574,
+    "most_likely_scores": [
+      {
+        "score": "1-0",
+        "prob": 0.1294
+      },
+      {
+        "score": "1-1",
+        "prob": 0.119
+      },
+      {
+        "score": "2-0",
+        "prob": 0.0992
+      },
+      {
+        "score": "2-1",
+        "prob": 0.0945
+      },
+      {
+        "score": "0-0",
+        "prob": 0.0841
+      },
+      {
+        "score": "0-1",
+        "prob": 0.0768
+      },
+      {
+        "score": "1-2",
+        "prob": 0.055
+      },
+      {
+        "score": "3-0",
+        "prob": 0.0504
+      }
+    ]
+  }
+}
