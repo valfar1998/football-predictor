@@ -19,8 +19,10 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, urllib.parse, urllib.request
-          token = os.environ["TELEGRAM_BOT_TOKEN"]
-          chat = os.environ["TELEGRAM_CHAT_ID"]
+          token = "".join(os.environ.get("TELEGRAM_BOT_TOKEN", "").split())
+          chat = "".join(os.environ.get("TELEGRAM_CHAT_ID", "").split())
+          if not token or not chat:
+              raise SystemExit("manca TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID")
           text = (
               "Football Predictor — promemoria (ogni ~30 giorni)\n\n"
               "Tocca il repo su GitHub, altrimenti tra 60 giorni senza attività "

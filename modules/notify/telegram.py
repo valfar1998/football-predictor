@@ -50,16 +50,20 @@ def _env_candidates() -> list[Path]:
     return unique
 
 
+def _clean_secret(value: str) -> str:
+    return "".join(str(value or "").split())
+
+
 def load_credentials() -> dict[str, str] | None:
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    token = _clean_secret(os.getenv("TELEGRAM_BOT_TOKEN", ""))
+    chat = _clean_secret(os.getenv("TELEGRAM_CHAT_ID", ""))
     if token and chat:
         return {"token": token, "chat_id": chat, "source": "env"}
 
     for path in _env_candidates():
         data = _parse_env_file(path)
-        token = token or data.get("TELEGRAM_BOT_TOKEN", "").strip()
-        chat = chat or data.get("TELEGRAM_CHAT_ID", "").strip()
+        token = token or _clean_secret(data.get("TELEGRAM_BOT_TOKEN", ""))
+        chat = chat or _clean_secret(data.get("TELEGRAM_CHAT_ID", ""))
         if token and chat:
             os.environ.setdefault("TELEGRAM_BOT_TOKEN", token)
             os.environ.setdefault("TELEGRAM_CHAT_ID", chat)
