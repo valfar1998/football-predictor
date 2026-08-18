@@ -13,7 +13,14 @@ import streamlit as st
 from main import predict_pipeline
 from modules.advisor.advise import advise, format_advice
 from modules.calibration.config import load_calibration
-from modules.data_update.asian_odds import load_asian_odds
+from modules.data_update.asian_odds import (
+    MOVE_FILTER_OPTIONS,
+    MOVE_FILTER_RANK,
+    MOVE_RANK,
+    find_asian_odds,
+    load_asian_odds,
+    summarize_moves,
+)
 from modules.predictor import list_known_teams, list_team_meta
 
 ROOT = Path(__file__).resolve().parent
@@ -95,41 +102,44 @@ def _filter_by_date(df: pd.DataFrame, col: str = "date") -> pd.DataFrame:
     return df[mask.fillna(False)]
 
 
-def _value_edge(quota: float | None, fair: float | None) -> float | None:
-    if quota and fair and fair > 1.01:
-        return round(float(quota) / float(fair) - 1.0, 4)
-    return None
-
-
 def _pct(val: float | None) -> str | None:
     if val is None:
         return None
     return f"{float(val):+.0%}"
 
 
+def _pp(val: float | None) -> str | None:
+    if val is None:
+        return None
+    return f"{float(val):+.1f} pp"
+
+
 def _sort_calendario(view: pd.DataFrame, mode: str) -> pd.DataFrame:
     out = view.copy()
     if mode == "Movimento mercato (maggiore)":
-        order = {"Forte": 4, "Medio": 3, "Leggero": 2, "Stabile": 1}
-        out["_sort"] = out["movement_level"].map(order).fillna(0)
-        if "spread_score" in out.columns:
+        out["_sort"] = out["movement_level"].map(MOVE_RANK).fillna(0)
+        if "line_move" in out.columns:
+            out["_sort"] = out["_sort"] * 100 + out["line_move"].fillna(0)
+        elif "spread_score" in out.columns:
             out["_sort"] = out["_sort"] * 100 + out["spread_score"].fillna(0)
         return out.sort_values("_sort", ascending=False).drop(columns="_sort")
-    if mode == "Value (equa vs reale)":
-        out["_sort"] = out["value_edge"].fillna(out["ev"].fillna(-99))
+    if mode == "Value (edge vs mercato)":
+        edge = out["edge_pp"] if "edge_pp" in out.columns else pd.Series(index=out.index, dtype=float)
+        cons = out["ev_cons"] if "ev_cons" in out.columns else pd.Series(index=out.index, dtype=float)
+        out["_sort"] = edge.fillna(cons).fillna(out["ev"] if "ev" in out.columns else -99).fillna(-99)
         return out.sort_values("_sort", ascending=False).drop(columns="_sort")
     return out.sort_values(["score", "probability"], ascending=False, na_position="last")
 
 
-def _asian_radar_table(min_spread: float) -> pd.DataFrame:
+def _asian_radar_table(min_rank: int) -> pd.DataFrame:
     rows = load_asian_odds()
     if not rows:
         return pd.DataFrame()
     data = []
     for r in rows:
-        move = r.get("market_move") or {}
-        spread = move.get("spread_score") or 0.0
-        if spread < min_spread:
+        move = summarize_moves(r)
+        level = move.get("movement_level") or "Stabile"
+        if MOVE_RANK.get(level, 0) < min_rank:
             continue
         data.append(
             {
@@ -137,22 +147,65 @@ def _asian_radar_table(min_spread: float) -> pd.DataFrame:
                 "Ora": r.get("time"),
                 "Campionato": r.get("league"),
                 "Partita": f"{r.get('home')} vs {r.get('away')}",
-                "Movimento": move.get("movement_level") or "Stabile",
+                "Movimento": level,
+                "Var linea": move.get("line_move"),
                 "Cosa è cambiato": move.get("movement_summary") or "Quasi nessun movimento",
-                "Soldi su 1X2": move.get("steam_1x2") or "—",
+                "Commento quote": move.get("movement_comment"),
+                "Soldi su 1X2": move.get("steam_1x2_label") or move.get("steam_1x2") or "—",
                 "Soldi su O/U": move.get("steam_ou") or "—",
-                "Quota 1 attuale": r.get("odd_1"),
+                "Δ 1": _pp(move.get("drop_1")),
+                "Δ X": _pp(move.get("drop_x")),
+                "Δ 2": _pp(move.get("drop_2")),
+                "Δ Over": _pp(move.get("drop_over")),
+                "Δ Under": _pp(move.get("drop_under")),
                 "Quota 1 apertura": r.get("open_1"),
-                "Quota 2 attuale": r.get("odd_2"),
+                "Quota 1 attuale": r.get("odd_1"),
+                "Quota X apertura": r.get("open_x"),
+                "Quota X attuale": r.get("odd_x"),
                 "Quota 2 apertura": r.get("open_2"),
+                "Quota 2 attuale": r.get("odd_2"),
             }
         )
     if not data:
         return pd.DataFrame()
-    level_order = {"Forte": 0, "Medio": 1, "Leggero": 2, "Stabile": 3}
     out = pd.DataFrame(data)
-    out["_ord"] = out["Movimento"].map(level_order).fillna(9)
-    return out.sort_values("_ord").drop(columns="_ord")
+    out["_ord"] = out["Movimento"].map(MOVE_RANK).fillna(-1)
+    out["_line"] = out["Var linea"].fillna(0)
+    return out.sort_values(["_ord", "_line"], ascending=False).drop(columns=["_ord", "_line"])
+
+
+def _enrich_upcoming(rows: list[dict]) -> list[dict]:
+    """Ricalcola livelli, commenti e Δ pp dal cache Asian."""
+    out: list[dict] = []
+    for match in rows:
+        item = dict(match)
+        asian = find_asian_odds(
+            str(item.get("home") or ""),
+            str(item.get("away") or ""),
+            item.get("date"),
+        )
+        if asian:
+            move = summarize_moves(asian)
+            item["market_move"] = move
+            item["movement_comment"] = move.get("movement_comment")
+            item["movement_summary"] = move.get("movement_summary")
+            item["market_note"] = move.get("movement_comment")
+            item["movement_level"] = move.get("movement_level")
+            item["drop_1"] = move.get("drop_1")
+            item["drop_x"] = move.get("drop_x")
+            item["drop_2"] = move.get("drop_2")
+            item["line_move"] = move.get("line_move")
+            item["spread_score"] = move.get("spread_score")
+        out.append(item)
+    return out
+
+
+@st.cache_data(show_spinner=False)
+def _load_upcoming_enriched(_up_mtime: float, _asian_mtime: float) -> list[dict]:
+    rows = _load_json(UPCOMING) or []
+    if not rows:
+        return []
+    return _enrich_upcoming(rows)
 
 
 def _kind_label(kind: str) -> str:
@@ -166,20 +219,34 @@ def _kind_label(kind: str) -> str:
 def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
     wanted = [
         "date", "time", "country", "league", "home", "away",
-        "pick", "pick_name", "score", "kelly_quarter", "score_reason_1", "probability",
-        "quota_pick", "fair_odds", "value_edge", "ev",
-        "movement_level", "movement_summary", "market_align",
+        "pick", "pick_name", "action", "score", "kelly_quarter", "clv", "tipster_consensus", "tipster_agree",
+        "score_reason_1", "score_reason_2", "probability",
+        "quota_pick", "fair_odds", "edge_pp", "ev_cons", "ev_sharp",
+        "odds_real", "value_note",
+        "movement_level", "line_move", "movement_summary", "movement_comment", "market_align",
+        "drop_1", "drop_x", "drop_2",
         "odd_1", "odd_x", "odd_2", "odd_over_25", "odd_under_25", "odds_source",
     ]
     show = view[[c for c in wanted if c in view.columns]].copy()
     if "probability" in show.columns:
         show["probability"] = show["probability"].map(lambda x: f"{x:.0%}" if pd.notna(x) else None)
-    if "value_edge" in show.columns:
-        show["value_edge"] = show["value_edge"].map(_pct)
-    if "ev" in show.columns:
-        show["ev"] = show["ev"].map(_pct)
+    if "edge_pp" in show.columns:
+        show["edge_pp"] = show["edge_pp"].map(_pct)
+    if "ev_cons" in show.columns:
+        show["ev_cons"] = show["ev_cons"].map(_pct)
+    if "ev_sharp" in show.columns:
+        show["ev_sharp"] = show["ev_sharp"].map(_pct)
+    if "odds_real" in show.columns:
+        show["odds_real"] = show["odds_real"].map(lambda x: "Sì" if bool(x) else "No")
     if "kelly_quarter" in show.columns:
         show["kelly_quarter"] = show["kelly_quarter"].map(lambda x: f"{x:.1%}" if pd.notna(x) else None)
+    if "clv" in show.columns:
+        show["clv"] = show["clv"].map(lambda x: f"{x:+.1%}" if pd.notna(x) else None)
+    if "action" in show.columns:
+        show["action"] = show["action"].map(lambda x: "No bet" if x == "no_bet" else "Gioca")
+    for drop_col in ("drop_1", "drop_x", "drop_2"):
+        if drop_col in show.columns:
+            show[drop_col] = show[drop_col].map(_pp)
     return show.rename(
         columns={
             "date": "Data",
@@ -190,17 +257,30 @@ def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
             "away": "Trasferta",
             "pick": "Gioca",
             "pick_name": "Mercato",
+            "action": "Azione",
             "score": "Voto",
             "kelly_quarter": "Kelly ¼",
+            "clv": "CLV vs apertura",
+            "tipster_consensus": "Tipster",
+            "tipster_agree": "Vs tipster",
             "score_reason_1": "Perché questo voto",
+            "score_reason_2": "Quote e mercato",
             "probability": "Prob.",
             "quota_pick": "Quota book",
             "fair_odds": "Quota equa",
-            "value_edge": "Value",
-            "ev": "EV atteso",
+            "edge_pp": "Edge pp",
+            "ev_cons": "EV cons.",
+            "ev_sharp": "EV sharp",
+            "odds_real": "Quota reale",
+            "value_note": "Nota value",
             "movement_level": "Movimento",
+            "line_move": "Var linea",
             "movement_summary": "Cosa è cambiato",
+            "movement_comment": "Commento quote",
             "market_align": "Vs mercato",
+            "drop_1": "Δ 1",
+            "drop_x": "Δ X",
+            "drop_2": "Δ 2",
             "odd_1": "1",
             "odd_x": "X",
             "odd_2": "2",
@@ -222,27 +302,57 @@ def _run_cli(*flags: str) -> subprocess.CompletedProcess:
 
 
 def _table(markets: list[dict]) -> None:
-    rows = [
-        {
-            "Mercato": m["name"],
-            "Codice": m["code"],
-            "Prob.": f"{m['probability']:.0%}",
-            "Quota book": m["odds"],
-            "Quota equa": m["fair_odds"],
-            "EV atteso": _pct(m["ev"]),
-            "Voto prob.": m.get("score_prob"),
-            "Voto value": m.get("score_value"),
-            "Voto finale": m.get("score"),
-            "Kelly ¼": f"{m['kelly_quarter']:.1%}" if m.get("kelly_quarter") is not None else "—",
-            "Fonte": m.get("odds_source") or "—",
-        }
-        for m in markets
-    ]
+    rows = []
+    for m in markets:
+        real = m.get("odds_real")
+        if real is None:
+            src = str(m.get("odds_source") or "")
+            real = bool(src) and not src.startswith("stimata")
+        rows.append(
+            {
+                "Mercato": m["name"],
+                "Codice": m["code"],
+                "Prob.": f"{m['probability']:.0%}",
+                "P cons.": f"{m['p_cons']:.0%}" if m.get("p_cons") is not None else "—",
+                "P mercato": f"{m['p_market']:.0%}" if real and m.get("p_market") is not None else "—",
+                "Quota book": m["odds"],
+                "Quota equa": m["fair_odds"],
+                "Edge pp": _pct(m.get("edge_pp")) if real else "—",
+                "EV cons.": _pct(m.get("ev_cons")) if real else "—",
+                "EV sharp": _pct(m.get("ev_sharp")) if real else "—",
+                "Voto prob.": m.get("score_prob"),
+                "Voto value": m.get("score_value") if real and m.get("score_value") is not None else "—",
+                "Voto finale": m.get("score"),
+                "Kelly ¼": f"{m['kelly_quarter']:.1%}" if m.get("kelly_quarter") is not None else "—",
+                "Fonte": m.get("odds_source") or "—",
+            }
+        )
     st.dataframe(rows, width="stretch", hide_index=True)
 
 
-def render_advice(pred: dict, odds: dict, market_move: dict | None = None, *, odds_from_asian: bool = False) -> None:
-    advice = advise(pred, odds, market_move=market_move, odds_from_asian=odds_from_asian)
+def render_advice(
+    pred: dict,
+    odds: dict,
+    market_move: dict | None = None,
+    *,
+    odds_from_asian: bool = False,
+    match_date: str | None = None,
+    league: str | None = None,
+) -> None:
+    if odds_from_asian or market_move:
+        match = pred.get("match") or ""
+        if " vs " in match:
+            home, away = match.split(" vs ", 1)
+            asian = find_asian_odds(home.strip(), away.strip(), match_date)
+            if asian:
+                market_move = summarize_moves(asian)
+    advice = advise(
+        pred,
+        odds,
+        market_move=market_move,
+        odds_from_asian=odds_from_asian,
+        league=league or pred.get("league"),
+    )
     play = advice["play"]
     left, right = st.columns([1.15, 1])
     with left:
@@ -254,6 +364,8 @@ def render_advice(pred: dict, odds: dict, market_move: dict | None = None, *, od
         )
         st.markdown(_score_bar(play["score"]), unsafe_allow_html=True)
         st.markdown(f"**{play['score']} / 10**")
+        if play.get("action") == "no_bet":
+            st.warning("No bet — " + "; ".join(play.get("no_bet_reasons") or ["filtro edge/mercato"]))
         r1 = advice.get("score_reason_1")
         r2 = advice.get("score_reason_2")
         if r1:
@@ -261,16 +373,56 @@ def render_advice(pred: dict, odds: dict, market_move: dict | None = None, *, od
         if r2:
             st.caption(r2)
     with right:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Probabilità", f"{play['probability']:.1%}")
-        c2.metric("Quota equa", f"{play['fair_odds']:.2f}" if play["fair_odds"] else "—")
-        if play["odds"]:
-            c3.metric("EV", f"{(play['ev'] or 0):+.1%}")
-            kq = play.get("kelly_quarter")
-            c4.metric("Kelly ¼", f"{kq:.1%}" if kq is not None else "—")
-        else:
-            c3.metric("Quota", "—")
-            c4.metric("Kelly ¼", "—")
+        p_cons = play.get("p_cons")
+        p_mkt = play.get("p_market")
+        edge = play.get("edge_pp")
+        ev_cons = play.get("ev_cons") if play.get("ev_cons") is not None else play.get("ev")
+        ev_sharp = play.get("ev_sharp")
+        with st.container(border=True):
+            st.markdown("**Modello vs mercato**")
+            with st.container(horizontal=True):
+                st.metric(
+                    "Modello (cons.)",
+                    f"{p_cons:.1%}" if p_cons is not None else f"{play['probability']:.1%}",
+                    border=True,
+                )
+                st.metric(
+                    "Mercato (devig)",
+                    f"{p_mkt:.1%}" if p_mkt is not None else "—",
+                    border=True,
+                )
+                st.metric(
+                    "Edge",
+                    f"{edge:+.1%} pp" if edge is not None else "—",
+                    border=True,
+                )
+                book_odd = play.get("odds")
+                fair = play.get("fair_odds")
+                st.metric(
+                    "Quota vs equa",
+                    f"{book_odd:.2f} vs {fair:.2f}" if book_odd and fair else "—",
+                    border=True,
+                )
+            with st.container(horizontal=True):
+                st.metric(
+                    "EV cons.",
+                    f"{ev_cons:+.1%}" if ev_cons is not None else "—",
+                    border=True,
+                )
+                st.metric(
+                    "EV sharp",
+                    f"{ev_sharp:+.1%}" if ev_sharp is not None else "—",
+                    border=True,
+                )
+                kq = play.get("kelly_quarter")
+                st.metric("Kelly ¼", f"{kq:.1%}" if kq is not None else "—", border=True)
+                st.metric(
+                    "Fonte",
+                    play.get("odds_source") or ("ipotetica" if play.get("odds_real") is False else "—"),
+                    border=True,
+                )
+            if play.get("value_note"):
+                st.caption(play["value_note"])
         alt = advice.get("play_alt")
         if alt and alt["code"] != play["code"]:
             st.caption(f"Alternativa: **{alt['code']}** {alt['name']} · {alt['score']}/10")
@@ -279,14 +431,68 @@ def render_advice(pred: dict, odds: dict, market_move: dict | None = None, *, od
         move = advice.get("market_move")
         align = advice.get("market_align") or {}
         if move:
-            st.markdown("**Mercato asiatico — cosa è cambiato dall'apertura**")
-            m1, m2, m3 = st.columns(3)
+            st.markdown("**Mercato asiatico — variazioni di quota dall'apertura**")
+            m1, m2, m3, m4 = st.columns(4)
             m1.metric("Intensità", move.get("movement_level") or "Stabile")
-            m2.metric("Direzione 1X2", move.get("steam_1x2") or "stabile")
-            m3.metric("Direzione O/U", move.get("steam_ou") or "stabile")
-            st.caption(move.get("movement_summary") or move.get("note") or "Quasi nessun movimento")
+            line = move.get("line_move")
+            m2.metric("Var linea", f"{line:g}" if line else "0")
+            m3.metric("Direzione 1X2", move.get("steam_1x2_label") or move.get("steam_1x2") or "stabile")
+            m4.metric("Direzione O/U", move.get("steam_ou") or "stabile")
+            comment = move.get("movement_comment") or move.get("movement_summary") or move.get("note")
+            if comment:
+                st.info(comment)
+            odds_moves = move.get("odds_moves") or []
+            if odds_moves:
+                st.dataframe(
+                    [
+                        {
+                            "Mercato": r["market"],
+                            "Apertura": r["open"],
+                            "Attuale": r["current"],
+                            "Δ quota": r["delta_odd"],
+                            "Δ implicita": _pp(r.get("delta_pp")),
+                            "Lettura": r.get("read"),
+                        }
+                        for r in odds_moves
+                    ],
+                    width="stretch",
+                    hide_index=True,
+                )
+                st.caption(
+                    "Δ implicita positiva = quota accorciata (più giocata). "
+                    "Negativa = quota allungata (soldi altrove). AH negativo = casa favorita."
+                )
             label = align.get("label") or "n/d"
-            st.caption(f"Modello vs mercato: **{label}**")
+            agrees = ", ".join(align.get("agrees") or []) or "—"
+            disagrees = ", ".join(align.get("disagrees") or []) or "—"
+            st.caption(f"Modello vs mercato: **{label}** · conferma {agrees} · contrasto {disagrees}")
+            if play.get("clv") is not None:
+                st.caption(f"CLV vs apertura Asian: **{play['clv']:+.1%}** (positivo = quota accorciata dopo l'open)")
+
+        tip = advice.get("tipster") or play.get("tipster") or {}
+        if tip.get("n_sources"):
+            st.markdown("**Tipster professionisti**")
+            t1, t2, t3 = st.columns(3)
+            t1.metric("Consenso", tip.get("consensus") or "—")
+            t2.metric("Fonti", str(tip.get("n_sources") or 0))
+            t3.metric("Vs modello", tip.get("agree") or tip.get("label") or "—")
+            src_rows = []
+            for s in tip.get("sources") or []:
+                src_rows.append(
+                    {
+                        "Fonte": s.get("source"),
+                        "Pick": s.get("pick"),
+                        "1": f"{s['p_home']:.0%}" if s.get("p_home") is not None else "—",
+                        "X": f"{s['p_draw']:.0%}" if s.get("p_draw") is not None else "—",
+                        "2": f"{s['p_away']:.0%}" if s.get("p_away") is not None else "—",
+                    }
+                )
+            if src_rows:
+                st.dataframe(src_rows, width="stretch", hide_index=True)
+            st.caption(
+                "I tipster pesano poco sul voto e non modificano EV o Kelly. "
+                "Se sono contrari e il mercato è liquido contro, scatta il no-bet."
+            )
 
     grouped = advice.get("grouped") or {"1x2": advice.get("markets") or []}
     for key, label in GROUP_LABEL.items():
@@ -339,6 +545,14 @@ with st.sidebar:
         else:
             st.success("Quote AsianBetSoccer aggiornate")
             st.rerun()
+    if st.button("Pronostici tipster", width="stretch"):
+        with st.spinner("Scarico Forebet, PredictZ e Vitibet…"):
+            proc = _run_cli("--tipsters")
+        if proc.returncode != 0:
+            st.error(proc.stderr[-1500:] or proc.stdout[-1500:] or "Errore tipster")
+        else:
+            st.success("Tipster aggiornati")
+            st.rerun()
     if st.button("Calibra probabilità (backtest)", width="stretch"):
         with st.spinner("Temperature scaling + backtest EV su storico…"):
             proc = _run_cli("--calibrate")
@@ -351,13 +565,20 @@ with st.sidebar:
     if cal.get("fitted_at"):
         st.caption(
             f"Calibrazione: T={cal.get('temperature', 1):.2f}, "
-            f"EV min={cal.get('min_ev_play', 0.04):.0%}, "
-            f"Brier {cal.get('brier_favorite_raw', '—')}→{cal.get('brier_favorite_calibrated', '—')}"
+            f"EV min={cal.get('min_ev_play', 0.025):.0%}, "
+            f"Kelly cap={cal.get('kelly_cap', 0.02):.0%}, "
+            f"Brier {cal.get('brier_multiclass_calibrated') or cal.get('brier_favorite_calibrated', '—')}, "
+            f"ECE {cal.get('ece_calibrated', '—')}"
         )
     st.caption("Quote: football-data.co.uk + AsianBetSoccer (Bet365)")
 
-upcoming = _load_json(UPCOMING) or []
-tab_cal, tab_mkt, tab_one = st.tabs(["Calendario", "Tutti i mercati", "Singola partita"])
+upcoming = _load_upcoming_enriched(
+    UPCOMING.stat().st_mtime if UPCOMING.exists() else 0.0,
+    (ROOT / "data" / "raw" / "asian_odds.json").stat().st_mtime
+    if (ROOT / "data" / "raw" / "asian_odds.json").exists()
+    else 0.0,
+)
+tab_cal, tab_mkt, tab_one, tab_eval = st.tabs(["Calendario", "Tutti i mercati", "Singola partita", "Valutazione"])
 
 with tab_cal:
     if not upcoming:
@@ -366,13 +587,23 @@ with tab_cal:
         with st.expander("Come leggere la tabella", expanded=False):
             st.markdown(
                 """
-                - **Kelly ¼**: frazione di bankroll suggerita da Kelly (÷4) — stake teorico, non un ordine di giocata.
+                - **Kelly ¼**: frazione di bankroll da ¼ Kelly, con tetto (default 2%). Zero se scatta il no-bet.
+                - **Azione**: *Gioca* solo se l'edge stimato è almeno 2–3% e il mercato Asian non è fortemente contrario.
+                - **CLV vs apertura**: se la quota del pick si è accorciata dopo l'apertura, il mercato si è mosso a tuo favore (CLV positivo).
+                - **Tipster**: consenso Forebet / PredictZ / Vitibet. Bilancia il voto, **non** entra nel calcolo dell'EV.
                 - **Voto**: mix probabilità + value + robustezza ML/MC + Kelly ¼. Gli outsider non salgono solo per EV.
-                - **Perché questo voto**: due righe che spiegano probabilità, quote e mercato Asian.
-                - **Movimento**: quanto si è mosso il mercato asiatico dall'apertura — *Stabile / Leggero / Medio / Forte*.
-                - **Cosa è cambiato**: es. `AH -0.25->0` = handicap spostato verso trasferta; `Tot 2.75->2.5` = linea gol abbassata (soldi sull'under).
+                - **Perché questo voto**: probabilità, accordo ML/MC, e se il pick è sopra/sotto soglia.
+                - **Quote e mercato**: quota book vs equa, allineamento allo steam Asian, e se la quota del pick si è accorciata o allungata.
+                - **Movimento**: *Stabile / Leggero / Medio / Forte* (quote), **Fortissimo** (linea AH/tot 0.5 o 0.75), **Raro** (linea ≥1).
+                - **Var linea**: massimo spostamento di handicap o totale (0.25, 0.5, 0.75, 1…).
+                - **Cosa è cambiato**: riassunto con quote apertura→attuale e punti percentuali impliciti (es. `1X2 verso casa 2.20->2.05 (+3.3 pp)`).
+                - **Commento quote**: lettura del flusso: soldi su casa/trasferta/over/under, spostamento linee AH e totale.
+                - **Δ 1 / Δ X / Δ 2**: variazione della probabilità implicita. Positivo = quota accorciata (più giocata).
                 - **Vs mercato**: il consiglio del modello è *allineato* o *contrario* al movimento delle quote.
-                - **Value**: quanto la quota del book è sopra la quota equa del modello (+15% = 15% più generosa).
+                - **Value / Edge pp**: differenza in punti percentuali tra probabilità conservativa del modello e probabilità implicita del book *dopo* de-vig. Non è `quota/equa − 1` (quello coincide con l'EV grezzo).
+                - **EV cons.**: value vote sull'EV conservativo (p calibrata e scontata × quota book − 1), non sull'EV grezzo.
+                - **EV sharp**: stesso calcolo sulla quota Asian/Pinnacle. Value alto solo se anche lo sharp tiene l'edge.
+                - **Quota reale**: sulle quote stimate (combo senza book) non c'è voto value.
                 """
             )
         df = pd.DataFrame(upcoming)
@@ -396,20 +627,21 @@ with tab_cal:
         with q2:
             odd_max = st.number_input("Quota max", min_value=1.01, max_value=30.0, value=15.0, step=0.05)
         with q3:
-            min_ev = st.slider("EV minimo", min_value=-0.40, max_value=0.40, value=-0.40, step=0.02, format="%.2f")
+            min_ev = st.slider("EV cons. minimo", min_value=-0.40, max_value=0.40, value=-0.40, step=0.02, format="%.2f")
         with q4:
-            only_value = st.checkbox("Solo EV positivo", value=False)
+            only_value = st.checkbox("Solo EV cons. positivo", value=False)
         aligned_only = st.checkbox("Solo allineati al mercato asiatico", value=False)
+        hide_nbet = st.checkbox("Nascondi no-bet (edge basso o mercato contrario)", value=True)
         s1, s2, s3 = st.columns(3)
         with s1:
             sort_mode = st.selectbox(
                 "Ordina per",
-                ["Consiglio (voto)", "Movimento mercato (maggiore)", "Value (equa vs reale)"],
+                ["Consiglio (voto)", "Movimento mercato (maggiore)", "Value (edge vs mercato)"],
             )
         with s2:
             only_asian = st.checkbox("Solo partite con quote Asian", value=False)
         with s3:
-            min_move = st.selectbox("Movimento minimo", ["Tutti", "Leggero+", "Medio+", "Forte"], index=0)
+            min_move = st.selectbox("Movimento minimo", MOVE_FILTER_OPTIONS, index=0)
 
         view = df[df["country"].isin(sel_country) & df["league"].isin(sel_league)].copy()
         if "pick_group" in view.columns:
@@ -417,23 +649,20 @@ with tab_cal:
         view = view[view["score"] >= min_score]
         view["quota_pick"] = view.apply(_quota_consiglio, axis=1)
         view = view[view["quota_pick"].isna() | ((view["quota_pick"] >= odd_min) & (view["quota_pick"] <= odd_max))]
+        ev_col = view["ev_cons"] if "ev_cons" in view.columns else view["ev"]
         if only_value:
-            view = view[view["ev"].fillna(-1) > 0]
+            view = view[ev_col.fillna(-1) > 0]
         else:
-            view = view[view["ev"].fillna(min_ev) >= min_ev]
+            view = view[ev_col.fillna(min_ev) >= min_ev]
         if aligned_only and "market_align" in view.columns:
             view = view[view["market_align"] == "allineato"]
+        if hide_nbet and "action" in view.columns:
+            view = view[view["action"].fillna("gioca") != "no_bet"]
         if only_asian and "odds_source" in view.columns:
             view = view[view["odds_source"] == "asianbetsoccer"]
-        move_rank = {"Stabile": 0, "Leggero": 1, "Medio": 2, "Forte": 3}
-        min_rank = {"Tutti": 0, "Leggero+": 1, "Medio+": 2, "Forte": 3}[min_move]
+        min_rank = MOVE_FILTER_RANK[min_move]
         if min_rank > 0 and "movement_level" in view.columns:
-            view = view[view["movement_level"].map(move_rank).fillna(0) >= min_rank]
-        if "value_edge" not in view.columns:
-            view["value_edge"] = view.apply(
-                lambda r: _value_edge(r.get("quota_pick"), r.get("fair_odds")),
-                axis=1,
-            )
+            view = view[view["movement_level"].map(MOVE_RANK).fillna(0) >= min_rank]
         view = _sort_calendario(view, sort_mode)
 
         st.write(f"{len(view)} partite dopo i filtri (su {len(df)})")
@@ -441,9 +670,14 @@ with tab_cal:
 
         with st.expander("Radar AsianBetSoccer — partite con movimento quote"):
             r1, r2 = st.columns(2)
-            radar_min = r1.selectbox("Movimento minimo radar", ["Leggero+", "Medio+", "Forte"], index=1, key="radar_spread")
-            min_map = {"Leggero+": 1.0, "Medio+": 4.0, "Forte": 7.0}
-            radar = _asian_radar_table(min_map[radar_min])
+            radar_opts = [o for o in MOVE_FILTER_OPTIONS if o != "Tutti"]
+            radar_min = r1.selectbox(
+                "Movimento minimo radar",
+                radar_opts,
+                index=radar_opts.index("Fortissimo+ (0.5/0.75)"),
+                key="radar_spread",
+            )
+            radar = _asian_radar_table(MOVE_FILTER_RANK[radar_min])
             if radar.empty:
                 r2.caption("Nessun dato Asian. Premi **Quote AsianBetSoccer** nella sidebar.")
             else:
@@ -459,6 +693,8 @@ with tab_cal:
                 row.get("odds") or {},
                 row.get("market_move"),
                 odds_from_asian=(row.get("odds_source") == "asianbetsoccer"),
+                match_date=row.get("date"),
+                league=row.get("league"),
             )
 
 with tab_mkt:
@@ -468,9 +704,15 @@ with tab_mkt:
         flat_rows = []
         for match in upcoming:
             for m in match.get("markets") or []:
-                quota = m.get("odds")
-                fair = m.get("fair_odds")
-                ve = _value_edge(quota, fair)
+                src = str(m.get("odds_source") or "")
+                real = m.get("odds_real")
+                if real is None:
+                    real = bool(src) and not src.startswith("stimata")
+                edge = m.get("edge_pp") if real else None
+                ev_cons = m.get("ev_cons") if real else None
+                if ev_cons is None and real:
+                    ev_cons = m.get("ev")
+                voto_value = m.get("score_value") if real else None
                 flat_rows.append(
                     {
                         "Data": match["date"],
@@ -483,17 +725,22 @@ with tab_mkt:
                         "Codice": m["code"],
                         "Prob.": f"{m['probability']:.0%}",
                         "prob_num": m["probability"],
-                        "Quota book": quota,
-                        "Quota equa": fair,
-                        "Value": _pct(ve),
-                        "value_num": ve,
-                        "EV atteso": _pct(m["ev"]),
-                        "ev_num": m["ev"],
-                        "Movimento": match.get("movement_level"),
-                        "Cosa è cambiato": match.get("movement_summary"),
-                        "Voto": m.get("score") or m.get("score_value") or m.get("score_prob"),
-                        "Fonte": m.get("odds_source") or "—",
+                        "Quota book": m.get("odds"),
+                        "Quota equa": m.get("fair_odds"),
+                        "Edge pp": _pct(edge),
+                        "value_num": edge,
+                        "EV cons.": _pct(ev_cons),
+                        "EV sharp": _pct(m.get("ev_sharp") if real else None),
+                        "ev_num": ev_cons,
+                        "Voto value": voto_value if voto_value is not None else "—",
+                        "Voto": m.get("score") or voto_value or m.get("score_prob"),
+                        "Fonte": src or "—",
                         "match_source": match.get("odds_source") or "—",
+                        "odds_real": real,
+                        "Movimento": match.get("movement_level"),
+                        "Var linea": match.get("line_move"),
+                        "Cosa è cambiato": match.get("movement_summary"),
+                        "Commento quote": match.get("movement_comment") or match.get("market_note"),
                     }
                 )
         flat = pd.DataFrame(flat_rows)
@@ -515,38 +762,45 @@ with tab_mkt:
         qmin = g3.number_input("Quota min", 1.01, 30.0, 1.40, 0.05, key="mkt_qmin")
         qmax = g4.number_input("Quota max", 1.01, 30.0, 3.50, 0.05, key="mkt_qmax")
         e1, e2, e3 = st.columns(3)
-        min_ev_m = e1.slider("EV minimo", -0.40, 0.40, 0.0, 0.02, key="mkt_ev")
+        min_ev_m = e1.slider("EV cons. minimo", -0.40, 0.40, 0.0, 0.02, key="mkt_ev")
         min_voto = e2.slider("Voto minimo", 1, 10, 5, key="mkt_voto")
         sort_mkt = e3.selectbox(
             "Ordina per",
-            ["Value (equa vs reale)", "Movimento mercato", "EV atteso", "Voto"],
+            ["Value (edge vs mercato)", "Movimento mercato", "EV cons.", "Voto"],
             key="mkt_sort",
         )
-        f1, f2 = st.columns(2)
+        f1, f2, f3 = st.columns(3)
         src_opts = sorted(flat["Fonte"].dropna().unique().tolist())
         sel_src = f1.multiselect("Fonte quota mercato", src_opts, default=src_opts)
         only_asian_match = f2.checkbox("Solo partite con quote Asian", value=False, key="mkt_asian")
+        min_move_m = f3.selectbox("Movimento minimo", MOVE_FILTER_OPTIONS, index=0, key="mkt_move")
+        hide_phantom = st.checkbox("Nascondi quote stimate (senza voto value)", value=True, key="mkt_real")
         filt = flat[flat["group"].isin(sel_g)]
         filt = filt[filt["Fonte"].isin(sel_src)]
         if only_asian_match:
             filt = filt[filt["match_source"] == "asianbetsoccer"]
+        if hide_phantom and "odds_real" in filt.columns:
+            filt = filt[filt["odds_real"].fillna(False)]
         filt = filt[filt["prob_num"] >= min_p]
         filt = filt[filt["Voto"].fillna(0) >= min_voto]
         filt = filt[filt["ev_num"].fillna(-1) >= min_ev_m]
         has_q = filt["Quota book"].notna()
         filt = filt[~has_q | ((filt["Quota book"] >= qmin) & (filt["Quota book"] <= qmax))]
-        move_rank = {"Forte": 3, "Medio": 2, "Leggero": 1, "Stabile": 0}
+        min_rank_m = MOVE_FILTER_RANK[min_move_m]
+        if min_rank_m > 0:
+            filt = filt[filt["Movimento"].map(MOVE_RANK).fillna(0) >= min_rank_m]
         if sort_mkt == "Movimento mercato":
-            filt["_ord"] = filt["Movimento"].map(move_rank).fillna(-1)
-            filt = filt.sort_values(["_ord", "Voto"], ascending=False, na_position="last").drop(columns="_ord")
-        elif sort_mkt == "Value (equa vs reale)":
+            filt["_ord"] = filt["Movimento"].map(MOVE_RANK).fillna(-1)
+            filt["_line"] = filt["Var linea"].fillna(0)
+            filt = filt.sort_values(["_ord", "_line", "Voto"], ascending=False, na_position="last").drop(columns=["_ord", "_line"])
+        elif sort_mkt == "Value (edge vs mercato)":
             filt = filt.sort_values(["value_num", "ev_num"], ascending=False, na_position="last")
         elif sort_mkt == "Voto":
             filt = filt.sort_values("Voto", ascending=False, na_position="last")
         else:
             filt = filt.sort_values(["ev_num", "Voto"], ascending=False, na_position="last")
         st.write(f"{len(filt)} mercati dopo i filtri")
-        hide = {"group", "match_source", "prob_num", "value_num", "ev_num"}
+        hide = {"group", "match_source", "prob_num", "value_num", "ev_num", "odds_real"}
         st.dataframe(
             filt.drop(columns=[c for c in hide if c in filt.columns]),
             width="stretch",
@@ -638,3 +892,101 @@ with tab_one:
         elif last:
             st.caption("Ultima predizione salvata")
             render_advice(last, extra_odds)
+
+with tab_eval:
+    cal = load_calibration()
+    summary = cal.get("backtest_summary") or {}
+    if not cal.get("fitted_at") and not summary:
+        st.info("Nessuna valutazione. Premi **Calibra probabilità (backtest)** nella colonna a sinistra (meglio dopo **Aggiorna dati + modello** per lo split rolling).")
+    else:
+        st.caption(
+            "Walk-forward temporale (OOF): Brier, log-loss, ECE e CLV. "
+            "Le scommesse simulate usano ¼ Kelly con cap, edge minimo 2–3% e scarto se Pinnacle non offre edge."
+        )
+        split = summary.get("split") or cal.get("split") or "—"
+        st.caption(f"Protocollo: **{split}** · T={cal.get('temperature', 1):.2f} · EV min {cal.get('min_ev_play', 0.025):.1%}")
+        with st.container(horizontal=True):
+            st.metric("Brier", f"{cal.get('brier_multiclass_calibrated') or cal.get('brier_favorite_calibrated') or '—'}", border=True)
+            st.metric("Log-loss", f"{cal.get('log_loss_calibrated') or summary.get('prob_log_loss') or '—'}", border=True)
+            st.metric("ECE", f"{cal.get('ece_calibrated') or summary.get('prob_ece') or '—'}", border=True)
+            st.metric("Calibration gap", f"{cal.get('calibration_gap_calibrated') or summary.get('prob_calibration_gap') or '—'}", border=True)
+        with st.container(horizontal=True):
+            st.metric("CLV medio", f"{summary.get('clv_mean_clv') or '—'}", border=True)
+            beat = summary.get("clv_beat_close_rate")
+            st.metric("Beat close", f"{beat:.0%}" if isinstance(beat, (int, float)) else "—", border=True)
+            st.metric("Scommesse filtrate", f"{summary.get('n_bets_played') or 0}", border=True)
+            bank = summary.get("bankroll_final")
+            st.metric("Bankroll ¼ Kelly", f"{bank:.2f}" if isinstance(bank, (int, float)) else "—", border=True)
+
+        path = cal.get("bankroll_path") or []
+        if path:
+            bank_df = pd.DataFrame(path)
+            if "bankroll" in bank_df.columns:
+                st.subheader("Bankroll simulato (¼ Kelly con cap)")
+                st.line_chart(bank_df, x="i", y="bankroll", x_label="Scommessa", y_label="Bankroll")
+
+        def _show_report(title: str, rows: list, rename: dict | None = None):
+            if not rows:
+                return
+            st.subheader(title)
+            df = pd.DataFrame(rows)
+            if rename:
+                df = df.rename(columns=rename)
+            pct_cols = [c for c in df.columns if c in {"hit_rate", "roi", "mean_ev", "realization", "mean_clv", "beat_close_rate", "pnl_kelly"}]
+            show = df.copy()
+            for c in pct_cols:
+                if c in show.columns:
+                    show[c] = show[c].map(lambda x: f"{x:+.1%}" if isinstance(x, (int, float)) else x)
+            st.dataframe(show, width="stretch", hide_index=True)
+
+        _show_report(
+            "Per campionato",
+            cal.get("by_league") or [],
+            {"league": "Campionato", "n": "N", "hit_rate": "Hit", "roi": "ROI piatto", "mean_ev": "EV medio", "realization": "Realizzazione", "mean_clv": "CLV", "beat_close_rate": "Beat close", "pnl_kelly": "PnL Kelly"},
+        )
+        _show_report(
+            "Per mercato",
+            cal.get("by_market") or [],
+            {"market": "Mercato", "n": "N", "hit_rate": "Hit", "roi": "ROI piatto", "mean_ev": "EV medio", "realization": "Realizzazione", "mean_clv": "CLV", "beat_close_rate": "Beat close", "pnl_kelly": "PnL Kelly"},
+        )
+        _show_report(
+            "Per esito",
+            cal.get("by_code") or [],
+            {"code": "Codice", "n": "N", "hit_rate": "Hit", "roi": "ROI piatto", "mean_ev": "EV medio", "realization": "Realizzazione", "mean_clv": "CLV", "beat_close_rate": "Beat close", "pnl_kelly": "PnL Kelly"},
+        )
+        folds = cal.get("by_fold") or []
+        rolling = None
+        metrics_path = ROOT / "data" / "models" / "metrics.json"
+        if metrics_path.exists():
+            try:
+                rolling = json.loads(metrics_path.read_text(encoding="utf-8")).get("rolling") or {}
+            except Exception:
+                rolling = None
+        if rolling and rolling.get("folds"):
+            st.subheader("Fold rolling")
+            fdf = pd.DataFrame(rolling["folds"])
+            st.dataframe(fdf, width="stretch", hide_index=True)
+        elif folds:
+            _show_report("Fold rolling (scommesse)", folds, {"fold": "Fold"})
+
+        rel = cal.get("reliability_1x2") or []
+        if rel:
+            st.subheader("Calibrazione 1X2 (bin)")
+            st.dataframe(
+                [
+                    {
+                        "Range": f"{b['range'][0]:.2f}–{b['range'][1]:.2f}",
+                        "Predetta": f"{b['predicted']:.1%}",
+                        "Reale": f"{b['actual']:.1%}",
+                        "N": b["n"],
+                        "Fattore": b.get("factor"),
+                    }
+                    for b in rel
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+        st.caption(
+            "CLV storico: quota di apertura (venerdì / AvgH) contro la close (AvgCH / B365CH). "
+            "Positivo = hai battuto la linea di chiusura. I tipster non entrano in queste metriche."
+        )

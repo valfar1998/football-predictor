@@ -39,11 +39,25 @@ FD_MAIN = ROOT / "data" / "raw" / "fd" / "main"
 FD_EXTRA = ROOT / "data" / "raw" / "fd" / "extra"
 FIXTURES_DIR = ROOT / "data" / "raw" / "fixtures"
 
-ODDS_HOME = ("AvgH", "AvgCH", "B365H", "B365CH", "MaxH", "MaxCH", "PSH", "PSCH")
-ODDS_DRAW = ("AvgD", "AvgCD", "B365D", "B365CD", "MaxD", "MaxCD", "PSD", "PSCD")
-ODDS_AWAY = ("AvgA", "AvgCA", "B365A", "B365CA", "MaxA", "MaxCA", "PSA", "PSCA")
-ODDS_O25 = ("Avg>2.5", "AvgC>2.5", "B365>2.5", "B365C>2.5", "Max>2.5")
-ODDS_U25 = ("Avg<2.5", "AvgC<2.5", "B365<2.5", "B365C<2.5", "Max<2.5")
+ODDS_HOME_OPEN = ("AvgH", "B365H", "PSH", "MaxH")
+ODDS_DRAW_OPEN = ("AvgD", "B365D", "PSD", "MaxD")
+ODDS_AWAY_OPEN = ("AvgA", "B365A", "PSA", "MaxA")
+ODDS_HOME_CLOSE = ("AvgCH", "B365CH", "PSCH", "MaxCH")
+ODDS_DRAW_CLOSE = ("AvgCD", "B365CD", "PSCD", "MaxCD")
+ODDS_AWAY_CLOSE = ("AvgCA", "B365CA", "PSCA", "MaxCA")
+ODDS_HOME_SHARP = ("PSH",)
+ODDS_DRAW_SHARP = ("PSD",)
+ODDS_AWAY_SHARP = ("PSA",)
+ODDS_O25_OPEN = ("Avg>2.5", "B365>2.5", "Max>2.5")
+ODDS_U25_OPEN = ("Avg<2.5", "B365<2.5", "Max<2.5")
+ODDS_O25_CLOSE = ("AvgC>2.5", "B365C>2.5", "MaxC>2.5")
+ODDS_U25_CLOSE = ("AvgC<2.5", "B365C<2.5", "MaxC<2.5")
+# compat: quota "presa" = apertura (venerdì), non la close
+ODDS_HOME = ODDS_HOME_OPEN + ODDS_HOME_CLOSE
+ODDS_DRAW = ODDS_DRAW_OPEN + ODDS_DRAW_CLOSE
+ODDS_AWAY = ODDS_AWAY_OPEN + ODDS_AWAY_CLOSE
+ODDS_O25 = ODDS_O25_OPEN + ODDS_O25_CLOSE
+ODDS_U25 = ODDS_U25_OPEN + ODDS_U25_CLOSE
 
 
 def _read_fd_csv(path: Path) -> pd.DataFrame:
@@ -70,6 +84,34 @@ def _first_odd(df: pd.DataFrame, names: tuple[str, ...]) -> pd.Series:
     return out
 
 
+def _odds_open_close_sharp(df: pd.DataFrame) -> dict[str, pd.Series]:
+    home_open = _first_odd(df, ODDS_HOME_OPEN)
+    draw_open = _first_odd(df, ODDS_DRAW_OPEN)
+    away_open = _first_odd(df, ODDS_AWAY_OPEN)
+    home_close = _first_odd(df, ODDS_HOME_CLOSE).fillna(home_open)
+    draw_close = _first_odd(df, ODDS_DRAW_CLOSE).fillna(draw_open)
+    away_close = _first_odd(df, ODDS_AWAY_CLOSE).fillna(away_open)
+    o25_open = _first_odd(df, ODDS_O25_OPEN)
+    u25_open = _first_odd(df, ODDS_U25_OPEN)
+    o25_close = _first_odd(df, ODDS_O25_CLOSE).fillna(o25_open)
+    u25_close = _first_odd(df, ODDS_U25_CLOSE).fillna(u25_open)
+    return {
+        "odd_home": home_open.fillna(_first_odd(df, ODDS_HOME_CLOSE)),
+        "odd_draw": draw_open.fillna(_first_odd(df, ODDS_DRAW_CLOSE)),
+        "odd_away": away_open.fillna(_first_odd(df, ODDS_AWAY_CLOSE)),
+        "odd_over_25": o25_open.fillna(o25_close),
+        "odd_under_25": u25_open.fillna(u25_close),
+        "odd_home_close": home_close,
+        "odd_draw_close": draw_close,
+        "odd_away_close": away_close,
+        "odd_over_25_close": o25_close,
+        "odd_under_25_close": u25_close,
+        "odd_home_sharp": _first_odd(df, ODDS_HOME_SHARP),
+        "odd_draw_sharp": _first_odd(df, ODDS_DRAW_SHARP),
+        "odd_away_sharp": _first_odd(df, ODDS_AWAY_SHARP),
+    }
+
+
 def _meta_from_div(div: object) -> tuple[str, str]:
     if div is None or (not isinstance(div, str) and pd.isna(div)):
         return ("Altro", "unknown")
@@ -89,6 +131,7 @@ def parse_main_results(path: Path) -> pd.DataFrame:
     else:
         country_s = country
         league_s = league
+    odds = _odds_open_close_sharp(df)
     out = pd.DataFrame(
         {
             "date": pd.to_datetime(df["Date"], dayfirst=True, errors="coerce"),
@@ -99,11 +142,7 @@ def parse_main_results(path: Path) -> pd.DataFrame:
             "country": country_s,
             "league": league_s,
             "div": df["Div"] if "Div" in df.columns else league,
-            "odd_home": _first_odd(df, ODDS_HOME),
-            "odd_draw": _first_odd(df, ODDS_DRAW),
-            "odd_away": _first_odd(df, ODDS_AWAY),
-            "odd_over_25": _first_odd(df, ODDS_O25),
-            "odd_under_25": _first_odd(df, ODDS_U25),
+            **odds,
             "source": f"fd:{path.stem}",
         }
     )
@@ -124,6 +163,7 @@ def parse_extra_results(path: Path) -> pd.DataFrame:
     else:
         country_s = country
     league_s = df["League"].astype(str).str.strip() if "League" in df.columns else path.stem
+    odds = _odds_open_close_sharp(df)
     out = pd.DataFrame(
         {
             "date": pd.to_datetime(df["Date"], dayfirst=True, errors="coerce"),
@@ -134,11 +174,7 @@ def parse_extra_results(path: Path) -> pd.DataFrame:
             "country": country_s,
             "league": league_s,
             "div": path.stem,
-            "odd_home": _first_odd(df, ODDS_HOME),
-            "odd_draw": _first_odd(df, ODDS_DRAW),
-            "odd_away": _first_odd(df, ODDS_AWAY),
-            "odd_over_25": _first_odd(df, ODDS_O25),
-            "odd_under_25": _first_odd(df, ODDS_U25),
+            **odds,
             "source": f"fd-extra:{path.stem}",
         }
     )
@@ -178,6 +214,7 @@ def parse_main_fixtures(path: Path) -> pd.DataFrame:
     if "HomeTeam" not in df.columns:
         return pd.DataFrame()
     mapped = df["Div"].map(lambda d: _meta_from_div(d)) if "Div" in df.columns else None
+    odds = _odds_open_close_sharp(df)
     return pd.DataFrame(
         {
             "date": pd.to_datetime(df["Date"], dayfirst=True, errors="coerce"),
@@ -187,11 +224,7 @@ def parse_main_fixtures(path: Path) -> pd.DataFrame:
             "country": mapped.map(lambda t: t[0]) if mapped is not None else "Europa",
             "league": mapped.map(lambda t: t[1]) if mapped is not None else df.get("Div", "unknown"),
             "div": df["Div"] if "Div" in df.columns else "",
-            "odd_home": _first_odd(df, ODDS_HOME),
-            "odd_draw": _first_odd(df, ODDS_DRAW),
-            "odd_away": _first_odd(df, ODDS_AWAY),
-            "odd_over_25": _first_odd(df, ODDS_O25),
-            "odd_under_25": _first_odd(df, ODDS_U25),
+            **odds,
             "source": "fixtures-main",
         }
     )
@@ -203,6 +236,7 @@ def parse_extra_fixtures(path: Path) -> pd.DataFrame:
     away_col = "Away" if "Away" in df.columns else "AwayTeam"
     if home_col not in df.columns:
         return pd.DataFrame()
+    odds = _odds_open_close_sharp(df)
     return pd.DataFrame(
         {
             "date": pd.to_datetime(df["Date"], dayfirst=True, errors="coerce"),
@@ -212,11 +246,7 @@ def parse_extra_fixtures(path: Path) -> pd.DataFrame:
             "country": df["Country"].astype(str).str.strip().map(_country_it) if "Country" in df.columns else "",
             "league": df["League"].astype(str).str.strip() if "League" in df.columns else "",
             "div": df["Country"] if "Country" in df.columns else "",
-            "odd_home": _first_odd(df, ODDS_HOME),
-            "odd_draw": _first_odd(df, ODDS_DRAW),
-            "odd_away": _first_odd(df, ODDS_AWAY),
-            "odd_over_25": _first_odd(df, ODDS_O25),
-            "odd_under_25": _first_odd(df, ODDS_U25),
+            **odds,
             "source": "fixtures-extra",
         }
     )

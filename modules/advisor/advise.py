@@ -6,6 +6,13 @@ from math import floor
 from typing import Any
 
 from modules.calibration.config import load_calibration, prob_bin_factor
+from modules.advisor.staking import (
+    KELLY_CAP,
+    MIN_EDGE,
+    no_bet_reasons,
+    quarter_kelly,
+)
+from modules.advisor.value import PLAY_VALUE_KEYS, enrich_value
 
 
 def _clamp_score(value: float) -> int:
@@ -28,29 +35,29 @@ def score_probability(p: float, p_second: float, p_model: float, baseline: float
 
 
 def score_value(prob: float, odds: float) -> int:
+    """Fallback grezzo; il voto reale è in enrich_value."""
     ev = prob * odds - 1.0
     if ev >= 0:
         raw = 4 + 6 * min(1.0, ev / 0.20)
     else:
         raw = 4 - 3 * min(1.0, -ev / 0.25)
-    if prob < 0.20:
-        raw = min(raw, 4)
-    elif prob < 0.25:
-        raw = min(raw, 5)
-    elif prob < 0.30:
-        raw = min(raw, 6)
-    elif prob < 0.35:
-        raw = min(raw, 7)
     return _clamp_score(raw)
 
 
 def _kelly_fraction(prob: float, odds: float) -> float:
-    if odds <= 1.01 or prob <= 0:
-        return 0.0
-    edge = prob * odds - 1.0
-    if edge <= 0:
-        return 0.0
-    return edge / (odds - 1.0)
+    from modules.advisor.staking import kelly_full
+
+    return kelly_full(prob, odds)
+
+
+def _capped_kelly(prob: float, odds: float, cal: dict | None = None) -> float:
+    cal = cal or load_calibration()
+    return quarter_kelly(
+        prob,
+        odds,
+        fraction=float(cal.get("kelly_fraction", 0.25)),
+        cap=float(cal.get("kelly_cap", KELLY_CAP)),
+    )
 
 
 def _ml_mc_divergence(mc_prob: float, ml_prob: float | None) -> float:
@@ -66,7 +73,9 @@ def score_composite(market: dict[str, Any]) -> int:
     group = market.get("group") or "1x2"
     sp = int(market.get("score_prob") or 1)
     sv = market.get("score_value")
-    ev = market.get("ev")
+    ev = market.get("ev_cons")
+    if ev is None:
+        ev = market.get("ev")
     odds = market.get("odds")
     ml_prob = market.get("model_probability")
 
@@ -115,7 +124,8 @@ def score_composite(market: dict[str, Any]) -> int:
         raw -= 0.75
 
     if odds and float(odds) > 1.01:
-        qk = _kelly_fraction(prob, float(odds)) * 0.25
+        stake_p = float(market.get("p_cons") or prob)
+        qk = _kelly_fraction(stake_p, float(odds)) * float(cal.get("kelly_fraction", 0.25))
         if qk < 0.005:
             raw = min(raw, 4)
         elif qk < 0.015:
@@ -169,32 +179,122 @@ def explain_pick(
     line1 = f"Probabilità stimata: {p:.0%} ({agree}, {band})"
 
     bits: list[str] = []
-    if play.get("odds") and play.get("fair_odds"):
-        ev = play.get("ev") or 0
+    if play.get("odds") and play.get("p_market") is not None and play.get("edge_pp") is not None:
+        bits.append(
+            f"modello {float(play.get('p_cons') or p):.0%} vs mercato {float(play['p_market']):.0%} "
+            f"(edge {play['edge_pp']:+.1%} pp · quota {play['odds']:.2f} vs equa {play.get('fair_odds')})"
+        )
+        if play.get("ev_cons") is not None:
+            sharp = play.get("ev_sharp")
+            sharp_bit = f" · EV sharp {sharp:+.0%}" if sharp is not None else ""
+            bits.append(f"EV cons. {play['ev_cons']:+.0%}{sharp_bit}")
+    elif play.get("odds") and play.get("fair_odds"):
+        ev = play.get("ev_cons") if play.get("ev_cons") is not None else play.get("ev") or 0
         bits.append(f"Quota {play['odds']:.2f} vs equa {play['fair_odds']:.2f} (EV {ev:+.0%})")
-    label = (alignment or {}).get("label") or "n/d"
-    move_lvl = (market_move or {}).get("movement_level") or "Stabile"
-    if label == "allineato":
-        bits.append(f"mercato Asian {move_lvl.lower()} e allineato")
-    elif label == "contrario":
-        bits.append(f"mercato Asian {move_lvl.lower()} ma contrario")
-    elif move_lvl != "Stabile":
-        bits.append(f"mercato {move_lvl.lower()}, modello neutro")
-    else:
-        bits.append("mercato stabile")
+        if play.get("odds_real") is False:
+            bits.append("quota ipotetica")
+    bits.append(_pick_vs_market_bit(play, alignment, market_move))
 
     kelly = 0.0
     if play.get("odds"):
-        kelly = _kelly_fraction(p, float(play["odds"])) * 0.25
-    if kelly < 0.01:
+        kelly = _capped_kelly(float(play.get("p_cons") or p), float(play["odds"]))
+    if play.get("action") == "no_bet":
+        bits.append("No bet: " + "; ".join(play.get("no_bet_reasons") or ["filtro"]))
+    elif kelly < 0.01:
         bits.append("Kelly ¼ basso → stake teorico minimo")
     elif kelly >= 0.03:
-        bits.append(f"Kelly ¼ {kelly:.1%} → stake moderato")
+        bits.append(f"Kelly ¼ {kelly:.1%} (cap {KELLY_CAP:.0%}) → stake moderato")
     else:
-        bits.append(f"Kelly ¼ {kelly:.1%}")
+        bits.append(f"Kelly ¼ {kelly:.1%} (cap {KELLY_CAP:.0%})")
+
+    tip = play.get("tipster") or {}
+    if tip.get("n_sources"):
+        cons = tip.get("consensus") or "?"
+        agree = tip.get("agree") or tip.get("label")
+        names = ", ".join(str(s.get("source")) for s in (tip.get("sources") or []) if s.get("source"))
+        bits.append(f"tipster {names or 'n/d'} → {cons} ({agree})")
 
     line2 = " · ".join(bits)
     return line1, line2
+
+
+def _pp(val: float | None) -> str:
+    if val is None:
+        return "—"
+    return f"{val:+.1f} pp"
+
+
+def _pick_drop(play: dict[str, Any], market_move: dict[str, Any] | None) -> tuple[float | None, object, object]:
+    """Variazione pp / quota apertura→attuale del mercato consigliato."""
+    if not market_move:
+        return None, None, None
+    code = str(play.get("code") or "")
+    group = play.get("group") or "1x2"
+    if code == "1":
+        return market_move.get("drop_1"), market_move.get("open_1"), market_move.get("odd_1")
+    if code == "X":
+        return market_move.get("drop_x"), market_move.get("open_x"), market_move.get("odd_x")
+    if code == "2":
+        return market_move.get("drop_2"), market_move.get("open_2"), market_move.get("odd_2")
+    if group == "ou" or code.startswith("O"):
+        if "U" in code and not code.startswith("O"):
+            return market_move.get("drop_under"), market_move.get("open_under"), market_move.get("odd_under")
+        if code.startswith("O") and "GOL" not in code:
+            return market_move.get("drop_over"), market_move.get("open_over"), market_move.get("odd_over")
+    if code.startswith("U"):
+        return market_move.get("drop_under"), market_move.get("open_under"), market_move.get("odd_under")
+    return None, None, None
+
+
+def _pick_vs_market_bit(
+    play: dict[str, Any],
+    alignment: dict[str, Any] | None,
+    market_move: dict[str, Any] | None,
+) -> str:
+    label = (alignment or {}).get("label") or "n/d"
+    move_lvl = (market_move or {}).get("movement_level") or "Stabile"
+    drop, open_odd, curr_odd = _pick_drop(play, market_move)
+    quota_bit = ""
+    if drop is not None and open_odd is not None and curr_odd is not None:
+        try:
+            q_txt = f"{float(open_odd):.2f}->{float(curr_odd):.2f}"
+        except (TypeError, ValueError):
+            q_txt = ""
+        if drop >= 1.5:
+            quota_bit = f"quota pick accorciata {q_txt} ({_pp(drop)}): mercato conferma"
+        elif drop <= -1.5:
+            quota_bit = f"quota pick allungata {q_txt} ({_pp(drop)}): mercato sconta"
+        elif abs(drop) >= 0.4:
+            verb = "accorciata" if drop > 0 else "allungata"
+            quota_bit = f"quota pick {verb} {q_txt} ({_pp(drop)})"
+
+    agrees = (alignment or {}).get("agrees") or []
+    disagrees = (alignment or {}).get("disagrees") or []
+    if label == "allineato":
+        core = f"mercato Asian {move_lvl.lower()} allineato"
+        if agrees:
+            core += f" su {', '.join(agrees)}"
+    elif label == "contrario":
+        core = f"mercato Asian {move_lvl.lower()} contrario"
+        if disagrees:
+            core += f" (flusso su {', '.join(disagrees)})"
+    elif label == "misto":
+        core = f"mercato {move_lvl.lower()} misto"
+        extra = []
+        if agrees:
+            extra.append("ok " + ", ".join(agrees))
+        if disagrees:
+            extra.append("no " + ", ".join(disagrees))
+        if extra:
+            core += f" ({'; '.join(extra)})"
+    elif move_lvl != "Stabile":
+        core = f"mercato {move_lvl.lower()}, modello neutro"
+    else:
+        core = "mercato stabile"
+
+    if quota_bit:
+        return f"{core} · {quota_bit}"
+    return core
 
 
 def _market(
@@ -218,7 +318,7 @@ def _market(
         implied = round(1.0 / odds, 4)
         ev = round(prob * odds - 1.0, 4)
         ratio = round(prob * odds, 4)
-        value = score_value(prob, odds)
+        value = None
         source = odds_source or "book"
     return {
         "code": code,
@@ -241,8 +341,9 @@ def _with_composite(market: dict[str, Any]) -> dict[str, Any]:
     out = dict(market)
     out["score"] = score_composite(market)
     odd = out.get("odds")
+    stake_p = float(out.get("p_cons") or out["probability"])
     if odd and float(odd) > 1.01:
-        out["kelly_quarter"] = round(_kelly_fraction(float(out["probability"]), float(odd)) * 0.25, 4)
+        out["kelly_quarter"] = round(_capped_kelly(stake_p, float(odd)), 4)
     else:
         out["kelly_quarter"] = 0.0
     return out
@@ -278,10 +379,10 @@ def _pick_headline(probable: dict, value: dict | None) -> dict[str, Any]:
     value = _with_composite(value) if value else None
 
     def pack(item: dict, kind: str) -> dict[str, Any]:
-        p = float(item["probability"])
+        p = float(item.get("p_cons") or item["probability"])
         odd = item.get("odds")
-        kq = _kelly_fraction(p, float(odd)) * 0.25 if odd else 0.0
-        return {
+        kq = _capped_kelly(p, float(odd)) if odd else 0.0
+        packed = {
             "code": item["code"],
             "name": item["name"],
             "group": item.get("group"),
@@ -292,11 +393,15 @@ def _pick_headline(probable: dict, value: dict | None) -> dict[str, Any]:
             "probability": item["probability"],
             "model_probability": item.get("model_probability"),
             "odds": item["odds"],
-            "ev": item["ev"],
+            "ev": item.get("ev_cons") if item.get("ev_cons") is not None else item.get("ev"),
             "fair_odds": item["fair_odds"],
             "odds_source": item.get("odds_source"),
             "kelly_quarter": round(kq, 4),
         }
+        for key in PLAY_VALUE_KEYS:
+            if key in item:
+                packed[key] = item[key]
+        return packed
 
     if value is None:
         return pack(probable, "più_probabile")
@@ -304,15 +409,18 @@ def _pick_headline(probable: dict, value: dict | None) -> dict[str, Any]:
     cal = load_calibration()
     min_ev_val = float(cal.get("min_ev_strong_value", 0.06))
     min_p_val = float(cal.get("min_prob_1x2_value", 0.35))
+    value_ev = value.get("ev_cons") if value.get("ev_cons") is not None else value.get("ev")
 
     if probable["code"] == value["code"]:
-        kind = "probabile_e_valore" if (value["ev"] or 0) >= 0 else "più_probabile"
+        kind = "probabile_e_valore" if (value_ev or 0) >= 0 and value.get("odds_real") else "più_probabile"
         return pack(probable, kind)
 
     strong_value = (
-        (value["ev"] or 0) >= min_ev_val
+        value.get("odds_real")
+        and (value_ev or 0) >= min_ev_val
         and value["probability"] >= min_p_val
         and value["score"] >= probable["score"] + 1
+        and (value.get("ev_sharp") is None or value["ev_sharp"] >= 0)
     )
     if strong_value:
         return pack(value, "valore")
@@ -336,12 +444,17 @@ def advise(
     market_move: dict | None = None,
     *,
     odds_from_asian: bool = False,
+    tipster: dict | None = None,
+    league: str | None = None,
 ) -> dict[str, Any]:
     """Mercati 1X2, doppia chance, DNB, O/U 0.5-4.5, BTTS, gol squadra, combo."""
     odds = odds or {}
     home, away = _split_match(prediction.get("match", "Casa vs Trasferta"))
+    league = league or prediction.get("league")
     mc = prediction["montecarlo"]
     ml = prediction["model_probabilities"]
+    cal = load_calibration()
+    book_src = "asianbetsoccer" if odds_from_asian else "book"
 
     o1 = _get_odd(odds, "home", "1")
     ox = _get_odd(odds, "draw", "X", "x")
@@ -360,9 +473,9 @@ def advise(
     dnb_2 = float(mc.get("dnb_2", p2 / max(p1 + p2, 1e-9)))
 
     markets_1x2 = [
-        _market("1", f"{home} vince", "1x2", p1, ranked[1], ml["home_win"], o1, baseline=0.333, odds_source="book"),
-        _market("X", "Pareggio", "1x2", px, ranked[1], ml["draw"], ox, baseline=0.333, odds_source="book"),
-        _market("2", f"{away} vince", "1x2", p2, ranked[1], ml["away_win"], o2, baseline=0.333, odds_source="book"),
+        _market("1", f"{home} vince", "1x2", p1, ranked[1], ml["home_win"], o1, baseline=0.333, odds_source=book_src),
+        _market("X", "Pareggio", "1x2", px, ranked[1], ml["draw"], ox, baseline=0.333, odds_source=book_src),
+        _market("2", f"{away} vince", "1x2", p2, ranked[1], ml["away_win"], o2, baseline=0.333, odds_source=book_src),
     ]
 
     def derived(code, name, group, prob, complement, model_p, baseline, book_odd=None, source="stimata"):
@@ -372,7 +485,7 @@ def advise(
             odd = _apply_margin(prob, margin)
             src = source
         else:
-            src = "book"
+            src = book_src
         return _market(code, name, group, prob, complement, model_p, odd, baseline=baseline, odds_source=src)
 
     markets_dc = [
@@ -401,9 +514,10 @@ def advise(
         if ok not in mc:
             continue
         po, pu = float(mc.get(ok, 0)), float(mc.get(uk, 1 - mc.get(ok, 0)))
-        src = "book" if line == 2.5 and o_o25 else "stimata da O/U 2.5"
+        src = book_src if ou_book.get(ok) else "stimata da O/U 2.5"
         markets_ou.append(derived(f"O{line}", f"Over {line}", "ou", po, pu, po, 0.5, ou_book.get(ok), src))
-        markets_ou.append(derived(f"U{line}", f"Under {line}", "ou", pu, po, pu, 0.5, ou_book.get(uk), src))
+        src_u = book_src if ou_book.get(uk) else "stimata da O/U 2.5"
+        markets_ou.append(derived(f"U{line}", f"Under {line}", "ou", pu, po, pu, 0.5, ou_book.get(uk), src_u))
 
     btts = float(mc.get("btts", 0))
     markets_btts = [
@@ -437,7 +551,7 @@ def advise(
         prob = float(mc.get(mc_key, 0))
         book = _get_odd(odds, mc_key, code.replace(" ", "_").lower())
         odd = book if book and book > 1 else _apply_margin(prob, rr_combo)
-        src = "book" if book and book > 1 else "stimata combo"
+        src = book_src if book and book > 1 else "stimata combo"
         return _market(code, name, "combo", prob, complement, prob, odd, baseline=0.15, odds_source=src)
 
     markets_combo = [
@@ -465,35 +579,52 @@ def advise(
         combo("12+U2.5", "12 e Under 2.5", "combo_12_u25", float(mc.get("combo_12_o25", 0))),
     ]
 
+    def _finish(m: dict[str, Any], overround: float) -> dict[str, Any]:
+        rr = rr_1x2 if m.get("group") in {"1x2", "dc", "dnb"} else rr_ou if m.get("group") in {"ou", "btts", "team"} else rr_combo
+        return _with_composite(
+            enrich_value(
+                m,
+                odds=odds,
+                overround=overround or rr,
+                league=league,
+                market_move=market_move,
+                odds_from_asian=odds_from_asian,
+                cal=cal,
+            )
+        )
+
     grouped = {
-        "1x2": markets_1x2,
-        "dc": markets_dc,
-        "ou": markets_ou,
-        "btts": markets_btts,
-        "team": markets_team,
-        "combo": markets_combo,
+        "1x2": [_finish(m, rr_1x2) for m in markets_1x2],
+        "dc": [_finish(m, rr_1x2) for m in markets_dc],
+        "ou": [_finish(m, rr_ou) for m in markets_ou],
+        "btts": [_finish(m, rr_ou) for m in markets_btts],
+        "team": [_finish(m, rr_ou) for m in markets_team],
+        "combo": [_finish(m, rr_combo) for m in markets_combo],
     }
-    all_markets = [_with_composite(m) for g in grouped.values() for m in g]
-    for key in grouped:
-        grouped[key] = [_with_composite(m) for m in grouped[key]]
+    all_markets = [m for g in grouped.values() for m in g]
 
     probable_1x2 = max(grouped["1x2"], key=lambda m: m["probability"])
-    with_odds_1x2 = [m for m in grouped["1x2"] if m["odds"] is not None]
-    best_value_1x2 = max(with_odds_1x2, key=lambda m: m["ev"] if m["ev"] is not None else -99) if with_odds_1x2 else None
+    with_odds_1x2 = [m for m in grouped["1x2"] if m.get("odds_real") and m.get("edge_pp") is not None]
+    if not with_odds_1x2:
+        with_odds_1x2 = [m for m in grouped["1x2"] if m["odds"] is not None]
+    best_value_1x2 = max(with_odds_1x2, key=lambda m: m.get("edge_pp") if m.get("edge_pp") is not None else -99) if with_odds_1x2 else None
     play_1x2 = _pick_headline(probable_1x2, best_value_1x2)
 
     extras = [m for m in all_markets if m["group"] != "1x2" and _actionable(m)]
     play_alt = None
     if extras:
         def extra_key(m):
-            return m["score"] + max(m.get("ev") or -0.05, -0.05) * 3
+            edge = m.get("edge_pp")
+            evn = m.get("ev_cons") if m.get("ev_cons") is not None else m.get("ev")
+            return m["score"] + max(edge if edge is not None else evn or -0.05, -0.05) * 3
 
         play_alt = max(extras, key=extra_key)
-        play_alt = _pick_headline(play_alt, play_alt if play_alt["odds"] else None)
+        play_alt = _pick_headline(play_alt, play_alt if play_alt.get("odds_real") else None)
 
     play = play_1x2
-    min_ev_play = float(load_calibration().get("min_ev_play", 0.04))
-    if play_alt and (play_alt.get("ev") or 0) >= min_ev_play and play_alt["score"] >= play_1x2["score"]:
+    min_ev_play = float(cal.get("min_ev_play", MIN_EDGE))
+    alt_ev = None if not play_alt else (play_alt.get("ev_cons") if play_alt.get("ev_cons") is not None else play_alt.get("ev"))
+    if play_alt and (alt_ev or 0) >= min_ev_play and play_alt["score"] >= play_1x2["score"]:
         play = play_alt
 
     ml_for_play = play.get("model_probability")
@@ -509,14 +640,15 @@ def advise(
     alignment = None
     score_cap: int | None = None
     if market_move:
-        from modules.data_update.asian_odds import move_alignment
+        from modules.data_update.asian_odds import MOVE_RANK, move_alignment
 
         alignment = move_alignment(play.get("code"), market_move)
         delta = alignment.get("delta") or 0
         if delta > 0 and odds_from_asian:
             delta = max(0, delta - 1)
-        if alignment.get("label") == "contrario" and market_move.get("movement_level") == "Forte":
-            score_cap = 6
+        lvl = market_move.get("movement_level") or "Stabile"
+        if alignment.get("label") == "contrario" and MOVE_RANK.get(lvl, 0) >= MOVE_RANK["Forte"]:
+            score_cap = 5 if lvl == "Raro" else 6
             delta = min(delta, -1)
         if delta:
             play = dict(play)
@@ -524,6 +656,43 @@ def advise(
         if score_cap is not None:
             play["score"] = min(play["score"], score_cap)
         play["market_align"] = alignment["label"]
+        _, open_odd, curr_odd = _pick_drop(play, market_move)
+        from modules.advisor.staking import clv_prob as _clv
+
+        play["clv"] = _clv(
+            float(open_odd) if open_odd else None,
+            float(curr_odd) if curr_odd else None,
+        )
+
+    if tipster is None:
+        try:
+            from modules.tipsters import consensus_for
+
+            tipster = consensus_for(home, away)
+        except Exception:
+            tipster = {"n_sources": 0, "label": "n/d"}
+    from modules.tipsters import apply_tipster_balance
+
+    play = apply_tipster_balance(play, tipster)
+
+    reasons = no_bet_reasons(
+        play,
+        market_move=market_move,
+        alignment=alignment,
+        min_edge=float(cal.get("min_ev_play", MIN_EDGE)),
+        min_rank=int(cal.get("liquid_against_rank", 3)),
+        min_pp=float(cal.get("liquid_against_pp", 2.0)),
+        sharp_ev=play.get("ev_sharp"),
+    )
+    play = dict(play)
+    if reasons:
+        play["action"] = "no_bet"
+        play["no_bet_reasons"] = reasons
+        play["kelly_quarter"] = 0.0
+        play["score"] = min(int(play.get("score") or 1), 5)
+    else:
+        play["action"] = "gioca"
+        play["no_bet_reasons"] = []
 
     reason1, reason2 = explain_pick(play, alignment=alignment, market_move=market_move, ml_prob=ml_for_play)
 
@@ -545,6 +714,7 @@ def advise(
         "has_odds": any(m["odds"] is not None for m in markets_1x2),
         "market_move": market_move,
         "market_align": alignment or {"agrees": [], "disagrees": [], "delta": 0, "label": "n/d"},
+        "tipster": play.get("tipster") or tipster,
         "score_reason_1": reason1,
         "score_reason_2": reason2,
     }
@@ -565,10 +735,19 @@ def format_advice(advice: dict[str, Any]) -> str:
         f"  Voto   {play['score']}/10   ({kind_it})",
         f"  Prob   {play['probability']:.1%}",
     ]
+    if play.get("action") == "no_bet":
+        lines.append("  Azione No bet  (" + "; ".join(play.get("no_bet_reasons") or []) + ")")
     if play["odds"]:
-        ev = play["ev"] or 0
+        ev = play.get("ev_cons") if play.get("ev_cons") is not None else play.get("ev") or 0
         sign = "+" if ev >= 0 else ""
-        lines.append(f"  Quota  {play['odds']:.2f}   equa {play['fair_odds']:.2f}   EV {sign}{ev:.1%}")
+        lines.append(f"  Quota  {play['odds']:.2f}   equa {play['fair_odds']:.2f}   EV cons. {sign}{ev:.1%}")
+        if play.get("edge_pp") is not None:
+            lines.append(f"  Edge   {play['edge_pp']:+.1%} pp vs mercato devig")
+    move = advice.get("market_move") or {}
+    if move.get("movement_comment"):
+        lines.append(f"  Quote  {move['movement_comment']}")
+    elif advice.get("score_reason_2"):
+        lines.append(f"  Nota   {advice['score_reason_2']}")
     alt = advice.get("play_alt")
     if alt and alt["code"] != play["code"]:
         lines.append(f"  Alt    {alt['code']}  {alt['name']}  {alt['score']}/10")

@@ -26,6 +26,28 @@ BOOKS = {
     "sbobet": "a812ffd882c5e9447002429bab519de4b78002c6",
 }
 
+MOVE_LEVELS = ("Stabile", "Leggero", "Medio", "Forte", "Fortissimo", "Raro")
+MOVE_RANK = {name: i for i, name in enumerate(MOVE_LEVELS)}
+MOVE_FILTER_OPTIONS = [
+    "Tutti",
+    "Leggero+",
+    "Medio+",
+    "Forte+",
+    "Fortissimo+ (0.5/0.75)",
+    "Raro (>=1)",
+]
+MOVE_FILTER_RANK = {
+    "Tutti": 0,
+    "Leggero+": 1,
+    "Medio+": 2,
+    "Forte+": 3,
+    "Forte": 3,
+    "Fortissimo+ (0.5/0.75)": 4,
+    "Fortissimo+": 4,
+    "Raro (>=1)": 5,
+    "Raro": 5,
+}
+
 
 def _parse_js_args(chunk: str) -> list[str | float | int]:
     """Parser leggero per argomenti stile JS (stringhe, numeri)."""
@@ -252,14 +274,27 @@ def save_asian_odds(rows: list[dict]) -> Path:
         "matches": rows,
     }
     CACHE.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    global _CACHE_ROWS, _CACHE_MTIME
+    _CACHE_ROWS, _CACHE_MTIME = rows, CACHE.stat().st_mtime
     return CACHE
 
 
+_CACHE_ROWS: list[dict] | None = None
+_CACHE_MTIME: float | None = None
+
+
 def load_asian_odds() -> list[dict]:
+    global _CACHE_ROWS, _CACHE_MTIME
     if not CACHE.exists():
+        _CACHE_ROWS, _CACHE_MTIME = [], None
         return []
+    mtime = CACHE.stat().st_mtime
+    if _CACHE_ROWS is not None and _CACHE_MTIME == mtime:
+        return _CACHE_ROWS
     data = json.loads(CACHE.read_text(encoding="utf-8"))
-    return data.get("matches") or []
+    _CACHE_ROWS = data.get("matches") or []
+    _CACHE_MTIME = mtime
+    return _CACHE_ROWS
 
 
 def _norm_team(name: str) -> str:
@@ -296,13 +331,87 @@ def find_asian_odds(home: str, away: str, match_date: str | None = None) -> dict
     return best if best_score >= 60 else None
 
 
+_SIDE_1X2 = {"1": "casa", "X": "pareggio", "2": "trasferta"}
+_SIDE_ART = {"1": "sulla casa", "X": "sul pareggio", "2": "sulla trasferta"}
+
+
+def _fmt_odd(val: object) -> str:
+    if val is None:
+        return "—"
+    try:
+        return f"{float(val):.2f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _fmt_line(val: object) -> str:
+    if val is None:
+        return "—"
+    num = float(val)
+    if abs(num - round(num)) < 1e-9:
+        return str(int(round(num)))
+    text = f"{num:.2f}".rstrip("0").rstrip(".")
+    return text
+
+
+def _fmt_pp(val: float | None) -> str:
+    if val is None:
+        return "—"
+    return f"{val:+.1f} pp"
+
+
+def _quota_read(drop: float | None) -> str:
+    if drop is None:
+        return "n/d"
+    if drop >= 1.5:
+        return "accorciata (soldi sopra)"
+    if drop >= 0.4:
+        return "accorciata"
+    if drop <= -1.5:
+        return "allungata (soldi altrove)"
+    if drop <= -0.4:
+        return "allungata"
+    return "stabile"
+
+
+def _quota_phrase(label: str, open_odd: object, curr_odd: object, drop: float | None, *, min_pp: float = 0.35) -> str | None:
+    if open_odd is None or curr_odd is None or drop is None:
+        return None
+    moved = abs(float(curr_odd) - float(open_odd)) >= 0.015 or abs(float(drop)) >= min_pp
+    if not moved:
+        return None
+    if drop > 0.15:
+        verb = "accorciata"
+    elif drop < -0.15:
+        verb = "allungata"
+    else:
+        verb = "quasi ferma"
+    return f"{label} {verb} {_fmt_odd(open_odd)}->{_fmt_odd(curr_odd)} ({_fmt_pp(drop)})"
+
+
+def _odds_move_row(market: str, open_odd: object, curr_odd: object, drop: float | None) -> dict:
+    delta_odd = None
+    if open_odd is not None and curr_odd is not None:
+        delta_odd = round(float(curr_odd) - float(open_odd), 3)
+    return {
+        "market": market,
+        "open": open_odd,
+        "current": curr_odd,
+        "delta_odd": delta_odd,
+        "delta_pp": drop,
+        "read": _quota_read(drop),
+    }
+
+
 def summarize_moves(row: dict) -> dict:
-    """Steam apertura→corrente su 1X2, handicap asiatico e totale."""
+    """Steam apertura→corrente su 1X2, handicap asiatico e totale, con commento analitico."""
     d1 = _implied_pp(row.get("open_1"), row.get("odd_1"))
     dx = _implied_pp(row.get("open_x"), row.get("odd_x"))
     d2 = _implied_pp(row.get("open_2"), row.get("odd_2"))
     do = _implied_pp(row.get("open_over"), row.get("odd_over"))
     du = _implied_pp(row.get("open_under"), row.get("odd_under"))
+    dah_h = _implied_pp(row.get("ah_home_open"), row.get("ah_home_odd"))
+    dah_a = _implied_pp(row.get("ah_away_open"), row.get("ah_away_odd"))
 
     steam_1x2 = None
     ranked = sorted(
@@ -350,15 +459,50 @@ def summarize_moves(row: dict) -> dict:
     if (do or 0) >= 2.0 or (du or 0) >= 2.0:
         strength += 1
 
-    note_parts: list[str] = []
-    if steam_1x2:
-        note_parts.append(f"1X2 verso {steam_1x2}")
-    if steam_ah:
-        note_parts.append(f"AH verso {'casa' if steam_ah == 'home' else 'trasferta'} ({ah_open}->{ah_curr})")
-    if steam_ou:
-        note_parts.append(f"totale verso {steam_ou} ({tot_open}->{tot_curr})")
-
     spread = _spread_score(ah_delta, tot_delta, d1, dx, d2, do, du)
+    line_move = _line_move(ah_delta, tot_delta)
+    level = _movement_level(spread, ah_delta=ah_delta, tot_delta=tot_delta)
+    summary = _movement_summary(
+        row,
+        steam_1x2=steam_1x2,
+        steam_ah=steam_ah,
+        steam_ou=steam_ou,
+        d1=d1,
+        dx=dx,
+        d2=d2,
+        do=do,
+        du=du,
+        dah_h=dah_h,
+        dah_a=dah_a,
+    )
+    comment = _movement_comment(
+        row,
+        level=level,
+        steam_1x2=steam_1x2,
+        steam_ah=steam_ah,
+        steam_ou=steam_ou,
+        ah_delta=ah_delta,
+        tot_delta=tot_delta,
+        d1=d1,
+        dx=dx,
+        d2=d2,
+        do=do,
+        du=du,
+        dah_h=dah_h,
+        dah_a=dah_a,
+    )
+    tot_label = _fmt_line(tot_curr) if tot_curr is not None else "2.5"
+    ah_label = _fmt_line(ah_curr) if ah_curr is not None else ""
+    odds_moves = [
+        _odds_move_row("1", row.get("open_1"), row.get("odd_1"), d1),
+        _odds_move_row("X", row.get("open_x"), row.get("odd_x"), dx),
+        _odds_move_row("2", row.get("open_2"), row.get("odd_2"), d2),
+        _odds_move_row(f"Over {tot_label}", row.get("open_over"), row.get("odd_over"), do),
+        _odds_move_row(f"Under {tot_label}", row.get("open_under"), row.get("odd_under"), du),
+    ]
+    if row.get("ah_home_odd") or row.get("ah_home_open"):
+        odds_moves.append(_odds_move_row(f"AH casa {ah_label}", row.get("ah_home_open"), row.get("ah_home_odd"), dah_h))
+        odds_moves.append(_odds_move_row(f"AH trasferta {ah_label}", row.get("ah_away_open"), row.get("ah_away_odd"), dah_a))
 
     return {
         "drop_1": d1,
@@ -366,7 +510,10 @@ def summarize_moves(row: dict) -> dict:
         "drop_2": d2,
         "drop_over": do,
         "drop_under": du,
+        "drop_ah_home": dah_h,
+        "drop_ah_away": dah_a,
         "steam_1x2": steam_1x2,
+        "steam_1x2_label": _SIDE_1X2.get(steam_1x2 or "", steam_1x2),
         "steam_ah": steam_ah,
         "steam_ou": steam_ou,
         "ah_curr": ah_curr,
@@ -375,15 +522,47 @@ def summarize_moves(row: dict) -> dict:
         "total_curr": tot_curr,
         "total_open": tot_open,
         "total_delta": tot_delta,
+        "open_1": row.get("open_1"),
+        "odd_1": row.get("odd_1"),
+        "open_x": row.get("open_x"),
+        "odd_x": row.get("odd_x"),
+        "open_2": row.get("open_2"),
+        "odd_2": row.get("odd_2"),
+        "open_over": row.get("open_over"),
+        "odd_over": row.get("odd_over"),
+        "open_under": row.get("open_under"),
+        "odd_under": row.get("odd_under"),
         "strength": strength,
         "spread_score": spread,
-        "movement_level": _movement_level(spread),
-        "movement_summary": _movement_summary(ah_open, ah_curr, tot_open, tot_curr, steam_1x2, steam_ou),
-        "note": "; ".join(note_parts) if note_parts else "mercato stabile",
+        "line_move": line_move,
+        "movement_level": level,
+        "movement_summary": summary,
+        "movement_comment": comment,
+        "odds_moves": odds_moves,
+        "note": comment,
     }
 
 
-def _movement_level(spread_score: float) -> str:
+def _line_move(ah_delta: float | None, tot_delta: float | None) -> float:
+    parts: list[float] = []
+    if ah_delta is not None:
+        parts.append(abs(float(ah_delta)))
+    if tot_delta is not None:
+        parts.append(abs(float(tot_delta)))
+    return round(max(parts), 3) if parts else 0.0
+
+
+def _movement_level(
+    spread_score: float,
+    ah_delta: float | None = None,
+    tot_delta: float | None = None,
+) -> str:
+    """Livelli su linea AH/totale: Fortissimo = 0.5/0.75, Raro = >=1."""
+    line = _line_move(ah_delta, tot_delta)
+    if line >= 1.0:
+        return "Raro"
+    if line >= 0.5:
+        return "Fortissimo"
     if spread_score < 1:
         return "Stabile"
     if spread_score < 4:
@@ -394,23 +573,171 @@ def _movement_level(spread_score: float) -> str:
 
 
 def _movement_summary(
-    ah_open: object,
-    ah_curr: object,
-    tot_open: object,
-    tot_curr: object,
+    row: dict,
+    *,
     steam_1x2: str | None,
+    steam_ah: str | None,
     steam_ou: str | None,
+    d1: float | None,
+    dx: float | None,
+    d2: float | None,
+    do: float | None,
+    du: float | None,
+    dah_h: float | None,
+    dah_a: float | None,
 ) -> str:
+    """Riassunto compatto con quote e punti percentuali, per tabelle."""
     parts: list[str] = []
-    if ah_open is not None and ah_curr is not None and float(ah_open) != float(ah_curr):
-        parts.append(f"AH {ah_open}->{ah_curr}")
-    elif steam_1x2:
-        parts.append(f"1X2 verso {steam_1x2}")
-    if tot_open is not None and tot_curr is not None and float(tot_open) != float(tot_curr):
-        parts.append(f"Tot {tot_open}->{tot_curr}")
-    elif steam_ou:
-        parts.append(f"O/U verso {steam_ou}")
+    side_map = {
+        "1": (row.get("open_1"), row.get("odd_1"), d1),
+        "X": (row.get("open_x"), row.get("odd_x"), dx),
+        "2": (row.get("open_2"), row.get("odd_2"), d2),
+    }
+    if steam_1x2 and steam_1x2 in side_map:
+        open_o, curr_o, drop = side_map[steam_1x2]
+        parts.append(
+            f"1X2 verso {_SIDE_1X2[steam_1x2]} {_fmt_odd(open_o)}->{_fmt_odd(curr_o)} ({_fmt_pp(drop)})"
+        )
+    else:
+        for code, (open_o, curr_o, drop) in side_map.items():
+            phrase = _quota_phrase(code, open_o, curr_o, drop, min_pp=0.8)
+            if phrase:
+                parts.append(phrase)
+
+    ah_open, ah_curr = row.get("ah_open"), row.get("ah_curr")
+    if ah_open is not None and ah_curr is not None and abs(float(ah_curr) - float(ah_open)) >= 0.01:
+        dest = "casa" if steam_ah == "home" else "trasferta" if steam_ah == "away" else "linea"
+        parts.append(f"AH {_fmt_line(ah_open)}->{_fmt_line(ah_curr)} (verso {dest})")
+    else:
+        ah_p = _quota_phrase("AH casa", row.get("ah_home_open"), row.get("ah_home_odd"), dah_h, min_pp=0.8)
+        if ah_p:
+            parts.append(ah_p)
+
+    tot_open, tot_curr = row.get("total_open"), row.get("total_line")
+    if tot_open is not None and tot_curr is not None and abs(float(tot_curr) - float(tot_open)) >= 0.01:
+        dest = steam_ou or "linea"
+        parts.append(f"Tot {_fmt_line(tot_open)}->{_fmt_line(tot_curr)} (verso {dest})")
+    elif steam_ou == "over":
+        phrase = _quota_phrase("Over", row.get("open_over"), row.get("odd_over"), do, min_pp=0.5)
+        parts.append(phrase or "O/U verso over")
+    elif steam_ou == "under":
+        phrase = _quota_phrase("Under", row.get("open_under"), row.get("odd_under"), du, min_pp=0.5)
+        parts.append(phrase or "O/U verso under")
     return " · ".join(parts) if parts else "Quasi nessun movimento"
+
+
+def _movement_comment(
+    row: dict,
+    *,
+    level: str,
+    steam_1x2: str | None,
+    steam_ah: str | None,
+    steam_ou: str | None,
+    ah_delta: float | None,
+    tot_delta: float | None,
+    d1: float | None,
+    dx: float | None,
+    d2: float | None,
+    do: float | None,
+    du: float | None,
+    dah_h: float | None,
+    dah_a: float | None,
+) -> str:
+    """Commento esteso per analizzare flusso di denaro e variazioni di quota."""
+    line = _line_move(ah_delta, tot_delta)
+    if level == "Stabile":
+        lead = "Mercato sostanzialmente fermo dall'apertura."
+    elif level == "Raro":
+        lead = f"Movimento raro dall'apertura: linea AH/totale spostata di {line:g} gol (>=1)."
+    elif level == "Fortissimo":
+        lead = f"Movimento fortissimo dall'apertura: linea AH/totale spostata di {line:g} (0.5/0.75)."
+    else:
+        lead = f"Movimento {level.lower()} dall'apertura."
+
+    sentences: list[str] = [lead]
+    one_x_two = [
+        p
+        for p in (
+            _quota_phrase("1", row.get("open_1"), row.get("odd_1"), d1),
+            _quota_phrase("X", row.get("open_x"), row.get("odd_x"), dx),
+            _quota_phrase("2", row.get("open_2"), row.get("odd_2"), d2),
+        )
+        if p
+    ]
+    if steam_1x2:
+        sentences.append(
+            f"1X2: soldi {_SIDE_ART[steam_1x2]}. " + "; ".join(one_x_two) + "."
+            if one_x_two
+            else f"1X2: flusso verso {_SIDE_1X2[steam_1x2]}."
+        )
+    elif one_x_two:
+        sentences.append("1X2: " + "; ".join(one_x_two) + ".")
+    elif row.get("odd_1") and row.get("open_1"):
+        sentences.append(
+            "1X2: quote 1/X/2 quasi invariate "
+            f"({_fmt_odd(row.get('open_1'))}/{_fmt_odd(row.get('open_x'))}/{_fmt_odd(row.get('open_2'))} "
+            f"-> {_fmt_odd(row.get('odd_1'))}/{_fmt_odd(row.get('odd_x'))}/{_fmt_odd(row.get('odd_2'))})."
+        )
+
+    ah_open, ah_curr = row.get("ah_open"), row.get("ah_curr")
+    if ah_open is not None and ah_curr is not None:
+        if steam_ah == "home":
+            meaning = "linea più a favore della casa (soldi sulla 1)"
+        elif steam_ah == "away":
+            meaning = "linea più a favore della trasferta (soldi sulla 2)"
+        else:
+            meaning = "linea invariata"
+        ah_bits = [f"AH {_fmt_line(ah_open)}->{_fmt_line(ah_curr)}: {meaning}"]
+        ah_odds = [
+            p
+            for p in (
+                _quota_phrase("quota AH casa", row.get("ah_home_open"), row.get("ah_home_odd"), dah_h),
+                _quota_phrase("quota AH trasferta", row.get("ah_away_open"), row.get("ah_away_odd"), dah_a),
+            )
+            if p
+        ]
+        if ah_odds:
+            extra = "; ".join(ah_odds)
+            if steam_ah is None:
+                if (dah_h or 0) - (dah_a or 0) >= 0.8:
+                    extra += " -> soldi sul lato casa a linea ferma"
+                elif (dah_a or 0) - (dah_h or 0) >= 0.8:
+                    extra += " -> soldi sul lato trasferta a linea ferma"
+            ah_bits.append(extra)
+        sentences.append(". ".join(ah_bits) + ".")
+
+    tot_open, tot_curr = row.get("total_open"), row.get("total_line")
+    ou_odds = [
+        p
+        for p in (
+            _quota_phrase("Over", row.get("open_over"), row.get("odd_over"), do),
+            _quota_phrase("Under", row.get("open_under"), row.get("odd_under"), du),
+        )
+        if p
+    ]
+    if tot_open is not None and tot_curr is not None:
+        if tot_delta and tot_delta > 0 and (du or 0) > (do or 0) + 0.8:
+            meaning = "linea alzata, ma sulla nuova linea le quote restano sull'under (transizione)"
+        elif tot_delta and tot_delta < 0 and (do or 0) > (du or 0) + 0.8:
+            meaning = "linea abbassata, ma sulla nuova linea le quote restano sull'over (transizione)"
+        elif steam_ou == "over" and tot_delta and tot_delta > 0:
+            meaning = "linea alzata, denaro sull'over"
+        elif steam_ou == "under" and tot_delta and tot_delta < 0:
+            meaning = "linea abbassata, denaro sull'under"
+        elif steam_ou == "over":
+            meaning = "linea ferma ma soldi sull'over (quota accorciata)"
+        elif steam_ou == "under":
+            meaning = "linea ferma ma soldi sull'under (quota accorciata)"
+        else:
+            meaning = "linea e quote O/U poco mosse"
+        tot_txt = f"Totale {_fmt_line(tot_open)}->{_fmt_line(tot_curr)}: {meaning}"
+        if ou_odds:
+            tot_txt += " | " + "; ".join(ou_odds)
+        sentences.append(tot_txt + ".")
+    elif ou_odds:
+        sentences.append("O/U: " + "; ".join(ou_odds) + ".")
+
+    return " ".join(sentences)
 
 
 def _spread_score(

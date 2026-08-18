@@ -158,6 +158,16 @@ class DatasetLoader:
             "odd_home": "mean",
             "odd_draw": "mean",
             "odd_away": "mean",
+            "odd_over_25": "mean",
+            "odd_under_25": "mean",
+            "odd_home_close": "mean",
+            "odd_draw_close": "mean",
+            "odd_away_close": "mean",
+            "odd_over_25_close": "mean",
+            "odd_under_25_close": "mean",
+            "odd_home_sharp": "mean",
+            "odd_draw_sharp": "mean",
+            "odd_away_sharp": "mean",
         }
         merged = (
             combined.groupby(["date", "home_team", "away_team"], as_index=False)

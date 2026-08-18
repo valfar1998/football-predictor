@@ -10,14 +10,23 @@ CAL_PATH = ROOT / "data" / "models" / "calibration.json"
 
 DEFAULTS = {
     "temperature": 1.0,
-    "min_ev_play": 0.04,
+    "min_ev_play": 0.025,
     "min_ev_strong_value": 0.06,
     "min_prob_1x2_value": 0.35,
     "min_bin_samples": 30,
     "low_sample_max_score": 6,
+    "kelly_fraction": 0.25,
+    "kelly_cap": 0.02,
+    "liquid_against_rank": 3,
+    "liquid_against_pp": 2.0,
     "reliability_1x2": [],
     "reliability_ou25": [],
     "backtest_summary": {},
+    "by_league": [],
+    "by_market": [],
+    "by_code": [],
+    "by_fold": [],
+    "bankroll_path": [],
 }
 
 

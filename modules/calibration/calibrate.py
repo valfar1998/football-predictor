@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.metrics import brier_score_loss, log_loss
+from sklearn.metrics import log_loss
 
-from modules.calibration.config import save_calibration
-from modules.feature_engineering import FeatureEngineer
-from modules.model_training import ModelTrainer
+from modules.calibration.metrics import brier_multiclass, expected_calibration_error, probability_metrics
+from modules.model_training import ModelTrainer, load_oof
 
 ROOT = Path(__file__).resolve().parents[2]
 MODELS = ROOT / "data" / "models"
@@ -78,48 +76,67 @@ def _reliability_bins(probs: np.ndarray, hits: np.ndarray, n_bins: int = 10) -> 
 
 
 def calibrate_from_features(feat: pd.DataFrame | None = None) -> dict:
-    import joblib as jl
-
     if feat is None:
         feat = pd.read_csv(ROOT / "data" / "processed" / "features.csv", parse_dates=["date"])
 
-    bundle = jl.load(MODELS / "best_model.joblib")
-    model = bundle["model"]
-    encoder = bundle["encoder"]
-    cols = bundle["feature_cols"]
+    oof = load_oof()
+    if oof is not None:
+        proba_raw = np.asarray(oof["proba"], dtype=float)
+        y_test = np.asarray(oof["y"], dtype=int)
+        valid = np.isfinite(proba_raw).all(axis=1)
+        proba_test = proba_raw[valid]
+        y_test = y_test[valid]
+        split_kind = "rolling_oof"
+    else:
+        bundle = joblib.load(MODELS / "best_model.joblib")
+        model = bundle["model"]
+        cols = bundle["feature_cols"]
+        trainer = ModelTrainer()
+        _x_train, x_test, _y_train, y_test, _ = trainer.split(feat)
+        proba_test = model.predict_proba(x_test)
+        split_kind = "holdout_last20"
 
-    trainer = ModelTrainer()
-    x_train, x_test, y_train, y_test, _ = trainer.split(feat)
-
-    proba_test = model.predict_proba(x_test)
     temperature = fit_temperature(proba_test, y_test)
     cal_proba = apply_temperature(proba_test, temperature)
 
-    # Brier per classe favorita
     fav_idx = proba_test.argmax(axis=1)
     fav_p_raw = proba_test[np.arange(len(proba_test)), fav_idx]
     fav_p_cal = cal_proba[np.arange(len(cal_proba)), fav_idx]
     fav_hit = (fav_idx == y_test).astype(float)
 
+    from sklearn.metrics import brier_score_loss
+
     brier_raw = float(brier_score_loss(fav_hit, fav_p_raw))
     brier_cal = float(brier_score_loss(fav_hit, fav_p_cal))
+    raw_metrics = probability_metrics(y_test, proba_test)
+    cal_metrics = probability_metrics(y_test, cal_proba)
+    ece_raw = expected_calibration_error(proba_test, y_test)
+    ece_cal = expected_calibration_error(cal_proba, y_test)
 
-    # Bin per ogni esito 1X2 (probabilità della classe effettiva)
     hit_h = (y_test == 0).astype(float)
     hit_d = (y_test == 1).astype(float)
     hit_a = (y_test == 2).astype(float)
     rel_1x2 = _reliability_bins(cal_proba.max(axis=1), fav_hit)
 
-    calibrator = {"temperature": temperature, "labels": list(encoder.classes_)}
+    calibrator = {"temperature": temperature, "labels": ["H", "D", "A"]}
     joblib.dump(calibrator, MODELS / "calibrator.joblib")
 
     payload = {
         "fitted_at": datetime.now(timezone.utc).isoformat(),
+        "split": split_kind,
         "temperature": temperature,
         "reliability_1x2": rel_1x2,
         "reliability_ou25": [],
         "brier_favorite_raw": round(brier_raw, 4),
         "brier_favorite_calibrated": round(brier_cal, 4),
+        "brier_multiclass_raw": round(brier_multiclass(y_test, proba_test), 4),
+        "brier_multiclass_calibrated": round(brier_multiclass(y_test, cal_proba), 4),
+        "log_loss_raw": raw_metrics.get("log_loss"),
+        "log_loss_calibrated": cal_metrics.get("log_loss"),
+        "ece_raw": ece_raw.get("ece"),
+        "ece_calibrated": ece_cal.get("ece"),
+        "calibration_gap_raw": ece_raw.get("calibration_gap"),
+        "calibration_gap_calibrated": ece_cal.get("calibration_gap"),
         "n_test": int(len(y_test)),
         "class_rates": {
             "H": round(float(hit_h.mean()), 4),

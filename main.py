@@ -20,6 +20,7 @@ from modules.model_training import ModelTrainer
 from modules.montecarlo import MonteCarloSimulator
 from modules.calibration import run_full_calibration
 from modules.predictor import MatchPredictor
+from modules.tipsters import fetch_tipsters
 
 OUT_DIR = ROOT / "data" / "processed"
 
@@ -57,13 +58,25 @@ def refresh_odds_pipeline(*, asian: bool = True) -> dict:
         rows = fetch_asian_odds(days=7, book="bet365")
         path = save_asian_odds(rows)
         asian_info = {"n_asian": len(rows), "asian_cache": str(path)}
+    tips_info: dict = {}
+    try:
+        tips = fetch_tipsters()
+        tips_info = {"n_tipsters": tips.get("n"), "tipster_counts": tips.get("counts"), "tipster_errors": tips.get("errors")}
+    except Exception as exc:
+        tips_info = {"tipster_error": str(exc)}
     upcoming = build_upcoming()
-    return {"n_upcoming": len(upcoming), "source": "football-data.co.uk + asianbetsoccer", **asian_info}
+    return {"n_upcoming": len(upcoming), "source": "football-data.co.uk + asianbetsoccer", **asian_info, **tips_info}
 
 
 def asian_odds_pipeline(*, days: int = 7, book: str = "bet365") -> dict:
     rows = fetch_asian_odds(days=days, book=book)
     path = save_asian_odds(rows)
+    tips_info: dict = {}
+    try:
+        tips = fetch_tipsters()
+        tips_info = {"n_tipsters": tips.get("n"), "tipster_counts": tips.get("counts")}
+    except Exception as exc:
+        tips_info = {"tipster_error": str(exc)}
     upcoming = build_upcoming()
     return {
         "n_asian": len(rows),
@@ -71,7 +84,14 @@ def asian_odds_pipeline(*, days: int = 7, book: str = "bet365") -> dict:
         "n_upcoming": len(upcoming),
         "book": book,
         "days": days,
+        **tips_info,
     }
+
+
+def tipsters_pipeline() -> dict:
+    info = fetch_tipsters()
+    upcoming = build_upcoming()
+    return {k: v for k, v in info.items() if k != "matches"} | {"n_upcoming": len(upcoming)}
 
 
 def train_pipeline() -> dict:
@@ -101,6 +121,9 @@ def train_pipeline() -> dict:
                 "min_ev_play",
                 "brier_favorite_raw",
                 "brier_favorite_calibrated",
+                "brier_multiclass_calibrated",
+                "log_loss_calibrated",
+                "ece_calibrated",
                 "path",
                 "calibration_error",
             )
@@ -190,6 +213,7 @@ def main() -> None:
     parser.add_argument("--odds-update", action="store_true", help="aggiorna fixtures/quote (incluso AsianBetSoccer) e pronostici")
     parser.add_argument("--calibrate", action="store_true", help="calibra probabilità e taratura EV su storico")
     parser.add_argument("--asian-odds", action="store_true", help="scarica quote AsianBetSoccer e ricalcola calendario")
+    parser.add_argument("--tipsters", action="store_true", help="scarica pronostici Forebet/PredictZ/Vitibet e ricalcola calendario")
     parser.add_argument("--predict", nargs=2, metavar=("HOME", "AWAY"), help="es. --predict Inter Milan")
     parser.add_argument("--odds", nargs=3, type=float, metavar=("ODD_1", "ODD_X", "ODD_2"), help="quote decimali 1 X 2")
     parser.add_argument("--advise", action="store_true", help="consiglio 1X2 sulla ultima predizione (o su --predict)")
@@ -213,11 +237,15 @@ def main() -> None:
         else:
             ensure_raw_sample()
         info = run_full_calibration()
-        print(json.dumps({k: v for k, v in info.items() if k != "reliability_1x2" and k != "reliability_ou25"}, indent=2, default=str))
+        print(json.dumps({k: v for k, v in info.items() if k not in {"reliability_1x2", "reliability_ou25", "bankroll_path", "by_league"}}, indent=2, default=str))
         return
 
     if args.asian_odds:
         print(json.dumps(asian_odds_pipeline(), indent=2))
+        return
+
+    if args.tipsters:
+        print(json.dumps(tipsters_pipeline(), indent=2, default=str))
         return
 
     if args.odds_update:

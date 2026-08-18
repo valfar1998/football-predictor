@@ -67,7 +67,7 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
                 if v is not None:
                     odds[k] = v
             odds_source = "asianbetsoccer"
-            market_move = asian.get("market_move") or summarize_moves(asian)
+            market_move = summarize_moves(asian)
         prediction = {
             "match": f"{pred['home_team']} vs {pred['away_team']}",
             "model_probabilities": {
@@ -77,15 +77,19 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
             },
             "expected_goals": {"home": pred["lambda_home"], "away": pred["lambda_away"]},
             "montecarlo": mc,
+            "league": str(fx.get("league") or ""),
         }
-        advice = advise(prediction, odds, market_move=market_move, odds_from_asian=(odds_source == "asianbetsoccer"))
+        advice = advise(
+            prediction,
+            odds,
+            market_move=market_move,
+            odds_from_asian=(odds_source == "asianbetsoccer"),
+            league=str(fx.get("league") or "") or None,
+        )
         play = advice["play"]
         alt = advice.get("play_alt")
         pick_quota = play.get("odds")
         pick_fair = play.get("fair_odds")
-        value_edge = None
-        if pick_quota and pick_fair and pick_fair > 1.01:
-            value_edge = round(float(pick_quota) / float(pick_fair) - 1.0, 4)
         spread_score = None
         ah_line = None
         if market_move:
@@ -100,7 +104,14 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
                 "probability": m["probability"],
                 "odds": m["odds"],
                 "fair_odds": m["fair_odds"],
-                "ev": m["ev"],
+                "ev": m.get("ev_cons") if m.get("ev_cons") is not None else m.get("ev"),
+                "ev_cons": m.get("ev_cons"),
+                "ev_sharp": m.get("ev_sharp"),
+                "edge_pp": m.get("edge_pp"),
+                "p_cons": m.get("p_cons"),
+                "p_market": m.get("p_market"),
+                "odds_real": m.get("odds_real"),
+                "value_note": m.get("value_note"),
                 "score_prob": m["score_prob"],
                 "score_value": m["score_value"],
                 "score": m.get("score"),
@@ -125,23 +136,37 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
                 "odds": odds,
                 "market_move": market_move,
                 "market_align": None if not advice.get("market_align") else advice["market_align"].get("label"),
-                "market_note": None if not market_move else market_move.get("movement_summary") or market_move.get("note"),
+                "market_note": None if not market_move else market_move.get("movement_comment") or market_move.get("movement_summary"),
                 "movement_level": None if not market_move else market_move.get("movement_level"),
                 "movement_summary": None if not market_move else market_move.get("movement_summary"),
+                "movement_comment": None if not market_move else market_move.get("movement_comment"),
                 "steam_1x2": None if not market_move else market_move.get("steam_1x2"),
                 "steam_ah": None if not market_move else market_move.get("steam_ah"),
                 "steam_ou": None if not market_move else market_move.get("steam_ou"),
                 "drop_1": None if not market_move else market_move.get("drop_1"),
                 "drop_x": None if not market_move else market_move.get("drop_x"),
                 "drop_2": None if not market_move else market_move.get("drop_2"),
+                "drop_over": None if not market_move else market_move.get("drop_over"),
+                "drop_under": None if not market_move else market_move.get("drop_under"),
                 "spread_score": spread_score,
+                "line_move": None if not market_move else market_move.get("line_move"),
                 "ah_line": ah_line,
-                "value_edge": value_edge,
+                "value_edge": play.get("edge_pp"),
+                "edge_pp": play.get("edge_pp"),
+                "p_cons": play.get("p_cons"),
+                "p_market": play.get("p_market"),
+                "ev_cons": play.get("ev_cons"),
+                "ev_sharp": play.get("ev_sharp"),
+                "odds_real": play.get("odds_real"),
+                "value_note": play.get("value_note"),
                 "pick": play["code"],
                 "pick_name": play["name"],
                 "pick_group": play.get("group"),
+                "action": play.get("action") or "gioca",
+                "no_bet_reasons": play.get("no_bet_reasons") or [],
                 "score": play["score"],
                 "kelly_quarter": play.get("kelly_quarter"),
+                "clv": play.get("clv"),
                 "quota_pick": pick_quota,
                 "score_reason_1": advice.get("score_reason_1"),
                 "score_reason_2": advice.get("score_reason_2"),
@@ -149,6 +174,11 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
                 "probability": play["probability"],
                 "ev": play["ev"],
                 "fair_odds": play["fair_odds"],
+                "tipster_consensus": None if not (play.get("tipster") or {}).get("consensus") else play["tipster"]["consensus"],
+                "tipster_label": None if not play.get("tipster") else play["tipster"].get("label"),
+                "tipster_agree": None if not play.get("tipster") else play["tipster"].get("agree"),
+                "tipster_n": None if not play.get("tipster") else play["tipster"].get("n_sources"),
+                "tipster": play.get("tipster"),
                 "alt_pick": None if not alt else alt["code"],
                 "alt_name": None if not alt else alt["name"],
                 "alt_score": None if not alt else alt["score"],
