@@ -1,0 +1,47 @@
+# Il 1° di ogni mese (~ogni 30 giorni). GitHub spegne gli schedule dopo 60 giorni
+# senza push / issue / PR; un Run workflow non basta.
+name: Promemoria attività repo
+
+on:
+  schedule:
+    - cron: "0 16 1 * *"
+  workflow_dispatch:
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Avviso Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.parse, urllib.request
+          token = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat = os.environ["TELEGRAM_CHAT_ID"]
+          text = (
+              "Football Predictor — promemoria (ogni ~30 giorni)\n\n"
+              "Tocca il repo su GitHub, altrimenti tra 60 giorni senza attività "
+              "GitHub disattiva gli schedule (train delle 7 e avvisi ogni 30 min). "
+              "Non è un ban del repo.\n\n"
+              "Basta una di queste cose:\n"
+              "• un commit / push\n"
+              "• aprire o commentare una issue\n"
+              "• una pull request\n\n"
+              "Non basta solo Run workflow.\n"
+              "https://github.com/valfar1998/football-predictor"
+          )
+          data = urllib.parse.urlencode(
+              {"chat_id": chat, "text": text, "disable_web_page_preview": "true"}
+          ).encode()
+          req = urllib.request.Request(
+              f"https://api.telegram.org/bot{token}/sendMessage", data=data
+          )
+          with urllib.request.urlopen(req, timeout=20) as resp:
+              body = json.loads(resp.read().decode("utf-8"))
+          if not body.get("ok"):
+              raise SystemExit(body)
+          print("promemoria inviato")
+          PY

@@ -49,6 +49,17 @@ def main() -> None:
 
             download_fixtures()
             download_season_zip(SEASON_ZIPS[-1])
+            try:
+                from modules.data_update.cups import download_org_cups
+
+                cups = download_org_cups()
+                info["cups_token"] = bool(cups.get("token"))
+                info["n_cup_files"] = cups.get("n_cup_files")
+                if cups.get("error"):
+                    info["cups_error"] = cups["error"]
+            except Exception as exc:
+                print(f"skip coppe: {exc}")
+                info["cups_error"] = str(exc)
             upcoming = build_upcoming(n_sims=400)
             info["n_upcoming"] = len(upcoming)
         except Exception as exc:
