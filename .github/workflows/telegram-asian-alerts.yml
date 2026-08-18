@@ -1,0 +1,35 @@
+name: Telegram Asian alerts
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: data/processed/telegram_alerts_sent.json
+          key: telegram-alerts-sent-v1
+
+      - name: Scarica Asian e avvisa Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONUTF8: "1"
+        run: python scripts/notify_cloud.py
+
+      - uses: actions/cache/save@v4
+        if: always() && hashFiles('data/processed/telegram_alerts_sent.json') != ''
+        with:
+          path: data/processed/telegram_alerts_sent.json
+          key: telegram-alerts-sent-v1
