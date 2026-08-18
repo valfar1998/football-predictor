@@ -70,10 +70,17 @@ def refresh_odds_pipeline(*, asian: bool = True) -> dict:
     try:
         from modules.data_update.cups import download_org_cups
 
-        cups_info = download_org_cups()
+        cups_info = download_org_cups(days=14)
     except Exception as exc:
         cups_info = {"n_cup_files": 0, "error": str(exc)}
         print(f"skip coppe org: {exc}")
+    try:
+        from modules.data_update.world_fixtures import download_world_fixtures
+
+        world_info = download_world_fixtures(days=14)
+    except Exception as exc:
+        world_info = {"n_world_fixtures": 0, "error": str(exc)}
+        print(f"skip calendario mondiale: {exc}")
     try:
         from modules.data_update.thesportsdb import download_cup_fixtures
 
@@ -84,7 +91,7 @@ def refresh_odds_pipeline(*, asian: bool = True) -> dict:
     try:
         from modules.data_update.api_football import download_cup_fixtures as download_api_football_cups
 
-        apif_info = download_api_football_cups()
+        apif_info = download_api_football_cups(days=14)
     except Exception as exc:
         apif_info = {"n_cup_files": 0, "error": str(exc)}
         print(f"skip coppe API-Football: {exc}")
@@ -102,6 +109,13 @@ def refresh_odds_pipeline(*, asian: bool = True) -> dict:
     except Exception as exc:
         understat_info = {"ok": False, "n_teams": 0, "error": str(exc)}
         print(f"skip Understat context: {exc}")
+    try:
+        from modules.data_update.statsbomb_context import download_statsbomb_context
+
+        statsbomb_info = download_statsbomb_context()
+    except Exception as exc:
+        statsbomb_info = {"ok": False, "n_teams": 0, "error": str(exc)}
+        print(f"skip StatsBomb context: {exc}")
     tips_info: dict = {}
     try:
         tips = fetch_tipsters()
@@ -111,15 +125,45 @@ def refresh_odds_pipeline(*, asian: bool = True) -> dict:
     upcoming = build_upcoming()
     return {
         "n_upcoming": len(upcoming),
-        "source": "football-data.co.uk + football-data.org + thesportsdb + asianbetsoccer",
+        "source": "football-data.co.uk + football-data.org + thesportsdb + world + asianbetsoccer",
         **asian_info,
         **tips_info,
         **{f"cups_{k}": v for k, v in cups_info.items()},
         **{f"tsdb_{k}": v for k, v in tsdb_info.items()},
         **{f"apif_{k}": v for k, v in apif_info.items()},
+        **{f"world_{k}": v for k, v in world_info.items()},
         **{f"fbref_{k}": v for k, v in fbref_info.items()},
         **{f"understat_{k}": v for k, v in understat_info.items()},
+        **{f"statsbomb_{k}": v for k, v in statsbomb_info.items()},
     }
+
+
+def notify_refresh_pipeline(*, days: int = 4, book: str = "bet365") -> dict:
+    """Refresh leggero per gli avvisi Telegram: solo Asian + calendario. Non sveglia il PC."""
+    import time
+
+    lock = OUT_DIR / "notify_refresh.lock"
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    if lock.exists() and time.time() - lock.stat().st_mtime < 40 * 60:
+        print("notify-refresh skip: già in corso")
+        return {"skipped": True, "reason": "già in corso"}
+    lock.write_text(str(time.time()), encoding="utf-8")
+    try:
+        rows = fetch_asian_odds(days=days, book=book)
+        asian_info: dict = {"n_asian": len(rows)}
+        if rows:
+            path = save_asian_odds(rows)
+            asian_info["asian_cache"] = str(path)
+        else:
+            print("asian vuoto: tengo la cache precedente")
+            asian_info["kept_previous_cache"] = True
+        upcoming = build_upcoming()
+        return {"n_upcoming": len(upcoming), "days": days, "book": book, **asian_info}
+    finally:
+        try:
+            lock.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def asian_odds_pipeline(*, days: int = 14, book: str = "bet365") -> dict:
@@ -150,7 +194,7 @@ def asian_odds_pipeline(*, days: int = 14, book: str = "bet365") -> dict:
     try:
         from modules.data_update.api_football import download_cup_fixtures as download_api_football_cups
 
-        apif_info = download_api_football_cups()
+        apif_info = download_api_football_cups(days=14)
     except Exception as exc:
         apif_info = {"error": str(exc)}
     fbref_info: dict = {}
@@ -323,10 +367,44 @@ def main() -> None:
     parser.add_argument("--advise", action="store_true", help="consiglio 1X2 sulla ultima predizione (o su --predict)")
     parser.add_argument("--ui", action="store_true", help="apre l'interfaccia Streamlit")
     parser.add_argument("--sims", type=int, default=10_000)
+    parser.add_argument(
+        "--notify",
+        action="store_true",
+        help="invia su Telegram (stesso bot offerte) voto ≥9 e spread Asian Raro ≥1",
+    )
+    parser.add_argument("--notify-test", action="store_true", help="ping di prova sul bot Telegram")
+    parser.add_argument("--notify-dry", action="store_true", help="stampa gli avvisi senza inviarli")
+    parser.add_argument(
+        "--notify-refresh",
+        action="store_true",
+        help="ogni ~30 min: scarica AsianBetSoccer (4 giorni) e ricalcola calendario/avvisi",
+    )
     args = parser.parse_args()
 
     if args.ui:
         raise SystemExit(_launch_ui())
+
+    if args.notify_test:
+        from modules.notify import ping_bot
+        from modules.notify.telegram import telegram_status
+
+        print(telegram_status())
+        ok = ping_bot()
+        print("ping inviato" if ok else "ping non inviato")
+        return
+
+    if args.notify_refresh:
+        info = notify_refresh_pipeline()
+        print(json.dumps(info, indent=2, default=str))
+        return
+
+    if args.notify or args.notify_dry:
+        from modules.notify import dispatch_alerts
+
+        info = dispatch_alerts(dry_run=args.notify_dry)
+        print(json.dumps({k: v for k, v in info.items() if k != "status"}, indent=2))
+        print(info.get("status"))
+        return
 
     if args.update:
         info = update_pipeline(retrain=True)
