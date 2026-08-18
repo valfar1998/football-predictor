@@ -28,6 +28,15 @@ def _norm(name: str) -> str:
     return _norm_key(name or "")
 
 
+def _reserve_mismatch(query: str, hit: str) -> bool:
+    def flag(k: str) -> bool:
+        t = f" {k} "
+        return any(s in t for s in (" ii ", " iii ", " u21 ", " u19 ", " u23 ", " reserves ", " amateur "))
+
+    q, h = _norm(query), _norm(hit)
+    return flag(q) != flag(h)
+
+
 def download_understat_context(*, seasons: list[int] | None = None) -> dict[str, Any]:
     seasons = seasons or [date.today().year - 1, date.today().year]
     try:
@@ -116,5 +125,7 @@ def lookup_understat_team(name: str, idx: dict[str, dict[str, Any]] | None = Non
         return idx[k]
     hit = difflib.get_close_matches(k, list(idx.keys()), n=1, cutoff=0.88)
     if hit:
-        return idx[hit[0]]
+        row = idx[hit[0]]
+        if row and not _reserve_mismatch(name, hit[0]):
+            return row
     return None

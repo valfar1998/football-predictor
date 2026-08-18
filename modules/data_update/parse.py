@@ -277,6 +277,14 @@ def load_fixtures() -> pd.DataFrame:
             frames.append(cups)
     except Exception as exc:
         print(f"skip coppe in calendario: {exc}")
+    try:
+        from modules.data_update.world_fixtures import load_world_fixtures
+
+        world = load_world_fixtures()
+        if not world.empty:
+            frames.append(world)
+    except Exception as exc:
+        print(f"skip calendario mondiale: {exc}")
     frames = [f for f in frames if f is not None and not f.empty]
     if not frames:
         return pd.DataFrame()

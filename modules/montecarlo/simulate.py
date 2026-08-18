@@ -38,9 +38,10 @@ class MonteCarloSimulator:
         draw = hg == ag
         away_w = hg < ag
 
-        p_h = float(home_w.mean())
-        p_d = float(draw.mean())
-        p_a = float(away_w.mean())
+        p_h_raw = float(home_w.mean())
+        p_d_raw = float(draw.mean())
+        p_a_raw = float(away_w.mean())
+        p_h, p_d, p_a = p_h_raw, p_d_raw, p_a_raw
         if model_probs:
             p_h = (1 - blend) * p_h + blend * model_probs.get("home_win", p_h)
             p_d = (1 - blend) * p_d + blend * model_probs.get("draw", p_d)
@@ -119,6 +120,16 @@ class MonteCarloSimulator:
             "avg_home_goals": round(float(hg.mean()), 3),
             "avg_away_goals": round(float(ag.mean()), 3),
             "avg_total_goals": round(float(tot.mean()), 3),
+            "mc_raw": {
+                "home_win": round(p_h_raw, 4),
+                "draw": round(p_d_raw, 4),
+                "away_win": round(p_a_raw, 4),
+            },
+            "mc_std": {
+                "home_win": round(float(np.sqrt(p_h_raw * (1.0 - p_h_raw) / n)), 4),
+                "draw": round(float(np.sqrt(p_d_raw * (1.0 - p_d_raw) / n)), 4),
+                "away_win": round(float(np.sqrt(p_a_raw * (1.0 - p_a_raw) / n)), 4),
+            },
             **{k: round(v, 4) for k, v in over.items()},
             **{k: round(v, 4) for k, v in under.items()},
             **{k: round(v, 4) for k, v in home_ou.items()},

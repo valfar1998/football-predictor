@@ -1,8 +1,8 @@
 """Coppe continentali: Champions, Libertadores, AFC CL e analoghe.
 
-football-data.co.uk non le pubblica. Il calendario arriva da AsianBetSoccer
-(già usato per le quote). Con token FOOTBALL_DATA_ORG_TOKEN si scaricano anche
-risultati storici da football-data.org.
+football-data.co.uk non le pubblica. Il calendario coppe arriva da
+GET https://api.football-data.org/v4/matches (token gratis), da TheSportsDB
+come fallback e, se c'è cache, da AsianBetSoccer.
 """
 
 from __future__ import annotations
@@ -10,16 +10,17 @@ from __future__ import annotations
 import json
 import os
 import re
-import time
+from datetime import date, timedelta
 from pathlib import Path
-from typing import Iterable
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 CUPS_DIR = ROOT / "data" / "raw" / "fd" / "cups"
+TOKEN_PATH = ROOT / "data" / "raw" / "football-data.org.token"
 ORG_BASE = "https://api.football-data.org/v4"
 UA = "Mozilla/5.0 (compatible; football-predictor/1.0; +local)"
 
@@ -50,28 +51,17 @@ CUP_PATTERNS: list[tuple[re.Pattern[str], str, str, str]] = [
     (re.compile(r"world cup|mondiali", re.I), "Mondo", "Mondiali", "WC"),
 ]
 
-# football-data.org: coppe club + nazionali principali
-ORG_CUP_CODES = (
-    "CL",
-    "EL",
-    "UCL",
-    "CLQ",
-    "ELQ",
-    "COLQ",
-    "ESC",
-    "CLI",
-    "CS",
-    "ACL",
-    "FCWC",
-    "CA",
-    "EC",
-    "WC",
-)
+# Codici competizioni da richiedere: se alcuni non sono accettati dal piano/API,
+# la funzione fa fallback a /matches non filtrato e filtra localmente.
+ORG_MATCH_CODES = ("CL", "EL", "ECL", "UECL", "UEL", "UCL", "EC", "WC", "CLI", "CS")
 
 ORG_CODE_META = {
     "CL": ("Europa", "Champions League"),
+    "UCL": ("Europa", "Champions League"),
     "EL": ("Europa", "Europa League"),
-    "UCL": ("Europa", "Conference League"),
+    "UEL": ("Europa", "Europa League"),
+    "ECL": ("Europa", "Conference League"),
+    "UECL": ("Europa", "Conference League"),
     "CLQ": ("Europa", "Qualificazioni Champions League"),
     "ELQ": ("Europa", "Qualificazioni Europa League"),
     "COLQ": ("Europa", "Qualificazioni Conference League"),
@@ -85,49 +75,14 @@ ORG_CODE_META = {
     "WC": ("Mondo", "Mondiali"),
 }
 
-CUP_TEAM_ALIASES = {
-    "inter milan": "Inter",
-    "internazionale": "Inter",
-    "fc internazionale": "Inter",
-    "fc internazionale milano": "Inter",
-    "ac milan": "Milan",
-    "manchester united": "Man United",
-    "man utd": "Man United",
-    "man united": "Man United",
-    "manchester city": "Man City",
-    "man city": "Man City",
-    "atletico madrid": "Ath Madrid",
-    "atlético madrid": "Ath Madrid",
-    "atl madrid": "Ath Madrid",
-    "atleti": "Ath Madrid",
-    "athletic bilbao": "Ath Bilbao",
-    "athletic club": "Ath Bilbao",
-    "bayern munich": "Bayern Munich",
-    "bayern munchen": "Bayern Munich",
-    "fc bayern munich": "Bayern Munich",
-    "fc bayern": "Bayern Munich",
-    "borussia dortmund": "Dortmund",
-    "bvb": "Dortmund",
-    "paris saint germain": "Paris SG",
-    "paris saint-germain": "Paris SG",
-    "psg": "Paris SG",
-    "sporting lisbon": "Sp Lisbon",
-    "sporting cp": "Sp Lisbon",
-    "sporting portugal": "Sp Lisbon",
-    "psv": "PSV Eindhoven",
-    "olympiacos": "Olympiakos",
-    "olympiakos": "Olympiakos",
-    "flamengo": "Flamengo RJ",
-    "cr flamengo": "Flamengo RJ",
-    "club america": "Club America",
-    "chivas": "Guadalajara Chivas",
-    "cd guadalajara": "Guadalajara Chivas",
-    "tigres": "Tigres UANL",
-    "red bull salzburg": "Salzburg",
-    "rb salzburg": "Salzburg",
-}
+from modules.data_update.team_names import (  # noqa: F401
+    _norm_key,
+    known_team_index,
+    resolve_known_team,
+)
 
-_NOISE = re.compile(r"\b(fc|cf|ac|sc|afc|bk|sk|fk|cd|de|the|club|calcio|ssc|us|cf)\b", re.I)
+# compat: alias storici usati da test/import
+from modules.data_update.team_names import SOURCE_TEAM_ALIASES as CUP_TEAM_ALIASES
 
 
 def classify_cup(league: str | None) -> tuple[str, str, str] | None:
@@ -138,51 +93,6 @@ def classify_cup(league: str | None) -> tuple[str, str, str] | None:
         if pattern.search(raw):
             return country, name, code
     return None
-
-
-def _norm_key(name: str) -> str:
-    s = re.sub(r"[^a-z0-9 ]", " ", str(name).lower())
-    s = _NOISE.sub(" ", s)
-    return " ".join(s.split())
-
-
-def resolve_known_team(name: str, known: Iterable[str] | dict[str, str] | None = None) -> str | None:
-    """Allinea il nome Asian/API allo spelling football-data.co.uk."""
-    from modules.dataset_loader.loader import TEAM_ALIASES, normalize_team
-
-    raw = str(name or "").strip()
-    if not raw:
-        return None
-    aliased = CUP_TEAM_ALIASES.get(_norm_key(raw)) or TEAM_ALIASES.get(" ".join(raw.lower().split()))
-    fallback = aliased or normalize_team(raw)
-    if known is None:
-        return fallback
-
-    if isinstance(known, dict):
-        index = known
-        canonical = set(known.values())
-    else:
-        canonical = set(known)
-        index = {_norm_key(t): t for t in canonical}
-
-    if aliased and aliased in canonical:
-        return aliased
-    if fallback in canonical:
-        return fallback
-    key = _norm_key(raw)
-    if key in index:
-        return index[key]
-    key2 = _norm_key(fallback)
-    if key2 in index:
-        return index[key2]
-    return None
-
-
-def known_team_index(names: Iterable[str]) -> dict[str, str]:
-    idx: dict[str, str] = {}
-    for name in names:
-        idx[_norm_key(name)] = name
-    return idx
 
 
 def asian_cup_fixtures(rows: list[dict] | None = None) -> pd.DataFrame:
@@ -226,91 +136,185 @@ def asian_cup_fixtures(rows: list[dict] | None = None) -> pd.DataFrame:
 
 
 def _org_token() -> str | None:
-    return os.environ.get("FOOTBALL_DATA_ORG_TOKEN") or os.environ.get("FOOTBALL_DATA_API_KEY")
+    for key in ("FOOTBALL_DATA_ORG_TOKEN", "FOOTBALL_DATA_API_KEY"):
+        val = (os.environ.get(key) or "").strip()
+        if val:
+            return val
+    env_path = ROOT / ".env"
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            raw = line.strip()
+            if raw.startswith("#") or "=" not in raw:
+                continue
+            key, val = raw.split("=", 1)
+            if key.strip() in {"FOOTBALL_DATA_ORG_TOKEN", "FOOTBALL_DATA_API_KEY"}:
+                token = val.strip().strip("'").strip('"')
+                if token:
+                    return token
+    if TOKEN_PATH.exists():
+        token = TOKEN_PATH.read_text(encoding="utf-8").strip()
+        if token:
+            return token
+    return None
 
 
-def _org_get(path: str, token: str) -> dict:
+def org_token_configured() -> bool:
+    return bool(_org_token())
+
+
+def save_org_token(token: str) -> Path:
+    TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TOKEN_PATH.write_text(token.strip(), encoding="utf-8")
+    return TOKEN_PATH
+
+
+def _org_get(path: str, token: str, params: dict[str, str] | None = None) -> dict:
+    query = f"?{urlencode(params)}" if params else ""
     req = Request(
-        f"{ORG_BASE}{path}",
+        f"{ORG_BASE}{path}{query}",
         headers={"User-Agent": UA, "X-Auth-Token": token},
     )
     with urlopen(req, timeout=45) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _org_matches_frame(matches: list[dict], code: str, *, finished: bool) -> pd.DataFrame:
-    country, league = ORG_CODE_META.get(code, ("Altro", code))
-    rows = []
-    for m in matches:
-        home = ((m.get("homeTeam") or {}).get("shortName") or (m.get("homeTeam") or {}).get("name") or "").strip()
-        away = ((m.get("awayTeam") or {}).get("shortName") or (m.get("awayTeam") or {}).get("name") or "").strip()
-        utc = m.get("utcDate")
-        date = pd.to_datetime(utc, errors="coerce", utc=True)
-        if pd.isna(date) or not home or not away:
-            continue
-        local = date.tz_convert(None) if getattr(date, "tzinfo", None) else date
-        score = (m.get("score") or {}).get("fullTime") or {}
-        item = {
-            "date": pd.Timestamp(local).normalize(),
-            "time": pd.Timestamp(local).strftime("%H:%M"),
-            "home_team": home,
-            "away_team": away,
-            "country": country,
-            "league": league,
-            "div": code,
-            "source": "fd.org:" + code,
-        }
-        if finished:
-            hg, ag = score.get("home"), score.get("away")
-            if hg is None or ag is None:
-                continue
-            item["home_goals"] = hg
-            item["away_goals"] = ag
-        rows.append(item)
-    return pd.DataFrame(rows) if rows else pd.DataFrame()
+def _org_matches_window(token: str, date_from: date, date_to: date) -> list[dict]:
+    # Prima senza filtro competizioni: copre campionati + coppe nella finestra.
+    params = {"dateFrom": date_from.isoformat(), "dateTo": date_to.isoformat()}
+    try:
+        data = _org_get("/matches", token, params)
+        return data.get("matches") or []
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:240]
+        print(f"skip /v4/matches {date_from}->{date_to}: HTTP {exc.code} {detail}")
+        params["competitions"] = ",".join(ORG_MATCH_CODES)
+        data = _org_get("/matches", token, params)
+        return data.get("matches") or []
 
 
-def download_org_cups(*, token: str | None = None) -> dict:
-    """Scarica coppe da football-data.org se c'è un token gratuito."""
+def _org_league_meta(match: dict) -> tuple[str, str, str] | None:
+    comp = match.get("competition") or {}
+    code = str(comp.get("code") or "").strip().upper()
+    name = str(comp.get("name") or "").strip()
+    ctype = str(comp.get("type") or "").strip().upper()
+    area = str((match.get("area") or {}).get("name") or "Europa")
+    if code in ORG_CODE_META:
+        country, league = ORG_CODE_META[code]
+        return country, league, code
+    classified = classify_cup(name) or classify_cup(code)
+    if classified:
+        return classified
+    if name or code:
+        return area, name or code, code or ctype or "LEA"
+    return None
+
+
+def _org_match_row(match: dict, *, finished: bool) -> dict | None:
+    meta = _org_league_meta(match)
+    if not meta:
+        return None
+    country, league, code = meta
+    home_raw = ((match.get("homeTeam") or {}).get("shortName") or (match.get("homeTeam") or {}).get("name") or "").strip()
+    away_raw = ((match.get("awayTeam") or {}).get("shortName") or (match.get("awayTeam") or {}).get("name") or "").strip()
+    home = resolve_known_team(home_raw) or home_raw
+    away = resolve_known_team(away_raw) or away_raw
+    utc = match.get("utcDate")
+    when = pd.to_datetime(utc, errors="coerce", utc=True)
+    if pd.isna(when) or not home or not away:
+        return None
+    local = when.tz_convert(None) if getattr(when, "tzinfo", None) else when
+    venue = match.get("venue")
+    if isinstance(venue, dict):
+        venue_name = str(venue.get("name") or "").strip()
+        venue_city = str(venue.get("city") or "").strip()
+    else:
+        venue_name = str(venue or "").strip()
+        venue_city = ""
+    item = {
+        "date": pd.Timestamp(local).normalize(),
+        "time": pd.Timestamp(local).strftime("%H:%M"),
+        "home_team": home,
+        "away_team": away,
+        "country": country,
+        "league": league,
+        "div": code,
+        "source": "fd.org:" + (code or "matches"),
+        "venue": venue_name,
+        "venue_city": venue_city,
+        "venue_neutral": False,
+    }
+    if finished:
+        score = (match.get("score") or {}).get("fullTime") or {}
+        hg, ag = score.get("home"), score.get("away")
+        if hg is None or ag is None:
+            return None
+        item["home_goals"] = hg
+        item["away_goals"] = ag
+    return item
+
+
+def download_org_cups(*, token: str | None = None, days: int = 10) -> dict:
+    """GET /v4/matches su una finestra di date (piano free: max ~10 giorni)."""
     token = token or _org_token()
     if not token:
-        print("skip coppe football-data.org: imposta FOOTBALL_DATA_ORG_TOKEN")
+        print("skip coppe football-data.org: token mancante (FOOTBALL_DATA_ORG_TOKEN)")
         return {"n_cup_files": 0, "token": False}
+    today = date.today()
+    target_days = max(2, int(days))
+    windows: list[tuple[date, date]] = []
+    start = today
+    left = target_days
+    while left > 0:
+        span = min(10, left)
+        end = start + timedelta(days=span)
+        windows.append((start, end))
+        start = end + timedelta(days=1)
+        left -= span
+    try:
+        matches: list[dict] = []
+        for d1, d2 in windows:
+            matches.extend(_org_matches_window(token, d1, d2))
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        print(f"skip coppe football-data.org: {exc}")
+        return {"n_cup_files": 0, "token": True, "error": str(exc)}
+
+    seen: set[tuple[str, str, str]] = set()
+    uniq: list[dict] = []
+    for m in matches:
+        fx = m.get("fixture") or {}
+        key = (str(m.get("utcDate") or ""), str((m.get("homeTeam") or {}).get("name") or ""), str((m.get("awayTeam") or {}).get("name") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(m)
+    matches = uniq
+    live = {"SCHEDULED", "TIMED", "IN_PLAY", "PAUSED", "LIVE"}
+    fixtures = [row for m in matches if m.get("status") in live for row in [_org_match_row(m, finished=False)] if row]
+    results = [row for m in matches if m.get("status") == "FINISHED" for row in [_org_match_row(m, finished=True)] if row]
     CUPS_DIR.mkdir(parents=True, exist_ok=True)
-    fixtures: list[pd.DataFrame] = []
-    results: list[pd.DataFrame] = []
-    errors: list[str] = []
-    for i, code in enumerate(ORG_CUP_CODES):
-        if i:
-            time.sleep(6.5)
-        try:
-            data = _org_get(f"/competitions/{code}/matches", token)
-        except HTTPError as exc:
-            errors.append(f"{code}: HTTP {exc.code}")
-            print(f"skip coppa {code}: HTTP {exc.code}")
-            continue
-        except (URLError, TimeoutError, json.JSONDecodeError) as exc:
-            errors.append(f"{code}: {exc}")
-            print(f"skip coppa {code}: {exc}")
-            continue
-        matches = data.get("matches") or []
-        scheduled = [m for m in matches if m.get("status") in {"SCHEDULED", "TIMED", "IN_PLAY"}]
-        finished = [m for m in matches if m.get("status") == "FINISHED"]
-        fx = _org_matches_frame(scheduled, code, finished=False)
-        rs = _org_matches_frame(finished, code, finished=True)
-        if not fx.empty:
-            fixtures.append(fx)
-        if not rs.empty:
-            results.append(rs)
-        print(f"ok coppa {code}: {len(scheduled)} in programma, {len(finished)} risultati")
     n_files = 0
     if fixtures:
-        pd.concat(fixtures, ignore_index=True).to_csv(CUPS_DIR / "fixtures.csv", index=False)
+        pd.DataFrame(fixtures).to_csv(CUPS_DIR / "fixtures.csv", index=False)
         n_files += 1
+        try:
+            from modules.data_update.venues import update_home_venues
+
+            update_home_venues(pd.DataFrame(fixtures))
+        except Exception:
+            pass
     if results:
-        pd.concat(results, ignore_index=True).to_csv(CUPS_DIR / "results.csv", index=False)
+        pd.DataFrame(results).to_csv(CUPS_DIR / "results.csv", index=False)
         n_files += 1
-    return {"n_cup_files": n_files, "token": True, "errors": errors}
+    comps = sorted({r["league"] for r in fixtures})
+    print(f"ok /v4/matches: {len(fixtures)} coppe in programma ({', '.join(comps) or '—'}; {len(results)} risultati)")
+    return {
+        "n_cup_files": n_files,
+        "token": True,
+        "n_matches": len(matches),
+        "n_cup_fixtures": len(fixtures),
+        "competitions": comps,
+        "permission": None,
+    }
 
 
 def load_org_cup_fixtures() -> pd.DataFrame:
@@ -331,7 +335,19 @@ def load_org_cup_results() -> pd.DataFrame:
 
 
 def load_cup_fixtures() -> pd.DataFrame:
-    frames = [load_org_cup_fixtures(), asian_cup_fixtures()]
+    try:
+        from modules.data_update.thesportsdb import load_cup_fixtures as load_thesportsdb_cups
+
+        tsdb = load_thesportsdb_cups()
+    except Exception:
+        tsdb = pd.DataFrame()
+    try:
+        from modules.data_update.api_football import load_cup_fixtures as load_api_football_cups
+
+        apif = load_api_football_cups()
+    except Exception:
+        apif = pd.DataFrame()
+    frames = [load_org_cup_fixtures(), asian_cup_fixtures(), tsdb, apif]
     frames = [f for f in frames if f is not None and not f.empty]
     if not frames:
         return pd.DataFrame()

@@ -13,11 +13,67 @@ from modules.advisor.staking import (
     quarter_kelly,
 )
 from modules.advisor.value import PLAY_VALUE_KEYS, enrich_value
-from modules.advisor.quadro import build_quadro
+from modules.advisor.quadro import build_quadro, validation_source
+from modules.advisor.validation import apply_to_play, run_validation
+
+# Senza EV/Kelly/edge misurati il voto non può sembrare una giocata forte.
+NO_MODEL_MAX_SCORE = 3
+WORKFLOW_INCOMPLETE_LO = 0.20
+WORKFLOW_INCOMPLETE_HI = 0.30
 
 
 def _clamp_score(value: float) -> int:
     return int(max(1, min(10, floor(value + 0.5))))
+
+
+def _value_metrics_missing(play: dict[str, Any] | None) -> bool:
+    """True se EV, Kelly o edge non sono misurabili (serve quota reale)."""
+    play = play or {}
+    if not play.get("odds_real"):
+        return True
+    if play.get("edge_pp") is None:
+        return True
+    ev = play.get("ev_cons")
+    if ev is None:
+        ev = play.get("ev")
+    if ev is None:
+        return True
+    if play.get("kelly_quarter") is None:
+        return True
+    return False
+
+
+def _analysis_play(
+    *,
+    action: str,
+    kind: str,
+    name: str,
+    code: str = "—",
+    tipster: dict[str, Any] | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Scheletro senza pick: fonti esterne non generano, quote assenti invalidano."""
+    return {
+        "code": code,
+        "name": name,
+        "group": "1x2",
+        "kind": kind,
+        "action": action,
+        "score": None,
+        "probability": None,
+        "ev": None,
+        "ev_cons": None,
+        "kelly_quarter": None,
+        "odds": None,
+        "fair_odds": None,
+        "odds_real": False,
+        "edge_pp": None,
+        "p_market": None,
+        "p_cons": None,
+        "clv": None,
+        "tipster": tipster,
+        "no_bet_reasons": [reason] if reason else [],
+    }
 
 
 def _fair_odds(prob: float) -> float | None:
@@ -80,62 +136,333 @@ def _safe_float(x: Any, default: float = 0.0) -> float:
         return default
 
 
+def _src_ready(sources: list[dict[str, Any]], name: str) -> bool:
+    return any(s.get("fonte") == name and not s.get("mancante") for s in sources)
+
+
+def _workflow_norm(
+    play: dict[str, Any],
+    quadro: dict[str, Any] | None,
+    validation: dict[str, Any] | None,
+) -> tuple[float, dict[str, bool]]:
+    """Workflow = copertura di ML/MC, mercato, EV, Kelly, forma, tattica. Senza modello: 20–30%."""
+    val = validation or {}
+    src = (quadro or {}).get("sources") or []
+    ml_mc = _src_ready(src, "Modello ML") and _src_ready(src, "Monte Carlo")
+    if not ml_mc:
+        ml_mc = bool((val.get("stability") or {}).get("ready"))
+    market = _src_ready(src, "Book (devig)") or bool(play.get("odds_real") and play.get("p_market") is not None)
+    if not market:
+        market = bool((val.get("market") or {}).get("ready"))
+    ev_ok = bool(play.get("odds_real") and (play.get("ev_cons") is not None or play.get("ev") is not None))
+    kelly_ok = bool(play.get("odds_real") and play.get("kelly_quarter") is not None)
+    form_ok = bool((val.get("form") or {}).get("ready"))
+    tac_ok = bool((val.get("tactical") or {}).get("ready"))
+    pillars = {
+        "ml_mc": ml_mc,
+        "market": market,
+        "ev": ev_ok,
+        "kelly": kelly_ok,
+        "form": form_ok,
+        "tactics": tac_ok,
+    }
+    n_ok = sum(1 for v in pillars.values() if v)
+    core_ok = ml_mc and market and ev_ok and kelly_ok
+    if not core_ok:
+        span = WORKFLOW_INCOMPLETE_HI - WORKFLOW_INCOMPLETE_LO
+        return round(WORKFLOW_INCOMPLETE_LO + span * (n_ok / 6.0), 3), pillars
+    share = _safe_float((quadro or {}).get("agree_share"), 0.50)
+    coverage = n_ok / 6.0
+    extra = 1.0 if form_ok and tac_ok else 0.5
+    return round(_clip01(0.55 * coverage + 0.25 * share + 0.20 * extra), 3), pillars
+
+
+def _has_asian_signal(market_move: dict[str, Any] | None) -> bool:
+    if not market_move:
+        return False
+    lvl = market_move.get("movement_level")
+    return bool(
+        market_move.get("steam_1x2")
+        or (lvl not in {None, "", "Stabile"})
+        or market_move.get("drop_1") is not None
+        or market_move.get("odds_moves")
+    )
+
+
 def _meta_analysis(
     play: dict[str, Any],
     *,
     alignment: dict[str, Any] | None,
     market_move: dict[str, Any] | None,
     quadro: dict[str, Any] | None,
+    legs: tuple[str, ...] | None = None,
+    validation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Unico indicatore: value+kelly+asian+workflow, a supporto del voto."""
+    """Unico indicatore: value+kelly+asian+workflow+storico. Gambe assenti restano a 0 (non si ricalcola)."""
+    metrics_nd = _value_metrics_missing(play)
     ev = play.get("ev_cons")
-    if ev is None:
+    if ev is None and play.get("odds_real"):
         ev = play.get("ev")
-    edge = play.get("edge_pp")
-    kelly_q = _safe_float(play.get("kelly_quarter"))
+    edge = play.get("edge_pp") if play.get("odds_real") else None
+    kelly_q = play.get("kelly_quarter") if play.get("odds_real") else None
 
-    ev_norm = _clip01((_safe_float(ev, -0.08) + 0.08) / 0.20)  # -8%..+12%
-    edge_norm = _clip01((_safe_float(edge, -0.03) + 0.03) / 0.08)  # -3pp..+5pp
-    value_norm = 0.6 * ev_norm + 0.4 * edge_norm
+    if metrics_nd:
+        value_norm = 0.0
+        kelly_norm = 0.0
+    else:
+        ev_norm = _clip01((_safe_float(ev, -0.08) + 0.08) / 0.20)
+        edge_norm = _clip01((_safe_float(edge, -0.03) + 0.03) / 0.08)
+        value_norm = 0.6 * ev_norm + 0.4 * edge_norm
+        kelly_norm = _clip01(_safe_float(kelly_q, 0.0) / 0.03)
 
-    kelly_norm = _clip01(kelly_q / 0.03)  # 0..3%
-
-    move_lvl = (market_move or {}).get("movement_level") or "Stabile"
-    lvl_map = {"Stabile": 0.45, "Leggero": 0.55, "Medio": 0.65, "Forte": 0.75, "Fortissimo": 0.82, "Raro": 0.88}
-    align_lbl = (alignment or {}).get("label") or "n/d"
-    align_map = {"allineato": 0.78, "misto": 0.55, "n/d": 0.50, "contrario": 0.28}
-    asian_norm = 0.65 * align_map.get(align_lbl, 0.50) + 0.35 * lvl_map.get(move_lvl, 0.50)
+    asian_ok = _has_asian_signal(market_move)
+    if asian_ok:
+        move_lvl = (market_move or {}).get("movement_level") or "Stabile"
+        lvl_map = {"Stabile": 0.45, "Leggero": 0.55, "Medio": 0.65, "Forte": 0.75, "Fortissimo": 0.82, "Raro": 0.88}
+        align_lbl = (alignment or {}).get("label") or "n/d"
+        align_map = {"allineato": 0.78, "misto": 0.55, "n/d": 0.50, "contrario": 0.28, "stabile": 0.50}
+        asian_norm = 0.65 * align_map.get(align_lbl, 0.50) + 0.35 * lvl_map.get(move_lvl, 0.50)
+    else:
+        asian_norm = 0.0
 
     q = quadro or {}
-    share = q.get("agree_share")
-    share_norm = _safe_float(share, 0.50)
     src = q.get("sources") or []
-    fb_ok = any(s.get("fonte") == "FBref" and not s.get("mancante") for s in src)
-    us_ok = any(s.get("fonte") == "Understat" and not s.get("mancante") for s in src)
-    coverage = 1.0 if (fb_ok and us_ok) else 0.75 if (fb_ok or us_ok) else 0.45
-    workflow_norm = 0.7 * share_norm + 0.3 * coverage
+    workflow_norm, pillars = _workflow_norm(play, q, validation)
 
-    final_norm = (
-        0.38 * value_norm
-        + 0.22 * kelly_norm
-        + 0.22 * asian_norm
-        + 0.18 * workflow_norm
-    )
+    hist_src = next((s for s in src if s.get("fonte") == "Storico locale" and not s.get("mancante")), None)
+    hist_ok = hist_src is not None
+    if hist_src:
+        top = max(
+            _safe_float(hist_src.get("p_1"), 0.34),
+            _safe_float(hist_src.get("p_x"), 0.34),
+            _safe_float(hist_src.get("p_2"), 0.34),
+        )
+        history_norm = _clip01((top - 0.34) / 0.28)
+        play_code = str(play.get("code") or "")
+        if play_code in {"1", "X", "2"} and hist_src.get("pick") == play_code:
+            history_norm = _clip01(0.65 * history_norm + 0.35)
+        elif play_code in {"1", "X", "2"} and hist_src.get("pick") in {"1", "X", "2"}:
+            history_norm = _clip01(0.55 * history_norm)
+    else:
+        history_norm = 0.0
+
+    combo_src = next((s for s in src if s.get("fonte") == "Combo tattica" and not s.get("mancante")), None)
+    combos_ok = combo_src is not None
+    if combo_src:
+        topc = max(
+            _safe_float(combo_src.get("p_1"), 0.34),
+            _safe_float(combo_src.get("p_x"), 0.34),
+            _safe_float(combo_src.get("p_2"), 0.34),
+        )
+        c12 = _clip01((topc - 0.34) / 0.28)
+        play_code = str(play.get("code") or "")
+        if play_code in {"1", "X", "2"} and combo_src.get("pick") == play_code:
+            c12 = _clip01(0.62 * c12 + 0.38)
+        combos_norm = _clip01(0.50 * c12 + 0.30 * value_norm + 0.20 * asian_norm)
+    else:
+        combos_norm = 0.0
+
+    norms = {
+        "value": value_norm,
+        "kelly": kelly_norm,
+        "asian": asian_norm,
+        "workflow": workflow_norm,
+        "history": history_norm,
+        "combos": combos_norm,
+    }
+    weights = {"value": 0.28, "kelly": 0.16, "asian": 0.18, "workflow": 0.10, "history": 0.10, "combos": 0.18}
+    # Gambe assenti restano 0 sul denominatore pieno: niente ricalcolo che gonfia il workflow.
+    measured = {
+        "value": not metrics_nd,
+        "kelly": not metrics_nd,
+        "asian": asian_ok,
+        "workflow": True,
+        "history": hist_ok,
+        "combos": combos_ok,
+    }
+    if legs:
+        allowed = set(legs)
+        for k in weights:
+            if k not in allowed:
+                norms[k] = 0.0
+                measured[k] = False
+    wsum = sum(weights.values()) or 1.0
+    final_norm = sum(weights[k] * norms[k] for k in weights) / wsum
+    val = validation or {}
     final_score = _clamp_score(1 + 9 * final_norm)
+    delta = float(val.get("delta_unified") or 0)
+    if delta:
+        final_score = int(max(1, min(10, round(final_score + delta))))
     if play.get("action") == "no_bet":
         final_score = min(final_score, 5)
+    if metrics_nd or play.get("action") in {"n/d", "invalido"}:
+        final_score = min(final_score, NO_MODEL_MAX_SCORE)
+
+    used = [k for k, ok in measured.items() if ok]
+    partial = metrics_nd or not all(measured[k] for k in ("value", "kelly", "asian", "workflow"))
+    note_bits: list[str] = []
+    for k in ("value", "kelly", "asian", "workflow", "history", "combos"):
+        if measured[k]:
+            note_bits.append(f"{k} {norms[k]:.0%}")
+        elif k in {"value", "kelly", "workflow"}:
+            note_bits.append(f"{k} n/d")
+    note = ("parziale · " if partial else "") + " · ".join(note_bits)
+    if val.get("summary"):
+        note = (note + " · " if note else "") + str(val["summary"])
+    if play.get("action") == "invalido":
+        label = "invalido · senza quote"
+    elif play.get("action") == "n/d" or metrics_nd:
+        label = "n/d · senza modello"
+    else:
+        label = "solida" if final_score >= 8 else "interessante" if final_score >= 6 else "debole"
+    if partial:
+        label = f"parziale · {label}"
 
     return {
         "score": final_score,
-        "value": round(value_norm, 3),
-        "kelly": round(kelly_norm, 3),
-        "asian": round(asian_norm, 3),
+        "value": None if not measured["value"] else round(value_norm, 3),
+        "kelly": None if not measured["kelly"] else round(kelly_norm, 3),
+        "asian": None if not measured["asian"] else round(asian_norm, 3),
         "workflow": round(workflow_norm, 3),
-        "label": "solida" if final_score >= 8 else "interessante" if final_score >= 6 else "debole",
-        "note": (
-            f"value {value_norm:.0%} · kelly {kelly_norm:.0%} · "
-            f"asian {asian_norm:.0%} · workflow {workflow_norm:.0%}"
-        ),
+        "history": None if not measured["history"] else round(history_norm, 3),
+        "combos": None if not measured["combos"] else round(combos_norm, 3),
+        "pillars": pillars,
+        "legs": used,
+        "partial": partial,
+        "label": label,
+        "note": note,
+        "validation_delta": round(float(val.get("delta_unified") or 0), 3),
+    }
+
+
+def _grouped_from_odds(odds: dict[str, Any] | None) -> dict[str, list]:
+    if not odds:
+        return {}
+    o1, ox, o2 = odds.get("1"), odds.get("X"), odds.get("2")
+    try:
+        if not (o1 and ox and o2) or min(float(o1), float(ox), float(o2)) <= 1.0:
+            return {}
+        i1, ix, i2 = 1.0 / float(o1), 1.0 / float(ox), 1.0 / float(o2)
+    except (TypeError, ValueError):
+        return {}
+    s = i1 + ix + i2
+    if s <= 0:
+        return {}
+    return {
+        "1x2": [
+            {"code": "1", "p_market": i1 / s},
+            {"code": "X", "p_market": ix / s},
+            {"code": "2", "p_market": i2 / s},
+        ]
+    }
+
+
+def _has_real_1x2_odds(odds: dict[str, Any] | None) -> bool:
+    if not odds:
+        return False
+    try:
+        o1 = float(odds.get("1") or odds.get("home") or 0)
+        ox = float(odds.get("X") or odds.get("draw") or odds.get("x") or 0)
+        o2 = float(odds.get("2") or odds.get("away") or 0)
+    except (TypeError, ValueError):
+        return False
+    return min(o1, ox, o2) > 1.0
+
+
+def advise_uncovered(
+    home: str,
+    away: str,
+    *,
+    odds: dict[str, Any] | None = None,
+    market_move: dict[str, Any] | None = None,
+    prediction: dict[str, Any] | None = None,
+    tipster: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Analisi senza modello: quadro di validazione. Nessun pick da fonti esterne, niente EV/Kelly."""
+    from modules.tipsters import consensus_for
+
+    prediction = prediction or {}
+    if tipster is None:
+        try:
+            tipster = consensus_for(home, away)
+        except Exception:
+            tipster = {"n_sources": 0, "label": "n/d"}
+    if int((tipster or {}).get("n_sources") or 0) < 2:
+        tipster = {"n_sources": 0, "label": "n/d"}
+
+    has_odds = _has_real_1x2_odds(odds)
+    grouped = _grouped_from_odds(odds) if has_odds else {}
+    if has_odds:
+        play = _analysis_play(
+            action="n/d",
+            kind="nessun_pick",
+            name="nessun pick (fonti esterne non generano giocata)",
+            tipster=tipster,
+            reason="senza modello: le fonti esterne validano, non generano pick",
+        )
+        play["odds_real"] = True
+    else:
+        play = _analysis_play(
+            action="invalido",
+            kind="invalido",
+            name="pick invalido (quote assenti)",
+            tipster=tipster,
+            reason="pick invalido: senza quote non si calcolano edge, EV, Kelly, quota equa, CLV",
+        )
+
+    quadro = build_quadro(
+        home=home,
+        away=away,
+        play=play,
+        prediction=prediction,
+        grouped=grouped,
+        alignment=None,
+        market_move=market_move,
+        tipster=tipster,
+    )
+    alignment = {"agrees": [], "disagrees": [], "delta": 0, "label": "n/d"}
+
+    pred = dict(prediction)
+    pred.setdefault("home", home)
+    pred.setdefault("away", away)
+    validation = run_validation(prediction=pred, play=play, grouped=grouped)
+    play = apply_to_play(play, validation)
+    quadro = dict(quadro)
+    quadro["validation"] = validation
+    if validation:
+        quadro["sources"] = list(quadro.get("sources") or []) + [validation_source(validation)]
+    meta = _meta_analysis(
+        play,
+        alignment=alignment,
+        market_move=market_move,
+        quadro=quadro,
+        validation=validation,
+    )
+    play["score_unified"] = meta["score"]
+    play["meta_analysis"] = meta
+
+    reason1 = (
+        "Pick invalido: senza quote non si calcolano edge, EV, Kelly, quota equa, CLV."
+        if play["action"] == "invalido"
+        else "Senza modello non c'è pick: le fonti esterne (ClubElo, FBref, tipster, …) validano, non generano."
+    )
+    reason2 = quadro.get("summary") or "Nessuna fonte di validazione."
+    reason2 = f"{reason2} · Voto unificato {meta['score']}/10 ({meta['note']})"
+
+    return {
+        "match": prediction.get("match") or f"{home} vs {away}",
+        "home": home,
+        "away": away,
+        "play": play,
+        "quadro": quadro,
+        "meta_analysis": play.get("meta_analysis"),
+        "market_move": market_move,
+        "market_align": alignment,
+        "tipster": tipster,
+        "score_reason_1": reason1,
+        "score_reason_2": reason2,
+        "grouped": grouped,
+        "all_markets": [],
     }
 
 
@@ -678,27 +1005,39 @@ def advise(
 
     probable_1x2 = max(grouped["1x2"], key=lambda m: m["probability"])
     with_odds_1x2 = [m for m in grouped["1x2"] if m.get("odds_real") and m.get("edge_pp") is not None]
-    if not with_odds_1x2:
-        with_odds_1x2 = [m for m in grouped["1x2"] if m["odds"] is not None]
-    best_value_1x2 = max(with_odds_1x2, key=lambda m: m.get("edge_pp") if m.get("edge_pp") is not None else -99) if with_odds_1x2 else None
-    play_1x2 = _pick_headline(probable_1x2, best_value_1x2)
-
-    extras = [m for m in all_markets if m["group"] != "1x2" and _actionable(m)]
+    best_value_1x2 = (
+        max(with_odds_1x2, key=lambda m: m.get("edge_pp") if m.get("edge_pp") is not None else -99)
+        if with_odds_1x2
+        else None
+    )
+    extras = [m for m in all_markets if m["group"] != "1x2" and _actionable(m) and m.get("odds_real")]
     play_alt = None
-    if extras:
-        def extra_key(m):
-            edge = m.get("edge_pp")
-            evn = m.get("ev_cons") if m.get("ev_cons") is not None else m.get("ev")
-            return m["score"] + max(edge if edge is not None else evn or -0.05, -0.05) * 3
+    invalid_no_odds = not with_odds_1x2
 
-        play_alt = max(extras, key=extra_key)
-        play_alt = _pick_headline(play_alt, play_alt if play_alt.get("odds_real") else None)
+    if invalid_no_odds:
+        play_1x2 = _analysis_play(
+            action="invalido",
+            kind="invalido",
+            name="pick invalido (quote assenti)",
+            reason="pick invalido: senza quote non si calcolano edge, EV, Kelly, quota equa, CLV",
+        )
+        play = play_1x2
+    else:
+        play_1x2 = _pick_headline(probable_1x2, best_value_1x2)
+        if extras:
+            def extra_key(m):
+                edge = m.get("edge_pp")
+                evn = m.get("ev_cons") if m.get("ev_cons") is not None else m.get("ev")
+                return m["score"] + max(edge if edge is not None else evn or -0.05, -0.05) * 3
 
-    play = play_1x2
-    min_ev_play = float(cal.get("min_ev_play", MIN_EDGE))
-    alt_ev = None if not play_alt else (play_alt.get("ev_cons") if play_alt.get("ev_cons") is not None else play_alt.get("ev"))
-    if play_alt and (alt_ev or 0) >= min_ev_play and play_alt["score"] >= play_1x2["score"]:
-        play = play_alt
+            play_alt = max(extras, key=extra_key)
+            play_alt = _pick_headline(play_alt, play_alt if play_alt.get("odds_real") else None)
+
+        play = play_1x2
+        min_ev_play = float(cal.get("min_ev_play", MIN_EDGE))
+        alt_ev = None if not play_alt else (play_alt.get("ev_cons") if play_alt.get("ev_cons") is not None else play_alt.get("ev"))
+        if play_alt and (alt_ev or 0) >= min_ev_play and play_alt["score"] >= play_1x2["score"]:
+            play = play_alt
 
     ml_for_play = play.get("model_probability")
     if ml_for_play is None and play.get("group") == "1x2":
@@ -712,7 +1051,7 @@ def advise(
 
     alignment = None
     score_cap: int | None = None
-    if market_move:
+    if market_move and not invalid_no_odds:
         from modules.data_update.asian_odds import MOVE_RANK, move_alignment
 
         alignment = move_alignment(play.get("code"), market_move)
@@ -725,8 +1064,8 @@ def advise(
             delta = min(delta, -1)
         if delta:
             play = dict(play)
-            play["score"] = _clamp_score(play["score"] + delta)
-        if score_cap is not None:
+            play["score"] = _clamp_score((play.get("score") or 1) + delta)
+        if score_cap is not None and play.get("score") is not None:
             play["score"] = min(play["score"], score_cap)
         play["market_align"] = alignment["label"]
         _, open_odd, curr_odd = _pick_drop(play, market_move)
@@ -748,26 +1087,54 @@ def advise(
 
     play = apply_tipster_balance(play, tipster)
 
-    reasons = no_bet_reasons(
-        play,
-        market_move=market_move,
-        alignment=alignment,
-        min_edge=float(cal.get("min_ev_play", MIN_EDGE)),
-        min_rank=int(cal.get("liquid_against_rank", 3)),
-        min_pp=float(cal.get("liquid_against_pp", 2.0)),
-        sharp_ev=play.get("ev_sharp"),
-    )
     play = dict(play)
-    if reasons:
-        play["action"] = "no_bet"
-        play["no_bet_reasons"] = reasons
-        play["kelly_quarter"] = 0.0
-        play["score"] = min(int(play.get("score") or 1), 5)
+    if invalid_no_odds or not play.get("odds_real"):
+        play["action"] = "invalido"
+        play["kind"] = "invalido"
+        play["code"] = "—"
+        play["name"] = "pick invalido (quote assenti)"
+        play["kelly_quarter"] = None
+        play["ev"] = None
+        play["ev_cons"] = None
+        play["edge_pp"] = None
+        play["fair_odds"] = None
+        play["clv"] = None
+        play["no_bet_reasons"] = [
+            "pick invalido: senza quote non si calcolano edge, EV, Kelly, quota equa, CLV"
+        ]
+        if play.get("score") is not None:
+            play["score"] = min(int(play["score"]), NO_MODEL_MAX_SCORE)
     else:
-        play["action"] = "gioca"
-        play["no_bet_reasons"] = []
+        reasons = no_bet_reasons(
+            play,
+            market_move=market_move,
+            alignment=alignment,
+            min_edge=float(cal.get("min_ev_play", MIN_EDGE)),
+            min_rank=int(cal.get("liquid_against_rank", 3)),
+            min_pp=float(cal.get("liquid_against_pp", 2.0)),
+            sharp_ev=play.get("ev_sharp"),
+        )
+        if reasons:
+            play["action"] = "no_bet"
+            play["no_bet_reasons"] = reasons
+            play["kelly_quarter"] = 0.0
+            play["score"] = min(int(play.get("score") or 1), 5)
+        else:
+            play["action"] = "gioca"
+            play["no_bet_reasons"] = []
+        if _value_metrics_missing(play) and play.get("score") is not None:
+            play["score"] = min(int(play["score"]), NO_MODEL_MAX_SCORE)
 
-    reason1, reason2 = explain_pick(play, alignment=alignment, market_move=market_move, ml_prob=ml_for_play)
+    if play.get("action") in {"invalido", "n/d"}:
+        reason1 = play["no_bet_reasons"][0] if play.get("no_bet_reasons") else "nessun pick"
+        reason2 = ""
+    else:
+        reason1, reason2 = explain_pick(play, alignment=alignment, market_move=market_move, ml_prob=ml_for_play)
+    pred = dict(prediction)
+    pred.setdefault("home", home)
+    pred.setdefault("away", away)
+    validation = run_validation(prediction=pred, play=play, grouped=grouped)
+    play = apply_to_play(play, validation)
     quadro = build_quadro(
         home=home,
         away=away,
@@ -777,8 +1144,15 @@ def advise(
         alignment=alignment,
         market_move=market_move,
         tipster=play.get("tipster") or tipster,
+        validation=validation,
     )
-    meta = _meta_analysis(play, alignment=alignment, market_move=market_move, quadro=quadro)
+    meta = _meta_analysis(
+        play,
+        alignment=alignment,
+        market_move=market_move,
+        quadro=quadro,
+        validation=validation,
+    )
     play["score_unified"] = meta["score"]
     play["meta_analysis"] = meta
     reason2 = (reason2 + " · " if reason2 else "") + f"Voto unificato {meta['score']}/10 ({meta['note']})"
@@ -798,7 +1172,7 @@ def advise(
         "extras": extras,
         "expected_goals": prediction.get("expected_goals"),
         "most_likely_scores": mc.get("most_likely_scores", []),
-        "has_odds": any(m["odds"] is not None for m in markets_1x2),
+        "has_odds": any(bool(m.get("odds_real")) for m in grouped["1x2"]),
         "market_move": market_move,
         "market_align": alignment or {"agrees": [], "disagrees": [], "delta": 0, "label": "n/d"},
         "tipster": play.get("tipster") or tipster,
@@ -815,22 +1189,43 @@ def format_advice(advice: dict[str, Any]) -> str:
         "più_probabile": "più probabile",
         "valore": "miglior rapporto probabilità/quota",
         "probabile_e_valore": "più probabile e miglior value",
+        "invalido": "pick invalido",
+        "nessun_pick": "nessun pick",
     }.get(play["kind"], play["kind"])
+    action = play.get("action")
+    head = "GIOCA" if action == "gioca" else "NO BET" if action == "no_bet" else "INVALIDO" if action == "invalido" else "N/D"
+    score_txt = "—" if play.get("score") is None else f"{play['score']}/10"
+    mix = play.get("score_unified", play.get("score"))
+    mix_txt = "—" if mix is None else f"{mix}/10"
+    prob = play.get("probability")
     lines = [
         "",
         "=" * 46,
         f"  {advice['match']}",
-        f"  GIOCA  {play['code']}   {play['name']}",
-        f"  Voto   {play['score']}/10   ({kind_it})",
-        f"  Mix    {play.get('score_unified', play['score'])}/10   (asian+kelly+workflow)",
-        f"  Prob   {play['probability']:.1%}",
+        f"  {head}  {play['code']}   {play['name']}",
+        f"  Voto   {score_txt}   ({kind_it})",
+        f"  Mix    {mix_txt}   (value+kelly+workflow)",
     ]
+    if prob is not None:
+        lines.append(f"  Prob   {float(prob):.1%}")
     if play.get("action") == "no_bet":
         lines.append("  Azione No bet  (" + "; ".join(play.get("no_bet_reasons") or []) + ")")
-    if play["odds"]:
+    elif play.get("action") in {"invalido", "n/d"}:
+        lines.append(
+            "  Azione "
+            + ("Invalido" if play["action"] == "invalido" else "N/D")
+            + "  ("
+            + "; ".join(play.get("no_bet_reasons") or [])
+            + ")"
+        )
+    if play.get("odds"):
         ev = play.get("ev_cons") if play.get("ev_cons") is not None else play.get("ev") or 0
         sign = "+" if ev >= 0 else ""
-        lines.append(f"  Quota  {play['odds']:.2f}   equa {play['fair_odds']:.2f}   EV cons. {sign}{ev:.1%}")
+        fair = play.get("fair_odds")
+        if fair:
+            lines.append(f"  Quota  {play['odds']:.2f}   equa {fair:.2f}   EV cons. {sign}{ev:.1%}")
+        else:
+            lines.append(f"  Quota  {float(play['odds']):.2f}")
         if play.get("edge_pp") is not None:
             lines.append(f"  Edge   {play['edge_pp']:+.1%} pp vs mercato devig")
     move = advice.get("market_move") or {}

@@ -5,8 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
-from matplotlib import pyplot as plt
-from mplsoccer import PyPizza
 
 from modules.data_update.fbref_context import load_fbref_team_index, lookup_team_context
 from modules.data_update.understat_context import load_understat_team_index, lookup_understat_team
@@ -83,6 +81,13 @@ def build_team_profile_values(home: str, away: str) -> tuple[list[str], list[flo
 
 
 def plot_team_radar(home: str, away: str):
+    try:
+        from mplsoccer import PyPizza
+    except Exception as exc:
+        raise RuntimeError(
+            "Dipendenze radar mancanti: installa matplotlib e mplsoccer nella .venv del progetto."
+        ) from exc
+
     params, home_values, away_values, table = build_team_profile_values(home, away)
     baker = PyPizza(
         params=params,

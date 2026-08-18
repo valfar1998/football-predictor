@@ -6,3 +6,4 @@ joblib>=1.3.0
 streamlit>=1.32.0
 soccerdata>=1.9.1
 mplsoccer>=1.8.0
+statsbombpy>=1.14.0

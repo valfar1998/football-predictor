@@ -26,6 +26,7 @@ class FeatureEngineer:
         history: dict[str, deque] = defaultdict(lambda: deque(maxlen=self.window))
         elo: dict[str, float] = defaultdict(lambda: self.elo_start)
         last_played: dict[str, pd.Timestamp] = {}
+        recent: dict[str, deque] = defaultdict(lambda: deque(maxlen=12))
         rows = []
 
         for i, (_, m) in enumerate(df.iterrows(), start=1):
@@ -34,6 +35,8 @@ class FeatureEngineer:
             a_stats = self._team_stats(history[away])
             rest_h = self._rest_days(last_played.get(home), m["date"])
             rest_a = self._rest_days(last_played.get(away), m["date"])
+            m7_h = self._matches_in_days(recent[home], m["date"], 7)
+            m7_a = self._matches_in_days(recent[away], m["date"], 7)
 
             rows.append(
                 {
@@ -76,6 +79,9 @@ class FeatureEngineer:
                     "home_rest_days": rest_h,
                     "away_rest_days": rest_a,
                     "rest_diff": rest_h - rest_a,
+                    "home_matches_7d": m7_h,
+                    "away_matches_7d": m7_a,
+                    "congestion_diff": m7_h - m7_a,
                     "n_home_hist": h_stats["n"],
                     "n_away_hist": a_stats["n"],
                 }
@@ -86,6 +92,8 @@ class FeatureEngineer:
             self._update_elo(elo, home, away, m["home_goals"], m["away_goals"])
             last_played[home] = m["date"]
             last_played[away] = m["date"]
+            recent[home].append(m["date"])
+            recent[away].append(m["date"])
             if i % 15000 == 0:
                 print(f"feature {i}/{len(df)}")
 
@@ -147,6 +155,11 @@ class FeatureEngineer:
             return 7
         return int(max((current - prev).days, 1))
 
+    @staticmethod
+    def _matches_in_days(dates: deque, current: pd.Timestamp, window: int) -> int:
+        cur = pd.Timestamp(current)
+        return sum(1 for d in dates if 0 < (cur - pd.Timestamp(d)).days <= window)
+
     def save(self, feat: pd.DataFrame, name: str = "features.csv") -> Path:
         dest = PROCESSED / name
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -160,4 +173,5 @@ class FeatureEngineer:
         "home_home_wr", "away_away_wr",
         "home_elo", "away_elo", "elo_diff",
         "month", "weekday", "home_rest_days", "away_rest_days", "rest_diff",
+        "home_matches_7d", "away_matches_7d", "congestion_diff",
     ]

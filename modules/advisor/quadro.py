@@ -53,6 +53,29 @@ def _src(
     }
 
 
+def validation_source(validation: dict[str, Any] | None) -> dict[str, Any]:
+    val = validation or {}
+    notes: list[str] = []
+    for key in ("venue", "tactical", "market", "stability", "form"):
+        block = val.get(key) or {}
+        notes.extend((block.get("notes") or [])[:2])
+    p_adj = val.get("p_validated") or {}
+    delta = val.get("delta_unified")
+    head = val.get("summary") or "controlli automatici"
+    if delta:
+        head = f"{head} · Δ voto {delta:+.1f}"
+    return _src(
+        "Validazione",
+        "stadio · tattica · mercato · ML/MC · forma (non EV)",
+        None,
+        p1=p_adj.get("home"),
+        px=p_adj.get("draw"),
+        p2=p_adj.get("away"),
+        missing=False,
+        note=head + ((" · " + " · ".join(notes[:6])) if notes else ""),
+    )
+
+
 def build_quadro(
     *,
     home: str,
@@ -63,6 +86,7 @@ def build_quadro(
     alignment: dict[str, Any] | None,
     market_move: dict[str, Any] | None,
     tipster: dict[str, Any] | None,
+    validation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     mc = prediction.get("montecarlo") or {}
     ml = prediction.get("model_probabilities") or {}
@@ -70,32 +94,48 @@ def build_quadro(
     xg = prediction.get("expected_goals") or {}
     fbref = prediction.get("fbref_context") or {}
     understat = prediction.get("understat_context") or {}
+    statsbomb = prediction.get("statsbomb_context") or {}
+    sofascore = prediction.get("sofascore_context") or {}
+    local_hist = prediction.get("history_context") or {}
+    if not local_hist:
+        try:
+            from modules.data_update.history import lookup_history_match
+
+            local_hist = lookup_history_match(home, away)
+        except Exception:
+            local_hist = {}
     p_draw = float(mc.get("draw") or ml.get("draw") or 0.26)
 
     sources: list[dict[str, Any]] = []
 
-    sources.append(
-        _src(
-            "Monte Carlo",
-            "simulazione gol",
-            _lean_1x2(mc.get("home_win"), mc.get("draw"), mc.get("away_win")),
-            p1=mc.get("home_win"),
-            px=mc.get("draw"),
-            p2=mc.get("away_win"),
-            note="distribuzione da λ gol",
+    if mc.get("home_win") is None:
+        sources.append(_src("Monte Carlo", "simulazione gol", None, missing=True, note="squadre non nel modello"))
+    else:
+        sources.append(
+            _src(
+                "Monte Carlo",
+                "simulazione gol",
+                _lean_1x2(mc.get("home_win"), mc.get("draw"), mc.get("away_win")),
+                p1=mc.get("home_win"),
+                px=mc.get("draw"),
+                p2=mc.get("away_win"),
+                note="distribuzione da λ gol",
+            )
         )
-    )
-    sources.append(
-        _src(
-            "Modello ML",
-            "classificatore 1X2",
-            _lean_1x2(ml.get("home_win"), ml.get("draw"), ml.get("away_win")),
-            p1=ml.get("home_win"),
-            px=ml.get("draw"),
-            p2=ml.get("away_win"),
-            note="feature forma/Elo interno/xG proxy",
+    if ml.get("home_win") is None:
+        sources.append(_src("Modello ML", "classificatore 1X2", None, missing=True, note="squadre non nel modello"))
+    else:
+        sources.append(
+            _src(
+                "Modello ML",
+                "classificatore 1X2",
+                _lean_1x2(ml.get("home_win"), ml.get("draw"), ml.get("away_win")),
+                p1=ml.get("home_win"),
+                px=ml.get("draw"),
+                p2=ml.get("away_win"),
+                note="feature forma/Elo interno/xG proxy",
+            )
         )
-    )
 
     m1 = next((m for m in (grouped.get("1x2") or []) if m.get("code") == "1"), None)
     mx = next((m for m in (grouped.get("1x2") or []) if m.get("code") == "X"), None)
@@ -177,26 +217,20 @@ def build_quadro(
 
     fb_h = fbref.get("home") or {}
     fb_a = fbref.get("away") or {}
-    if fb_h or fb_a:
-        # Segnale semplice da FBref: differenza G+A p90 e possesso palla.
+    if fb_h and fb_a:
         h_ga = fb_h.get("ga_p90")
         a_ga = fb_a.get("ga_p90")
         h_poss = fb_h.get("poss")
         a_poss = fb_a.get("poss")
-        if fb_h and fb_a:
-            try:
-                ga_diff = float(h_ga) - float(a_ga)
-            except (TypeError, ValueError):
-                ga_diff = 0.0
-            try:
-                poss_diff = (float(h_poss) - float(a_poss)) / 20.0
-            except (TypeError, ValueError):
-                poss_diff = 0.0
-            p_h2 = _clamp01(0.5 + ga_diff * 0.18 + poss_diff * 0.05)
-        elif fb_h:
-            p_h2 = 0.54
-        else:
-            p_h2 = 0.46
+        try:
+            ga_diff = float(h_ga) - float(a_ga)
+        except (TypeError, ValueError):
+            ga_diff = 0.0
+        try:
+            poss_diff = (float(h_poss) - float(a_poss)) / 20.0
+        except (TypeError, ValueError):
+            poss_diff = 0.0
+        p_h2 = _clamp01(0.5 + ga_diff * 0.18 + poss_diff * 0.05)
         p1, px, p2 = _two_way_to_1x2(p_h2, p_draw)
         note = (
             f"GA/90 {fb_h.get('ga_p90', 'n/d')} vs {fb_a.get('ga_p90', 'n/d')} · "
@@ -210,26 +244,165 @@ def build_quadro(
                 p1=p1,
                 px=px,
                 p2=p2,
-                note=note if (fb_h and fb_a) else f"{note} · copertura parziale",
+                note=note,
+            )
+        )
+    elif fb_h or fb_a:
+        sources.append(
+            _src(
+                "FBref",
+                "forma team avanzata",
+                None,
+                missing=True,
+                note="una sola squadra in cache, nessun lean",
             )
         )
     else:
         sources.append(_src("FBref", "forma team avanzata", None, missing=True, note="contesto non disponibile"))
 
+    tac = prediction.get("tactical") or {}
+    if not tac:
+        try:
+            from modules.advisor.tactics import match_tactics
+
+            tac = match_tactics(
+                home,
+                away,
+                None,
+                None,
+                fb_h,
+                fb_a,
+                country=prediction.get("country"),
+                league=prediction.get("league"),
+            )
+        except Exception:
+            tac = {}
+    style = (tac or {}).get("style") or {}
+    if style.get("ready"):
+        edge = float(style.get("edge_home") or 0)
+        p_h2 = _clamp01(0.5 + edge)
+        p1, px, p2 = _two_way_to_1x2(p_h2, p_draw)
+        sources.append(
+            _src(
+                "Matchup tattico",
+                "stile FBref (possesso, cross, transizioni)",
+                _lean_1x2(p1, px, p2),
+                p1=p1,
+                px=px,
+                p2=p2,
+                note=" · ".join(style.get("notes") or [])[:280],
+            )
+        )
+    else:
+        sources.append(
+            _src(
+                "Matchup tattico",
+                "stile FBref (possesso, cross, transizioni)",
+                None,
+                missing=True,
+                note=(style.get("notes") or ["copertura stile solo Big 5 FBref"])[0],
+            )
+        )
+    fat = (tac or {}).get("fatigue") or {}
+    if fat.get("ready"):
+        edge = float(fat.get("edge_home") or 0)
+        p_h2 = _clamp01(0.5 + edge)
+        p1, px, p2 = _two_way_to_1x2(p_h2, p_draw)
+        pick = _lean_1x2(p1, px, p2) if abs(edge) >= 0.03 else None
+        sources.append(
+            _src(
+                "Fatica / calendario",
+                "riposo, 3 in 7 giorni, viaggi",
+                pick,
+                p1=p1 if pick else None,
+                px=px if pick else None,
+                p2=p2 if pick else None,
+                note=" · ".join(fat.get("notes") or [])[:280],
+            )
+        )
+    else:
+        sources.append(_src("Fatica / calendario", "riposo, 3 in 7 giorni, viaggi", None, missing=True))
+    absn = (tac or {}).get("absences") or {}
+    if absn.get("ready"):
+        edge = float(absn.get("edge_home") or 0)
+        p_h2 = _clamp01(0.5 + edge)
+        p1, px, p2 = _two_way_to_1x2(p_h2, p_draw)
+        sources.append(
+            _src(
+                "Assenze / XI",
+                "WhoScored confermati × peso FBref xG+xA",
+                _lean_1x2(p1, px, p2) if abs(edge) >= 0.03 else None,
+                p1=p1 if abs(edge) >= 0.03 else None,
+                px=px if abs(edge) >= 0.03 else None,
+                p2=p2 if abs(edge) >= 0.03 else None,
+                note=(
+                    f"peso casa {absn.get('weight_home', 0):.0%} vs ospite {absn.get('weight_away', 0):.0%} · "
+                    + " · ".join(absn.get("notes") or [])
+                )[:280],
+            )
+        )
+    else:
+        sources.append(
+            _src(
+                "Assenze / XI",
+                "WhoScored confermati × peso FBref xG+xA",
+                None,
+                missing=True,
+                note=(absn.get("notes") or ["premi WhoScored a sinistra per i preview"])[0],
+            )
+        )
+    combos = (tac or {}).get("combos") or {}
+    if combos.get("ready") and combos.get("blend") is not None:
+        b = float(combos["blend"])
+        p_h2 = _clamp01(b)
+        p1, px, p2 = _two_way_to_1x2(p_h2, p_draw)
+        sources.append(
+            _src(
+                "Combo tattica",
+                "1 stile · 2 infortuni · 3 value/Asian",
+                _lean_1x2(p1, px, p2),
+                p1=p1,
+                px=px,
+                p2=p2,
+                note=(
+                    f"blend {b:.0%} · c1 {combos.get('combo1_tactics')} · "
+                    f"c2 {combos.get('combo2_injuries')} · c3 {combos.get('combo3_value')}"
+                ),
+            )
+        )
+    else:
+        sources.append(
+            _src(
+                "Combo tattica",
+                "1 stile · 2 infortuni · 3 value/Asian",
+                None,
+                missing=True,
+                note="servono almeno 2 combo (FBref/Sofascore, WhoScored, oppure EV+Asian)",
+            )
+        )
+    padj = (tac or {}).get("p_tactical")
+    if padj:
+        sources.append(
+            _src(
+                "P tattica",
+                "P_ML × (1−infortuni) × (1+stile) — non è EV",
+                _lean_1x2(padj.get("home"), padj.get("draw"), padj.get("away")),
+                p1=padj.get("home"),
+                px=padj.get("draw"),
+                p2=padj.get("away"),
+                note="solo lettura; Kelly e EV restano sul modello grezzo",
+            )
+        )
+
     us_h = understat.get("home") or {}
     us_a = understat.get("away") or {}
-    if us_h or us_a:
+    if us_h and us_a:
         h_diff = us_h.get("xg_diff")
         a_diff = us_a.get("xg_diff")
-        if us_h and us_a:
-            try:
-                p_h2 = _clamp01(0.5 + (float(h_diff) - float(a_diff)) * 0.25)
-            except (TypeError, ValueError):
-                p_h2 = 0.5
-        elif us_h:
-            p_h2 = 0.54
-        else:
-            p_h2 = 0.46
+        try:
+            p_h2 = _clamp01(0.5 + (float(h_diff) - float(a_diff)) * 0.25)
+        except (TypeError, ValueError):
+            p_h2 = 0.5
         p1, px, p2 = _two_way_to_1x2(p_h2, p_draw)
         sources.append(
             _src(
@@ -246,8 +419,130 @@ def build_quadro(
                 ),
             )
         )
+    elif us_h or us_a:
+        sources.append(
+            _src(
+                "Understat",
+                "xG reale storico",
+                None,
+                missing=True,
+                note="una sola squadra in cache, nessun lean",
+            )
+        )
     else:
         sources.append(_src("Understat", "xG reale storico", None, missing=True, note="contesto non disponibile"))
+
+    sb_h = statsbomb.get("home") or {}
+    sb_a = statsbomb.get("away") or {}
+    sb_n_ok = False
+    try:
+        sb_n_ok = float(sb_h.get("n") or 0) >= 5 and float(sb_a.get("n") or 0) >= 5
+    except (TypeError, ValueError):
+        sb_n_ok = False
+    if sb_h and sb_a and sb_n_ok:
+        try:
+            p_h2 = _clamp01(0.5 + (float(sb_h.get("gd_pg") or 0) - float(sb_a.get("gd_pg") or 0)) * 0.18)
+        except (TypeError, ValueError):
+            p_h2 = 0.5
+        p1, px, p2 = _two_way_to_1x2(p_h2, p_draw)
+        sources.append(
+            _src(
+                "StatsBomb",
+                "eventi open data",
+                _lean_1x2(p1, px, p2),
+                p1=p1,
+                px=px,
+                p2=p2,
+                note=(
+                    f"PPG {sb_h.get('ppg', 'n/d')} vs {sb_a.get('ppg', 'n/d')} · "
+                    f"GD/pg {sb_h.get('gd_pg', 'n/d')} vs {sb_a.get('gd_pg', 'n/d')} · "
+                    f"{sb_h.get('season') or sb_a.get('season') or ''} "
+                    f"(storico open data, non la stagione in corso)"
+                ).strip(),
+            )
+        )
+    elif sb_h or sb_a:
+        note = "una sola squadra in cache, nessun lean"
+        if sb_h and sb_a and not sb_n_ok:
+            note = "troppo pochi match nell'open data per un lean"
+        sources.append(_src("StatsBomb", "eventi open data", None, missing=True, note=note))
+    else:
+        sources.append(_src("StatsBomb", "eventi open data", None, missing=True, note="open data non copre queste squadre"))
+
+    sofa_h = sofascore.get("home") or {}
+    sofa_a = sofascore.get("away") or {}
+    if sofa_h and sofa_a:
+        try:
+            p_h2 = _clamp01(
+                0.5
+                + (float(sofa_h.get("ppg") or 0) - float(sofa_a.get("ppg") or 0)) * 0.16
+                + (float(sofa_h.get("gd_pg") or 0) - float(sofa_a.get("gd_pg") or 0)) * 0.04
+            )
+        except (TypeError, ValueError):
+            p_h2 = 0.5
+        p1, px, p2 = _two_way_to_1x2(p_h2, p_draw)
+        sources.append(
+            _src(
+                "Sofascore",
+                "classifica attuale",
+                _lean_1x2(p1, px, p2),
+                p1=p1,
+                px=px,
+                p2=p2,
+                note=(
+                    f"PPG {sofa_h.get('ppg', 'n/d')} vs {sofa_a.get('ppg', 'n/d')} · "
+                    f"Pts {sofa_h.get('pts', 'n/d')}-{sofa_a.get('pts', 'n/d')} · "
+                    f"{sofa_h.get('league') or ''}"
+                ).strip(),
+            )
+        )
+    elif sofa_h or sofa_a:
+        sources.append(
+            _src("Sofascore", "classifica attuale", None, missing=True, note="una sola squadra in cache, nessun lean")
+        )
+    else:
+        sources.append(_src("Sofascore", "classifica attuale", None, missing=True, note="contesto non disponibile"))
+
+    hist_h = (local_hist or {}).get("home") or {}
+    hist_a = (local_hist or {}).get("away") or {}
+    if local_hist.get("ready") and hist_h and hist_a:
+        try:
+            p_h2 = _clamp01(0.5 + (float(hist_h.get("gd_pg") or 0) - float(hist_a.get("gd_pg") or 0)) * 0.20)
+        except (TypeError, ValueError):
+            p_h2 = 0.5
+        p1, px, p2 = _two_way_to_1x2(p_h2, p_draw)
+        w = int(round(float(local_hist.get("weight") or 0.12) * 100))
+        sources.append(
+            _src(
+                "Storico locale",
+                f"esiti nostri (≥{local_hist.get('min_team', 6)} match/squadra)",
+                _lean_1x2(p1, px, p2),
+                p1=p1,
+                px=px,
+                p2=p2,
+                note=(
+                    f"PPG {hist_h.get('ppg')} vs {hist_a.get('ppg')} · "
+                    f"n {hist_h.get('n')}/{hist_a.get('n')} · "
+                    f"peso voto {w}% · chiusi globali {local_hist.get('n_global')}"
+                ),
+            )
+        )
+    else:
+        need_g = local_hist.get("min_global", 30)
+        need_t = local_hist.get("min_team", 6)
+        have = local_hist.get("n_global", 0)
+        sources.append(
+            _src(
+                "Storico locale",
+                "esiti nostri",
+                None,
+                missing=True,
+                note=(
+                    f"ancora non entra nel voto ({have}/{need_g} partite chiuse, "
+                    f"servono {need_t} per squadra)"
+                ),
+            )
+        )
 
     tip = tipster or {}
     if tip.get("n_sources"):
@@ -291,10 +586,25 @@ def build_quadro(
             )
         )
 
+    if validation:
+        sources.append(validation_source(validation))
+
     play_code = str(play.get("code") or "")
     play_group = play.get("group") or "1x2"
     votes = [s for s in sources if not s.get("mancante") and s.get("pick") in {"1", "X", "2"}]
-    if play_group != "1x2":
+    # Fonti esterne: validazione, non generazione. Niente maggioranza → pick.
+    if play_code not in {"1", "X", "2", "1X", "X2", "12", "1 DNB", "2 DNB"}:
+        consenso = "nessun pick"
+        agree, other = [], votes
+        n_votes = len(votes)
+        share = None
+        summary = (
+            "Nessun pick: ClubElo, FBref, tipster e le altre fonti validano, non generano giocate. "
+            "Servono modello e quota reale per edge, EV e Kelly."
+        )
+        play_code = "—"
+        play_group = "1x2"
+    elif play_group != "1x2":
         consenso = "quadro sul 1X2 (il pick è un altro mercato)"
         agree, other = [], votes
         n_votes = len(votes)
@@ -320,10 +630,15 @@ def build_quadro(
         else:
             consenso = "nessuna fonte sul pick"
 
+        no_model = ml.get("home_win") is None and mc.get("home_win") is None
         summary = (
             f"Pick {play_code}: {consenso}"
             + (f" ({len(agree)}/{n_votes} fonti)" if n_votes else "")
-            + ". EV e Kelly usano solo modello+quota, non questo quadro."
+            + (
+                ". Senza modello: le fonti esterne restano validazione, niente EV/Kelly."
+                if no_model
+                else ". EV e Kelly usano solo modello+quota, non questo quadro."
+            )
         )
         if other:
             contra = ", ".join(sorted({s["fonte"] for s in other}))
@@ -352,9 +667,11 @@ def build_quadro(
 
     gaps = [
         "xG vero Understat/FBref (qui è proxy da gol/forma)",
-        "infortuni e formazioni",
+        "infortuni e formazioni (XI live / Elo giocatore: nessuna fonte ufficiale gratis)",
+        "motivazioni e clima (salvezza, rotazioni da comunicato: il mercato Asian è il proxy)",
         "meteo",
-        "altri book oltre football-data e Bet365 Asian",
+        "altri book oltre football-data (Avg OddsPortal/BetBrain) e Bet365 Asian",
+        "OddsPortal/BetExplorer in tempo reale (niente libreria ufficiale, solo scraper)",
     ]
     if not club:
         gaps.insert(0, "ClubElo (download fallito o squadra assente)")
@@ -362,6 +679,12 @@ def build_quadro(
         gaps.insert(0, "FBref team stats (copertura lega/squadra limitata)")
     if not (us_h or us_a):
         gaps.insert(0, "Understat xG storico (copertura lega/squadra limitata)")
+    if not (sb_h or sb_a):
+        gaps.insert(0, "StatsBomb open data (poche stagioni club, soprattutto storiche)")
+    if not (sofa_h or sofa_a):
+        gaps.insert(0, "Sofascore classifica (Big 5, soccerdata)")
+    if not (local_hist or {}).get("ready"):
+        gaps.insert(0, "Storico locale (SQLite): poche partite chiuse per entrare nel voto")
 
     return {
         "summary": summary,
@@ -380,4 +703,5 @@ def build_quadro(
         ),
         "gaps": gaps,
         "play_code": play_code,
+        "validation": validation,
     }

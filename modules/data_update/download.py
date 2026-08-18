@@ -79,10 +79,17 @@ def download_all(*, seasons: tuple[str, ...] = SEASON_ZIPS) -> dict:
     try:
         from modules.data_update.cups import download_org_cups
 
-        cups = download_org_cups()
+        cups = download_org_cups(days=14)
     except Exception as exc:
         cups = {"n_cup_files": 0, "error": str(exc)}
         print(f"skip coppe org: {exc}")
+    try:
+        from modules.data_update.world_fixtures import download_world_fixtures
+
+        world = download_world_fixtures(days=14)
+    except Exception as exc:
+        world = {"n_world_fixtures": 0, "error": str(exc)}
+        print(f"skip calendario mondiale: {exc}")
     try:
         from modules.data_update.thesportsdb import download_cup_fixtures
 
@@ -93,7 +100,7 @@ def download_all(*, seasons: tuple[str, ...] = SEASON_ZIPS) -> dict:
     try:
         from modules.data_update.api_football import download_cup_fixtures as download_api_football_cups
 
-        apif = download_api_football_cups()
+        apif = download_api_football_cups(days=14)
     except Exception as exc:
         apif = {"n_cup_files": 0, "error": str(exc)}
         print(f"skip coppe API-Football: {exc}")
@@ -111,6 +118,20 @@ def download_all(*, seasons: tuple[str, ...] = SEASON_ZIPS) -> dict:
     except Exception as exc:
         understat = {"ok": False, "n_teams": 0, "error": str(exc)}
         print(f"skip Understat context: {exc}")
+    try:
+        from modules.data_update.statsbomb_context import download_statsbomb_context
+
+        statsbomb = download_statsbomb_context()
+    except Exception as exc:
+        statsbomb = {"ok": False, "n_teams": 0, "error": str(exc)}
+        print(f"skip StatsBomb context: {exc}")
+    try:
+        from modules.data_update.sofascore_context import download_sofascore_context
+
+        sofascore = download_sofascore_context()
+    except Exception as exc:
+        sofascore = {"ok": False, "n_teams": 0, "error": str(exc)}
+        print(f"skip Sofascore context: {exc}")
     elo_n = 0
     try:
         from modules.data_update.clubelo import fetch_clubelo
@@ -126,8 +147,11 @@ def download_all(*, seasons: tuple[str, ...] = SEASON_ZIPS) -> dict:
         "cup_files": int(cups.get("n_cup_files", 0)) + int(tsdb.get("n_cup_files", 0)) + int(apif.get("n_cup_files", 0)),
         "cup_tsdb_fixtures": tsdb.get("n_cup_fixtures", 0),
         "cup_api_football_fixtures": apif.get("n_cup_fixtures", 0),
+        "world_fixtures": world.get("n_world_fixtures", 0),
         "fbref_teams": fbref.get("n_teams", 0),
         "understat_teams": understat.get("n_teams", 0),
+        "statsbomb_teams": statsbomb.get("n_teams", 0),
+        "sofascore_teams": sofascore.get("n_teams", 0),
         "n_clubelo": elo_n,
         "source": BASE,
     }

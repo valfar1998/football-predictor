@@ -72,9 +72,13 @@ class MatchPredictor:
         last = pd.concat([home, away], ignore_index=True).sort_values("date").groupby("team").tail(1)
         self.last_idx = dict(zip(last["team"], last["index"]))
 
-    def _latest_row(self, home: str, away: str) -> pd.Series:
+    def _latest_row(self, home: str, away: str, kickoff=None) -> pd.Series:
         """Usa l'ultima riga in cui ciascuna squadra compare, poi ricompone un vettore pre-match."""
-        home, away = _norm(home), _norm(away)
+        from modules.data_update.team_names import known_team_index, resolve_known_team
+
+        idx = known_team_index(self.last_idx.keys())
+        home = resolve_known_team(home, idx) or _norm(home)
+        away = resolve_known_team(away, idx) or _norm(away)
         if home not in self.last_idx or away not in self.last_idx:
             missing = [t for t in (home, away) if t not in self.last_idx]
             raise KeyError(f"Squadra non nel dataset: {', '.join(missing)}")
@@ -110,9 +114,13 @@ class MatchPredictor:
 
         hs = side(h_last, home, "home", "away")
         aws = side(a_last, away, "home", "away")
-        today = pd.Timestamp.now()
-        return pd.Series(
-            {
+        ko = pd.Timestamp(kickoff) if kickoff is not None else pd.Timestamp.now()
+        ko = ko.normalize()
+        rest_h = int(max((ko - pd.Timestamp(h_last["date"]).normalize()).days, 1))
+        rest_a = int(max((ko - pd.Timestamp(a_last["date"]).normalize()).days, 1))
+        m7_h = self._matches_7d(home, ko)
+        m7_a = self._matches_7d(away, ko)
+        payload = {
                 "home_form_pts": hs["form_pts"],
                 "away_form_pts": aws["form_pts"],
                 "home_form_gd": hs["form_gd"],
@@ -132,17 +140,35 @@ class MatchPredictor:
                 "home_elo": hs["elo"],
                 "away_elo": aws["elo"],
                 "elo_diff": hs["elo"] - aws["elo"],
-                "month": int(today.month),
-                "weekday": int(today.weekday()),
-                "home_rest_days": hs["rest"],
-                "away_rest_days": aws["rest"],
-                "rest_diff": hs["rest"] - aws["rest"],
+                "month": int(ko.month),
+                "weekday": int(ko.weekday()),
+                "home_rest_days": rest_h,
+                "away_rest_days": rest_a,
+                "rest_diff": rest_h - rest_a,
+                "home_matches_7d": m7_h,
+                "away_matches_7d": m7_a,
+                "congestion_diff": m7_h - m7_a,
             }
-        )
+        return pd.Series(payload)
 
-    def predict(self, home_team: str, away_team: str) -> dict:
-        row = self._latest_row(home_team, away_team)
-        x = pd.DataFrame([row[self.feature_cols]])
+    def _matches_7d(self, team: str, kickoff: pd.Timestamp) -> int:
+        mask = (self.features["home_team"] == team) | (self.features["away_team"] == team)
+        dates = pd.to_datetime(self.features.loc[mask, "date"], errors="coerce")
+        return int(((dates >= kickoff - pd.Timedelta(days=7)) & (dates < kickoff)).sum())
+
+    def predict(self, home_team: str, away_team: str, kickoff=None) -> dict:
+        from modules.data_update.team_names import known_team_index, resolve_known_team
+
+        idx = known_team_index(self.last_idx.keys())
+        home_team = resolve_known_team(home_team, idx) or _norm(home_team)
+        away_team = resolve_known_team(away_team, idx) or _norm(away_team)
+        row = self._latest_row(home_team, away_team, kickoff=kickoff)
+        present = [c for c in self.feature_cols if c in row.index]
+        x = pd.DataFrame([row[present]])
+        for c in self.feature_cols:
+            if c not in x.columns:
+                x[c] = 0
+        x = x[self.feature_cols]
         proba = self.model.predict_proba(x)[0]
         # allinea all'ordine encoder (H, D, A)
         mapping = {cls: float(p) for cls, p in zip(self.encoder.classes_, proba)}

@@ -332,10 +332,14 @@ def consensus_for(home: str, away: str) -> dict[str, Any]:
 
 
 def apply_tipster_balance(play: dict[str, Any], tipster: dict[str, Any] | None) -> dict[str, Any]:
-    """I tipster non entrano nell'EV: solo aggiustamento lieve del voto."""
+    """I tipster non entrano nell'EV: solo aggiustamento lieve del voto su un pick già valido."""
     out = dict(play)
     if not tipster or not tipster.get("n_sources"):
         out["tipster"] = tipster or {"n_sources": 0, "label": "n/d"}
+        out["tipster_delta"] = 0
+        return out
+    if out.get("action") in {"n/d", "invalido"} or out.get("score") is None:
+        out["tipster"] = {**tipster, "agree": "n/d"}
         out["tipster_delta"] = 0
         return out
     pick = str(out.get("code") or "")

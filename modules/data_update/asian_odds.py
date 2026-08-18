@@ -14,16 +14,29 @@ ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / "data" / "raw" / "asian_odds.json"
 
 BASE = "https://botbot3.space/tables/v4"
+PAGE = "https://www.asianbetsoccer.com/it/nextgame.html"
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; football-predictor/1.0)",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    ),
     "Referer": "https://www.asianbetsoccer.com/it/nextgame.html",
+    "Accept": "*/*",
+    "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
 }
 
+# Hash ruotati dal sito; se 404, fetch_asian_odds li rilege da nextgame.html.
 BOOKS = {
-    "bet365": "12fa2eba2655cdc08a0d92fd601c498da2f49b54",
-    "188bet": "6161483bb3095c88f7e154d712b5decd13c888f4",
-    "avg": "f742dd97165c680c4b28d22dd56d0567189f8e3d",
-    "sbobet": "a812ffd882c5e9447002429bab519de4b78002c6",
+    "bet365": "60e3327f197d791424608bd18905b74d09c8247d",
+    "188bet": "f85973abdc9aebfd6dab7dd995a4b1a830b6deba",
+    "avg": "ed3b0bd5a48a2f9801674f8e7efd7fc8640be069",
+    "sbobet": "a232e19a17cec69d03dac9024a5ddc624c411f37",
+}
+_BOOK_LABELS = {
+    "bet365": "bet365",
+    "188bet": "188bet",
+    "avgodds": "avg",
+    "sbobet": "sbobet",
 }
 
 MOVE_LEVELS = ("Stabile", "Leggero", "Medio", "Forte", "Fortissimo", "Raro")
@@ -131,13 +144,35 @@ def _extract_calls(source: str, fn: str) -> list[list[str | float | int]]:
     return calls
 
 
+def _http_get(url: str, timeout: int = 45) -> str:
+    req = urllib.request.Request(url, headers=HEADERS)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", "replace")
+
+
+def refresh_book_ids() -> dict[str, str]:
+    """Rilegge gli hash bookmaker dalla pagina, perché AsianBetSoccer li ruota."""
+    html = _http_get(PAGE, timeout=30)
+    found: dict[str, str] = {}
+    for val, label in re.findall(
+        r'<option[^>]*value=["\']([a-f0-9]{40})["\'][^>]*>([^<]+)',
+        html,
+        flags=re.I,
+    ):
+        key = _BOOK_LABELS.get(re.sub(r"\s+", "", label).strip().lower())
+        if key:
+            found[key] = val
+    if found:
+        BOOKS.update(found)
+        print("asian book hash:", ", ".join(f"{k}={v[:8]}…" for k, v in sorted(found.items())))
+    return found
+
+
 def _fetch_js(day_offset: int, book: str = "bet365", stats: str = "Q") -> str:
     book_id = BOOKS.get(book, book)
     day_key = f"tablenext/day{day_offset}"
     url = f"{BASE}/{stats}/{day_key}/{book_id}.js?date={int(time.time() * 1000)}"
-    req = urllib.request.Request(url, headers=HEADERS)
-    with urllib.request.urlopen(req, timeout=45) as resp:
-        return resp.read().decode("utf-8", "replace")
+    return _http_get(url, timeout=45)
 
 
 def _float(val: object) -> float | None:
@@ -252,9 +287,27 @@ def parse_payload(js: str, *, day_offset: int, book: str) -> list[dict]:
 
 def fetch_asian_odds(*, days: int = 14, book: str = "bet365") -> list[dict]:
     rows: list[dict] = []
+    try:
+        refresh_book_ids()
+        refreshed = True
+    except Exception as exc:
+        print(f"asian hash skip: {exc}")
+        refreshed = False
     for offset in range(max(0, days)):
         try:
             js = _fetch_js(offset, book=book)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404 and not refreshed:
+                try:
+                    refresh_book_ids()
+                    refreshed = True
+                    js = _fetch_js(offset, book=book)
+                except Exception as retry_exc:
+                    print(f"asian skip day{offset}: HTTP {exc.code} ({retry_exc})")
+                    continue
+            else:
+                print(f"asian skip day{offset}: HTTP {exc.code}")
+                continue
         except urllib.error.URLError as exc:
             print(f"asian skip day{offset}: {exc}")
             continue
