@@ -9,6 +9,7 @@ import pandas as pd
 
 from modules.advisor.advise import advise
 from modules.data_update.asian_odds import asian_to_advisor_odds, find_asian_odds, summarize_moves
+from modules.data_update.cups import known_team_index, resolve_known_team
 from modules.data_update.parse import load_fixtures
 from modules.montecarlo import MonteCarloSimulator
 from modules.predictor import MatchPredictor
@@ -36,11 +37,13 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
 
     predictor = MatchPredictor()
     sim = MonteCarloSimulator(n_sims=n_sims)
+    team_idx = known_team_index(predictor.last_idx.keys())
     rows: list[dict] = []
     skipped = 0
 
     for _, fx in fixtures.iterrows():
-        home, away = str(fx["home_team"]), str(fx["away_team"])
+        home = resolve_known_team(str(fx["home_team"]), team_idx) or str(fx["home_team"])
+        away = resolve_known_team(str(fx["away_team"]), team_idx) or str(fx["away_team"])
         try:
             pred = predictor.predict(home, away)
         except KeyError:
@@ -59,6 +62,11 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
             "under_2.5": _odd(fx, "odd_under_25"),
         }
         odds_source = "football-data.co.uk"
+        src = str(fx.get("source") or "")
+        if src.startswith("fixtures-cups-asian") or "asian" in src:
+            odds_source = "asianbetsoccer"
+        elif src.startswith("fd.org") or src.startswith("fixtures-cups"):
+            odds_source = "football-data.org"
         asian = find_asian_odds(home, away, fx["date"].strftime("%Y-%m-%d"))
         market_move = None
         if asian:
@@ -76,6 +84,7 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
                 "away_win": pred["away_win"],
             },
             "expected_goals": {"home": pred["lambda_home"], "away": pred["lambda_away"]},
+            "features": pred.get("features") or {},
             "montecarlo": mc,
             "league": str(fx.get("league") or ""),
         }
@@ -159,6 +168,11 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
                 "ev_sharp": play.get("ev_sharp"),
                 "odds_real": play.get("odds_real"),
                 "value_note": play.get("value_note"),
+                "quadro_consenso": None if not advice.get("quadro") else advice["quadro"].get("consenso"),
+                "quadro_n": None
+                if not advice.get("quadro")
+                else f"{advice['quadro'].get('agree_n')}/{advice['quadro'].get('votes_n')}",
+                "quadro_summary": None if not advice.get("quadro") else advice["quadro"].get("summary"),
                 "pick": play["code"],
                 "pick_name": play["name"],
                 "pick_group": play.get("group"),
@@ -194,5 +208,5 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"upcoming {len(rows)} partite (saltate senza storia: {skipped})")
+    print(f"upcoming {len(rows)} partite (saltate senza storia: {skipped}, coppe incluse se in AsianBetSoccer)")
     return rows

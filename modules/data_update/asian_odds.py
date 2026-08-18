@@ -250,7 +250,7 @@ def parse_payload(js: str, *, day_offset: int, book: str) -> list[dict]:
     return out
 
 
-def fetch_asian_odds(*, days: int = 7, book: str = "bet365") -> list[dict]:
+def fetch_asian_odds(*, days: int = 14, book: str = "bet365") -> list[dict]:
     rows: list[dict] = []
     for offset in range(max(0, days)):
         try:

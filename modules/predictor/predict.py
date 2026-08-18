@@ -20,6 +20,21 @@ def _norm(name: str) -> str:
     return normalize_team(name)
 
 
+def _json_num(val):
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return None
+    try:
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(val, (np.integer, int)) and not isinstance(val, bool):
+        return int(val)
+    if isinstance(val, (np.floating, float)):
+        return float(val)
+    return val
+
+
 class MatchPredictor:
     def __init__(self, model_path: str | Path | None = None, features_path: str | Path | None = None) -> None:
         self.model_path = Path(model_path) if model_path else MODELS / "best_model.joblib"
@@ -147,7 +162,7 @@ class MatchPredictor:
             "away_win": round(p_a, 4),
             "lambda_home": round(lam_h, 3),
             "lambda_away": round(lam_a, 3),
-            "features": {k: (float(row[k]) if isinstance(row[k], (int, float, np.floating)) else row[k]) for k in self.feature_cols},
+            "features": {k: _json_num(row[k]) for k in self.feature_cols},
         }
 
 

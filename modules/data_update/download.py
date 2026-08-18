@@ -76,9 +76,26 @@ def download_all(*, seasons: tuple[str, ...] = SEASON_ZIPS) -> dict:
     seasons_ok = [s for s in seasons if download_season_zip(s)]
     extra = download_extra_leagues()
     fixtures = download_fixtures()
+    try:
+        from modules.data_update.cups import download_org_cups
+
+        cups = download_org_cups()
+    except Exception as exc:
+        cups = {"n_cup_files": 0, "error": str(exc)}
+        print(f"skip coppe org: {exc}")
+    elo_n = 0
+    try:
+        from modules.data_update.clubelo import fetch_clubelo
+
+        elo = fetch_clubelo()
+        elo_n = 0 if elo is None or elo.empty else int(len(elo))
+    except Exception as exc:
+        print(f"skip ClubElo: {exc}")
     return {
         "seasons": seasons_ok,
         "extra_files": len(extra),
         "fixture_files": [str(p) for p in fixtures],
+        "cup_files": cups.get("n_cup_files", 0),
+        "n_clubelo": elo_n,
         "source": BASE,
     }

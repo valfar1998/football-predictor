@@ -216,10 +216,30 @@ def _kind_label(kind: str) -> str:
     }.get(kind, kind)
 
 
+def _fmt_pair(a, b, *, digits: int = 1, pct: bool = False) -> str:
+    def one(v) -> str:
+        if v is None:
+            return "—"
+        try:
+            if pd.isna(v):
+                return "—"
+            n = float(v)
+        except (TypeError, ValueError):
+            return "—"
+        if pct:
+            return f"{n:.0%}" if digits == 0 else f"{n:.{digits}%}"
+        if digits == 0:
+            return f"{n:.0f}"
+        return f"{n:.{digits}f}"
+
+    return f"{one(a)} – {one(b)}"
+
+
 def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
     wanted = [
         "date", "time", "country", "league", "home", "away",
-        "pick", "pick_name", "action", "score", "kelly_quarter", "clv", "tipster_consensus", "tipster_agree",
+        "pick", "pick_name", "action", "score", "kelly_quarter", "clv",
+        "quadro_consenso", "quadro_n", "tipster_consensus", "tipster_agree",
         "score_reason_1", "score_reason_2", "probability",
         "quota_pick", "fair_odds", "edge_pp", "ev_cons", "ev_sharp",
         "odds_real", "value_note",
@@ -261,6 +281,8 @@ def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
             "score": "Voto",
             "kelly_quarter": "Kelly ¼",
             "clv": "CLV vs apertura",
+            "quadro_consenso": "Quadro",
+            "quadro_n": "Fonti vs pick",
             "tipster_consensus": "Tipster",
             "tipster_agree": "Vs tipster",
             "score_reason_1": "Perché questo voto",
@@ -494,6 +516,67 @@ def render_advice(
                 "Se sono contrari e il mercato è liquido contro, scatta il no-bet."
             )
 
+    quadro = advice.get("quadro") or {}
+    if quadro.get("sources"):
+        with st.container(border=True):
+            st.subheader("Quadro analisi")
+            st.caption(quadro.get("summary") or "")
+            feat = quadro.get("form") or {}
+            with st.container(horizontal=True):
+                st.metric("Consenso fonti", quadro.get("consenso") or "—", border=True)
+                n_a, n_v = quadro.get("agree_n"), quadro.get("votes_n")
+                st.metric(
+                    "Allineate sul pick",
+                    f"{n_a}/{n_v}" if n_v else "—",
+                    border=True,
+                )
+                st.metric(
+                    "Forma (pti)",
+                    _fmt_pair(feat.get("pts_casa"), feat.get("pts_trasferta"), digits=1),
+                    border=True,
+                )
+                st.metric(
+                    "Riposo (gg)",
+                    _fmt_pair(feat.get("riposo_casa"), feat.get("riposo_trasferta"), digits=0),
+                    border=True,
+                )
+                st.metric(
+                    "xG proxy",
+                    _fmt_pair(feat.get("xg_casa"), feat.get("xg_trasferta"), digits=2),
+                    border=True,
+                )
+            wr = _fmt_pair(feat.get("wr_casa"), feat.get("wr_trasferta"), digits=0, pct=True)
+            if wr != "— – —":
+                st.caption(f"Win rate casa / trasferta: {wr}")
+            club = quadro.get("clubelo")
+            if club:
+                st.caption(
+                    f"ClubElo {club['home'].get('club')} {club['home'].get('elo')} "
+                    f"(#{club['home'].get('rank') or '—'}) vs "
+                    f"{club['away'].get('club')} {club['away'].get('elo')} "
+                    f"(#{club['away'].get('rank') or '—'})"
+                )
+            rows = []
+            for s in quadro["sources"]:
+                rows.append(
+                    {
+                        "Fonte": s.get("fonte"),
+                        "Idea": s.get("idea"),
+                        "Lean": s.get("pick"),
+                        "1": f"{s['p_1']:.0%}" if s.get("p_1") is not None else "—",
+                        "X": f"{s['p_x']:.0%}" if s.get("p_x") is not None else "—",
+                        "2": f"{s['p_2']:.0%}" if s.get("p_2") is not None else "—",
+                        "Nota": s.get("nota") or "—",
+                    }
+                )
+            st.dataframe(rows, width="stretch", hide_index=True)
+            st.caption("EV e Kelly restano su modello + quota reale. Questo quadro non entra nel conto.")
+            gaps = quadro.get("gaps") or []
+            if gaps:
+                with st.expander("Cosa non è incluso"):
+                    for g in gaps:
+                        st.markdown(f"- {g}")
+
     grouped = advice.get("grouped") or {"1x2": advice.get("markets") or []}
     for key, label in GROUP_LABEL.items():
         block = grouped.get(key) or []
@@ -508,6 +591,7 @@ def render_advice(
         st.bar_chart({s["score"]: s["prob"] for s in scores}, x_label="Risultato", y_label="Probabilità")
     st.caption(
         "Quote 1X2 e Over/Under da football-data.co.uk e, se disponibili, AsianBetSoccer (Bet365). "
+        "Le coppe (Champions, Europa League, Libertadores, AFC Champions, …) arrivano da AsianBetSoccer. "
         "Le variazioni apertura→attuale (1X2, handicap, totale) confermano o scontano il voto: "
         "non sostituiscono il modello. Confronta sempre con il tuo bookmaker."
     )
@@ -516,7 +600,7 @@ def render_advice(
 st.title("Consiglio mercati")
 st.caption(
     "1X2, doppia chance, DNB, Over/Under 0.5–4.5, Gol/No gol, over squadra, combo. "
-    "Dati football-data.co.uk; quote anche da AsianBetSoccer quando disponibili."
+    "Campionati da football-data.co.uk; coppe europee, sudamericane e asiatiche da AsianBetSoccer."
 )
 
 with st.sidebar:
@@ -570,7 +654,7 @@ with st.sidebar:
             f"Brier {cal.get('brier_multiclass_calibrated') or cal.get('brier_favorite_calibrated', '—')}, "
             f"ECE {cal.get('ece_calibrated', '—')}"
         )
-    st.caption("Quote: football-data.co.uk + AsianBetSoccer (Bet365)")
+    st.caption("Quote: football-data.co.uk + AsianBetSoccer (coppe continentali)")
 
 upcoming = _load_upcoming_enriched(
     UPCOMING.stat().st_mtime if UPCOMING.exists() else 0.0,

@@ -13,6 +13,7 @@ from modules.advisor.staking import (
     quarter_kelly,
 )
 from modules.advisor.value import PLAY_VALUE_KEYS, enrich_value
+from modules.advisor.quadro import build_quadro
 
 
 def _clamp_score(value: float) -> int:
@@ -695,6 +696,16 @@ def advise(
         play["no_bet_reasons"] = []
 
     reason1, reason2 = explain_pick(play, alignment=alignment, market_move=market_move, ml_prob=ml_for_play)
+    quadro = build_quadro(
+        home=home,
+        away=away,
+        play=play,
+        prediction=prediction,
+        grouped=grouped,
+        alignment=alignment,
+        market_move=market_move,
+        tipster=play.get("tipster") or tipster,
+    )
 
     return {
         "match": prediction.get("match"),
@@ -717,6 +728,7 @@ def advise(
         "tipster": play.get("tipster") or tipster,
         "score_reason_1": reason1,
         "score_reason_2": reason2,
+        "quadro": quadro,
     }
 
 
@@ -748,6 +760,8 @@ def format_advice(advice: dict[str, Any]) -> str:
         lines.append(f"  Quote  {move['movement_comment']}")
     elif advice.get("score_reason_2"):
         lines.append(f"  Nota   {advice['score_reason_2']}")
+    if advice.get("quadro"):
+        lines.append(f"  Quadro {advice['quadro'].get('summary')}")
     alt = advice.get("play_alt")
     if alt and alt["code"] != play["code"]:
         lines.append(f"  Alt    {alt['code']}  {alt['name']}  {alt['score']}/10")

@@ -55,9 +55,16 @@ def refresh_odds_pipeline(*, asian: bool = True) -> dict:
     download_season_zip(SEASON_ZIPS[-1])
     asian_info: dict = {}
     if asian:
-        rows = fetch_asian_odds(days=7, book="bet365")
+        rows = fetch_asian_odds(days=14, book="bet365")
         path = save_asian_odds(rows)
         asian_info = {"n_asian": len(rows), "asian_cache": str(path)}
+    try:
+        from modules.data_update.clubelo import fetch_clubelo
+
+        elo = fetch_clubelo()
+        asian_info["n_clubelo"] = 0 if elo is None or elo.empty else int(len(elo))
+    except Exception as exc:
+        asian_info["clubelo_error"] = str(exc)
     tips_info: dict = {}
     try:
         tips = fetch_tipsters()
@@ -68,7 +75,7 @@ def refresh_odds_pipeline(*, asian: bool = True) -> dict:
     return {"n_upcoming": len(upcoming), "source": "football-data.co.uk + asianbetsoccer", **asian_info, **tips_info}
 
 
-def asian_odds_pipeline(*, days: int = 7, book: str = "bet365") -> dict:
+def asian_odds_pipeline(*, days: int = 14, book: str = "bet365") -> dict:
     rows = fetch_asian_odds(days=days, book=book)
     path = save_asian_odds(rows)
     tips_info: dict = {}
@@ -77,6 +84,14 @@ def asian_odds_pipeline(*, days: int = 7, book: str = "bet365") -> dict:
         tips_info = {"n_tipsters": tips.get("n"), "tipster_counts": tips.get("counts")}
     except Exception as exc:
         tips_info = {"tipster_error": str(exc)}
+    elo_info: dict = {}
+    try:
+        from modules.data_update.clubelo import fetch_clubelo
+
+        elo = fetch_clubelo()
+        elo_info["n_clubelo"] = 0 if elo is None or elo.empty else int(len(elo))
+    except Exception as exc:
+        elo_info["clubelo_error"] = str(exc)
     upcoming = build_upcoming()
     return {
         "n_asian": len(rows),
@@ -85,6 +100,7 @@ def asian_odds_pipeline(*, days: int = 7, book: str = "bet365") -> dict:
         "book": book,
         "days": days,
         **tips_info,
+        **elo_info,
     }
 
 
@@ -148,6 +164,7 @@ def predict_pipeline(home: str, away: str, n_sims: int = 10_000) -> dict:
             "away_win": pred["away_win"],
         },
         "expected_goals": {"home": pred["lambda_home"], "away": pred["lambda_away"]},
+        "features": pred.get("features") or {},
         "montecarlo": sim,
     }
     dest = OUT_DIR / "last_prediction.json"

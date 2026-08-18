@@ -203,7 +203,16 @@ def load_historical(min_date: str = "2019-07-01") -> pd.DataFrame:
             frames.append(part)
     if not frames:
         return pd.DataFrame()
-    df = pd.concat(frames, ignore_index=True)
+    df = pd.concat([f for f in frames if not f.empty], ignore_index=True)
+    try:
+        from modules.data_update.cups import load_org_cup_results
+
+        cups = load_org_cup_results()
+        if not cups.empty:
+            frames_hist = [df, cups]
+            df = pd.concat(frames_hist, ignore_index=True)
+    except Exception as exc:
+        print(f"skip coppe storiche: {exc}")
     df = df[df["date"] >= pd.Timestamp(min_date)]
     df = df.drop_duplicates(subset=["date", "home_team", "away_team"], keep="last")
     return df.sort_values("date").reset_index(drop=True)
@@ -260,9 +269,18 @@ def load_fixtures() -> pd.DataFrame:
         frames.append(parse_main_fixtures(main))
     if extra.exists():
         frames.append(parse_extra_fixtures(extra))
+    try:
+        from modules.data_update.cups import load_cup_fixtures
+
+        cups = load_cup_fixtures()
+        if not cups.empty:
+            frames.append(cups)
+    except Exception as exc:
+        print(f"skip coppe in calendario: {exc}")
+    frames = [f for f in frames if f is not None and not f.empty]
     if not frames:
         return pd.DataFrame()
-    df = pd.concat([f for f in frames if not f.empty], ignore_index=True)
+    df = pd.concat(frames, ignore_index=True)
     df = df.dropna(subset=["date", "home_team", "away_team"])
     today = pd.Timestamp.now().normalize() - pd.Timedelta(days=1)
     df = df[df["date"] >= today]
