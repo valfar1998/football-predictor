@@ -26,6 +26,10 @@ def _elo_home_win(elo_h: float, elo_a: float, hfa: float = 65.0) -> float:
     return 1.0 / (1.0 + 10 ** (-((elo_h + hfa - elo_a) / 400.0)))
 
 
+def _clamp01(x: float) -> float:
+    return max(0.01, min(0.99, x))
+
+
 def _src(
     name: str,
     idea: str,
@@ -64,6 +68,8 @@ def build_quadro(
     ml = prediction.get("model_probabilities") or {}
     feat = prediction.get("features") or {}
     xg = prediction.get("expected_goals") or {}
+    fbref = prediction.get("fbref_context") or {}
+    understat = prediction.get("understat_context") or {}
     p_draw = float(mc.get("draw") or ml.get("draw") or 0.26)
 
     sources: list[dict[str, Any]] = []
@@ -168,6 +174,80 @@ def build_quadro(
                 note=f"{float(lam_h):.2f} – {float(lam_a):.2f} · non è xG Understat/FBref, è stima da forma/gol",
             )
         )
+
+    fb_h = fbref.get("home") or {}
+    fb_a = fbref.get("away") or {}
+    if fb_h or fb_a:
+        # Segnale semplice da FBref: differenza G+A p90 e possesso palla.
+        h_ga = fb_h.get("ga_p90")
+        a_ga = fb_a.get("ga_p90")
+        h_poss = fb_h.get("poss")
+        a_poss = fb_a.get("poss")
+        if fb_h and fb_a:
+            try:
+                ga_diff = float(h_ga) - float(a_ga)
+            except (TypeError, ValueError):
+                ga_diff = 0.0
+            try:
+                poss_diff = (float(h_poss) - float(a_poss)) / 20.0
+            except (TypeError, ValueError):
+                poss_diff = 0.0
+            p_h2 = _clamp01(0.5 + ga_diff * 0.18 + poss_diff * 0.05)
+        elif fb_h:
+            p_h2 = 0.54
+        else:
+            p_h2 = 0.46
+        p1, px, p2 = _two_way_to_1x2(p_h2, p_draw)
+        note = (
+            f"GA/90 {fb_h.get('ga_p90', 'n/d')} vs {fb_a.get('ga_p90', 'n/d')} · "
+            f"Poss {fb_h.get('poss', 'n/d')}% vs {fb_a.get('poss', 'n/d')}%"
+        )
+        sources.append(
+            _src(
+                "FBref",
+                "forma team avanzata",
+                _lean_1x2(p1, px, p2),
+                p1=p1,
+                px=px,
+                p2=p2,
+                note=note if (fb_h and fb_a) else f"{note} · copertura parziale",
+            )
+        )
+    else:
+        sources.append(_src("FBref", "forma team avanzata", None, missing=True, note="contesto non disponibile"))
+
+    us_h = understat.get("home") or {}
+    us_a = understat.get("away") or {}
+    if us_h or us_a:
+        h_diff = us_h.get("xg_diff")
+        a_diff = us_a.get("xg_diff")
+        if us_h and us_a:
+            try:
+                p_h2 = _clamp01(0.5 + (float(h_diff) - float(a_diff)) * 0.25)
+            except (TypeError, ValueError):
+                p_h2 = 0.5
+        elif us_h:
+            p_h2 = 0.54
+        else:
+            p_h2 = 0.46
+        p1, px, p2 = _two_way_to_1x2(p_h2, p_draw)
+        sources.append(
+            _src(
+                "Understat",
+                "xG reale storico",
+                _lean_1x2(p1, px, p2),
+                p1=p1,
+                px=px,
+                p2=p2,
+                note=(
+                    f"xGdiff {us_h.get('xg_diff', 'n/d')} vs {us_a.get('xg_diff', 'n/d')} · "
+                    f"xG {us_h.get('xg_for', 'n/d')}/{us_h.get('xg_against', 'n/d')} vs "
+                    f"{us_a.get('xg_for', 'n/d')}/{us_a.get('xg_against', 'n/d')}"
+                ),
+            )
+        )
+    else:
+        sources.append(_src("Understat", "xG reale storico", None, missing=True, note="contesto non disponibile"))
 
     tip = tipster or {}
     if tip.get("n_sources"):
@@ -278,6 +358,10 @@ def build_quadro(
     ]
     if not club:
         gaps.insert(0, "ClubElo (download fallito o squadra assente)")
+    if not (fb_h or fb_a):
+        gaps.insert(0, "FBref team stats (copertura lega/squadra limitata)")
+    if not (us_h or us_a):
+        gaps.insert(0, "Understat xG storico (copertura lega/squadra limitata)")
 
     return {
         "summary": summary,
@@ -288,6 +372,12 @@ def build_quadro(
         "sources": sources,
         "form": form,
         "clubelo": club,
+        "fbref_summary": None
+        if not (fb_h or fb_a)
+        else (
+            f"FBref GA/90 {fb_h.get('ga_p90', 'n/d')} vs {fb_a.get('ga_p90', 'n/d')} · "
+            f"Poss {fb_h.get('poss', 'n/d')}% vs {fb_a.get('poss', 'n/d')}%"
+        ),
         "gaps": gaps,
         "play_code": play_code,
     }

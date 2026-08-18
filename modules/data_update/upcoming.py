@@ -10,6 +10,8 @@ import pandas as pd
 from modules.advisor.advise import advise
 from modules.data_update.asian_odds import asian_to_advisor_odds, find_asian_odds, summarize_moves
 from modules.data_update.cups import known_team_index, resolve_known_team
+from modules.data_update.fbref_context import load_fbref_team_index, lookup_team_context
+from modules.data_update.understat_context import load_understat_team_index, lookup_understat_team
 from modules.data_update.parse import load_fixtures
 from modules.montecarlo import MonteCarloSimulator
 from modules.predictor import MatchPredictor
@@ -38,6 +40,8 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
     predictor = MatchPredictor()
     sim = MonteCarloSimulator(n_sims=n_sims)
     team_idx = known_team_index(predictor.last_idx.keys())
+    fbref_idx = load_fbref_team_index()
+    understat_idx = load_understat_team_index()
     rows: list[dict] = []
     skipped = 0
 
@@ -85,6 +89,14 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
             },
             "expected_goals": {"home": pred["lambda_home"], "away": pred["lambda_away"]},
             "features": pred.get("features") or {},
+            "fbref_context": {
+                "home": lookup_team_context(pred["home_team"], fbref_idx),
+                "away": lookup_team_context(pred["away_team"], fbref_idx),
+            },
+            "understat_context": {
+                "home": lookup_understat_team(pred["home_team"], understat_idx),
+                "away": lookup_understat_team(pred["away_team"], understat_idx),
+            },
             "montecarlo": mc,
             "league": str(fx.get("league") or ""),
         }
@@ -173,12 +185,16 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
                 if not advice.get("quadro")
                 else f"{advice['quadro'].get('agree_n')}/{advice['quadro'].get('votes_n')}",
                 "quadro_summary": None if not advice.get("quadro") else advice["quadro"].get("summary"),
+                "fbref_ctx": None if not advice.get("quadro") else advice["quadro"].get("fbref_summary"),
                 "pick": play["code"],
                 "pick_name": play["name"],
                 "pick_group": play.get("group"),
                 "action": play.get("action") or "gioca",
                 "no_bet_reasons": play.get("no_bet_reasons") or [],
                 "score": play["score"],
+                "score_unified": play.get("score_unified"),
+                "meta_label": None if not play.get("meta_analysis") else play["meta_analysis"].get("label"),
+                "meta_note": None if not play.get("meta_analysis") else play["meta_analysis"].get("note"),
                 "kelly_quarter": play.get("kelly_quarter"),
                 "clv": play.get("clv"),
                 "quota_pick": pick_quota,

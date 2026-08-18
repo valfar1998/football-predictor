@@ -83,6 +83,34 @@ def download_all(*, seasons: tuple[str, ...] = SEASON_ZIPS) -> dict:
     except Exception as exc:
         cups = {"n_cup_files": 0, "error": str(exc)}
         print(f"skip coppe org: {exc}")
+    try:
+        from modules.data_update.thesportsdb import download_cup_fixtures
+
+        tsdb = download_cup_fixtures()
+    except Exception as exc:
+        tsdb = {"n_cup_files": 0, "error": str(exc)}
+        print(f"skip coppe TheSportsDB: {exc}")
+    try:
+        from modules.data_update.api_football import download_cup_fixtures as download_api_football_cups
+
+        apif = download_api_football_cups()
+    except Exception as exc:
+        apif = {"n_cup_files": 0, "error": str(exc)}
+        print(f"skip coppe API-Football: {exc}")
+    try:
+        from modules.data_update.fbref_context import download_fbref_context
+
+        fbref = download_fbref_context()
+    except Exception as exc:
+        fbref = {"ok": False, "n_teams": 0, "error": str(exc)}
+        print(f"skip FBref context: {exc}")
+    try:
+        from modules.data_update.understat_context import download_understat_context
+
+        understat = download_understat_context()
+    except Exception as exc:
+        understat = {"ok": False, "n_teams": 0, "error": str(exc)}
+        print(f"skip Understat context: {exc}")
     elo_n = 0
     try:
         from modules.data_update.clubelo import fetch_clubelo
@@ -95,7 +123,11 @@ def download_all(*, seasons: tuple[str, ...] = SEASON_ZIPS) -> dict:
         "seasons": seasons_ok,
         "extra_files": len(extra),
         "fixture_files": [str(p) for p in fixtures],
-        "cup_files": cups.get("n_cup_files", 0),
+        "cup_files": int(cups.get("n_cup_files", 0)) + int(tsdb.get("n_cup_files", 0)) + int(apif.get("n_cup_files", 0)),
+        "cup_tsdb_fixtures": tsdb.get("n_cup_fixtures", 0),
+        "cup_api_football_fixtures": apif.get("n_cup_fixtures", 0),
+        "fbref_teams": fbref.get("n_teams", 0),
+        "understat_teams": understat.get("n_teams", 0),
         "n_clubelo": elo_n,
         "source": BASE,
     }

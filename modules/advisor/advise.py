@@ -67,6 +67,78 @@ def _ml_mc_divergence(mc_prob: float, ml_prob: float | None) -> float:
     return abs(float(mc_prob) - float(ml_prob))
 
 
+def _clip01(x: float) -> float:
+    return max(0.0, min(1.0, float(x)))
+
+
+def _safe_float(x: Any, default: float = 0.0) -> float:
+    try:
+        if x is None:
+            return default
+        return float(x)
+    except (TypeError, ValueError):
+        return default
+
+
+def _meta_analysis(
+    play: dict[str, Any],
+    *,
+    alignment: dict[str, Any] | None,
+    market_move: dict[str, Any] | None,
+    quadro: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Unico indicatore: value+kelly+asian+workflow, a supporto del voto."""
+    ev = play.get("ev_cons")
+    if ev is None:
+        ev = play.get("ev")
+    edge = play.get("edge_pp")
+    kelly_q = _safe_float(play.get("kelly_quarter"))
+
+    ev_norm = _clip01((_safe_float(ev, -0.08) + 0.08) / 0.20)  # -8%..+12%
+    edge_norm = _clip01((_safe_float(edge, -0.03) + 0.03) / 0.08)  # -3pp..+5pp
+    value_norm = 0.6 * ev_norm + 0.4 * edge_norm
+
+    kelly_norm = _clip01(kelly_q / 0.03)  # 0..3%
+
+    move_lvl = (market_move or {}).get("movement_level") or "Stabile"
+    lvl_map = {"Stabile": 0.45, "Leggero": 0.55, "Medio": 0.65, "Forte": 0.75, "Fortissimo": 0.82, "Raro": 0.88}
+    align_lbl = (alignment or {}).get("label") or "n/d"
+    align_map = {"allineato": 0.78, "misto": 0.55, "n/d": 0.50, "contrario": 0.28}
+    asian_norm = 0.65 * align_map.get(align_lbl, 0.50) + 0.35 * lvl_map.get(move_lvl, 0.50)
+
+    q = quadro or {}
+    share = q.get("agree_share")
+    share_norm = _safe_float(share, 0.50)
+    src = q.get("sources") or []
+    fb_ok = any(s.get("fonte") == "FBref" and not s.get("mancante") for s in src)
+    us_ok = any(s.get("fonte") == "Understat" and not s.get("mancante") for s in src)
+    coverage = 1.0 if (fb_ok and us_ok) else 0.75 if (fb_ok or us_ok) else 0.45
+    workflow_norm = 0.7 * share_norm + 0.3 * coverage
+
+    final_norm = (
+        0.38 * value_norm
+        + 0.22 * kelly_norm
+        + 0.22 * asian_norm
+        + 0.18 * workflow_norm
+    )
+    final_score = _clamp_score(1 + 9 * final_norm)
+    if play.get("action") == "no_bet":
+        final_score = min(final_score, 5)
+
+    return {
+        "score": final_score,
+        "value": round(value_norm, 3),
+        "kelly": round(kelly_norm, 3),
+        "asian": round(asian_norm, 3),
+        "workflow": round(workflow_norm, 3),
+        "label": "solida" if final_score >= 8 else "interessante" if final_score >= 6 else "debole",
+        "note": (
+            f"value {value_norm:.0%} · kelly {kelly_norm:.0%} · "
+            f"asian {asian_norm:.0%} · workflow {workflow_norm:.0%}"
+        ),
+    }
+
+
 def score_composite(market: dict[str, Any]) -> int:
     """Voto giocabilità: probabilità, robustezza ML/MC, value, Kelly e calibrazione storica."""
     cal = load_calibration()
@@ -706,6 +778,10 @@ def advise(
         market_move=market_move,
         tipster=play.get("tipster") or tipster,
     )
+    meta = _meta_analysis(play, alignment=alignment, market_move=market_move, quadro=quadro)
+    play["score_unified"] = meta["score"]
+    play["meta_analysis"] = meta
+    reason2 = (reason2 + " · " if reason2 else "") + f"Voto unificato {meta['score']}/10 ({meta['note']})"
 
     return {
         "match": prediction.get("match"),
@@ -728,6 +804,7 @@ def advise(
         "tipster": play.get("tipster") or tipster,
         "score_reason_1": reason1,
         "score_reason_2": reason2,
+        "meta_analysis": meta,
         "quadro": quadro,
     }
 
@@ -745,6 +822,7 @@ def format_advice(advice: dict[str, Any]) -> str:
         f"  {advice['match']}",
         f"  GIOCA  {play['code']}   {play['name']}",
         f"  Voto   {play['score']}/10   ({kind_it})",
+        f"  Mix    {play.get('score_unified', play['score'])}/10   (asian+kelly+workflow)",
         f"  Prob   {play['probability']:.1%}",
     ]
     if play.get("action") == "no_bet":

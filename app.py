@@ -22,6 +22,10 @@ from modules.data_update.asian_odds import (
     summarize_moves,
 )
 from modules.predictor import list_known_teams, list_team_meta
+from modules.data_update.cups import download_org_cups, org_token_configured, save_org_token
+from modules.data_update.fbref_context import download_fbref_context
+from modules.data_update.understat_context import download_understat_context
+from modules.visualization.mplsoccer_profiles import plot_team_radar
 
 ROOT = Path(__file__).resolve().parent
 LAST = ROOT / "data" / "processed" / "last_prediction.json"
@@ -106,6 +110,15 @@ def _pct(val: float | None) -> str | None:
     if val is None:
         return None
     return f"{float(val):+.0%}"
+
+
+def _safe_pct(val) -> str:
+    if val is None:
+        return "—"
+    try:
+        return f"{float(val):.0%}"
+    except (TypeError, ValueError):
+        return "—"
 
 
 def _pp(val: float | None) -> str | None:
@@ -238,7 +251,7 @@ def _fmt_pair(a, b, *, digits: int = 1, pct: bool = False) -> str:
 def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
     wanted = [
         "date", "time", "country", "league", "home", "away",
-        "pick", "pick_name", "action", "score", "kelly_quarter", "clv",
+        "pick", "pick_name", "action", "score", "score_unified", "meta_label", "meta_note", "kelly_quarter", "clv",
         "quadro_consenso", "quadro_n", "tipster_consensus", "tipster_agree",
         "score_reason_1", "score_reason_2", "probability",
         "quota_pick", "fair_odds", "edge_pp", "ev_cons", "ev_sharp",
@@ -279,6 +292,9 @@ def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
             "pick_name": "Mercato",
             "action": "Azione",
             "score": "Voto",
+            "score_unified": "Voto unificato",
+            "meta_label": "Qualità mix",
+            "meta_note": "Dettaglio mix",
             "kelly_quarter": "Kelly ¼",
             "clv": "CLV vs apertura",
             "quadro_consenso": "Quadro",
@@ -386,6 +402,8 @@ def render_advice(
         )
         st.markdown(_score_bar(play["score"]), unsafe_allow_html=True)
         st.markdown(f"**{play['score']} / 10**")
+        if play.get("score_unified") is not None:
+            st.caption(f"Voto unificato (Asian + Kelly + workflow): **{play['score_unified']}/10**")
         if play.get("action") == "no_bet":
             st.warning("No bet — " + "; ".join(play.get("no_bet_reasons") or ["filtro edge/mercato"]))
         r1 = advice.get("score_reason_1")
@@ -445,6 +463,17 @@ def render_advice(
                 )
             if play.get("value_note"):
                 st.caption(play["value_note"])
+        meta = play.get("meta_analysis") or advice.get("meta_analysis") or {}
+        if meta:
+            with st.container(border=True):
+                st.markdown("**Mix unico analisi**")
+                with st.container(horizontal=True):
+                    st.metric("Voto unificato", f"{meta.get('score', '—')}/10", border=True)
+                    st.metric("Value", f"{_safe_pct(meta.get('value'))}", border=True)
+                    st.metric("Kelly", f"{_safe_pct(meta.get('kelly'))}", border=True)
+                    st.metric("Asian", f"{_safe_pct(meta.get('asian'))}", border=True)
+                    st.metric("Workflow", f"{_safe_pct(meta.get('workflow'))}", border=True)
+                st.caption(f"Lettura finale: {meta.get('label', 'n/d')} · {meta.get('note', '')}")
         alt = advice.get("play_alt")
         if alt and alt["code"] != play["code"]:
             st.caption(f"Alternativa: **{alt['code']}** {alt['name']} · {alt['score']}/10")
@@ -591,7 +620,8 @@ def render_advice(
         st.bar_chart({s["score"]: s["prob"] for s in scores}, x_label="Risultato", y_label="Probabilità")
     st.caption(
         "Quote 1X2 e Over/Under da football-data.co.uk e, se disponibili, AsianBetSoccer (Bet365). "
-        "Le coppe (Champions, Europa League, Libertadores, AFC Champions, …) arrivano da AsianBetSoccer. "
+        "Le coppe (Champions, Europa League, Libertadores, AFC Champions, …) arrivano da football-data.org "
+        "e, come fallback, TheSportsDB/AsianBetSoccer. "
         "Le variazioni apertura→attuale (1X2, handicap, totale) confermano o scontano il voto: "
         "non sostituiscono il modello. Confronta sempre con il tuo bookmaker."
     )
@@ -600,7 +630,7 @@ def render_advice(
 st.title("Consiglio mercati")
 st.caption(
     "1X2, doppia chance, DNB, Over/Under 0.5–4.5, Gol/No gol, over squadra, combo. "
-    "Campionati da football-data.co.uk; coppe europee, sudamericane e asiatiche da AsianBetSoccer."
+    "Campionati da football-data.co.uk; coppe da football-data.org con fallback TheSportsDB."
 )
 
 with st.sidebar:
@@ -645,6 +675,57 @@ with st.sidebar:
         else:
             st.success("Calibrazione completata")
             st.rerun()
+    org_token = st.text_input(
+        "Token football-data.org",
+        type="password",
+        help="Gratis su football-data.org/client/register. Serve per GET /v4/matches (Champions, Europa League, …).",
+    )
+    if org_token.strip():
+        save_org_token(org_token.strip())
+    if org_token_configured():
+        st.caption("Token football-data.org impostato · GET /v4/matches")
+    else:
+        st.caption("Senza token la Champions non entra: football-data.co.uk e Asian (ora 404) non la coprono.")
+    if st.button("Scarica coppe (football-data.org)", width="stretch"):
+        if not org_token_configured():
+            st.error("Incolla prima il token gratis di football-data.org.")
+        else:
+            with st.spinner("GET /v4/matches e ricalcolo calendario…"):
+                from modules.data_update.upcoming import build_upcoming
+
+                info = download_org_cups()
+                upcoming_n = len(build_upcoming())
+            if not info.get("token"):
+                st.error("Token assente o non letto.")
+            elif info.get("error"):
+                st.error(str(info["error"]))
+            else:
+                n = info.get("n_cup_fixtures") or 0
+                comps = ", ".join(info.get("competitions") or []) or "nessuna coppa in finestra"
+                st.success(f"Coppe: {n} match · {comps} · calendario {upcoming_n} partite")
+                st.rerun()
+    if st.button("Aggiorna contesto FBref (soccerdata)", width="stretch"):
+        with st.spinner("Scarico statistiche squadra FBref e aggiorno calendario…"):
+            from modules.data_update.upcoming import build_upcoming
+
+            info = download_fbref_context()
+            upcoming_n = len(build_upcoming())
+        if info.get("error"):
+            st.error(f"FBref: {info['error']}")
+        else:
+            st.success(f"FBref: {info.get('n_teams', 0)} squadre in cache · calendario {upcoming_n} partite")
+            st.rerun()
+    if st.button("Aggiorna contesto Understat xG", width="stretch"):
+        with st.spinner("Scarico xG Understat e aggiorno calendario…"):
+            from modules.data_update.upcoming import build_upcoming
+
+            info = download_understat_context()
+            upcoming_n = len(build_upcoming())
+        if info.get("error"):
+            st.error(f"Understat: {info['error']}")
+        else:
+            st.success(f"Understat: {info.get('n_teams', 0)} squadre in cache · calendario {upcoming_n} partite")
+            st.rerun()
     cal = load_calibration()
     if cal.get("fitted_at"):
         st.caption(
@@ -654,7 +735,10 @@ with st.sidebar:
             f"Brier {cal.get('brier_multiclass_calibrated') or cal.get('brier_favorite_calibrated', '—')}, "
             f"ECE {cal.get('ece_calibrated', '—')}"
         )
-    st.caption("Quote: football-data.co.uk + AsianBetSoccer (coppe continentali)")
+    st.caption(
+        "Quote campionati: football-data.co.uk. Coppe: football-data.org + fallback TheSportsDB/API-Football. "
+        "Contesto tecnico extra: FBref + Understat via soccerdata (solo quadro, non EV/Kelly)."
+    )
 
 upcoming = _load_upcoming_enriched(
     UPCOMING.stat().st_mtime if UPCOMING.exists() else 0.0,
@@ -662,7 +746,71 @@ upcoming = _load_upcoming_enriched(
     if (ROOT / "data" / "raw" / "asian_odds.json").exists()
     else 0.0,
 )
-tab_cal, tab_mkt, tab_one, tab_eval = st.tabs(["Calendario", "Tutti i mercati", "Singola partita", "Valutazione"])
+tab_flow, tab_cal, tab_mkt, tab_one, tab_eval = st.tabs(
+    ["Workflow 1-2-3", "Calendario", "Tutti i mercati", "Singola partita", "Valutazione"]
+)
+
+with tab_flow:
+    st.subheader("Ordine operativo per analisi e voto giocate")
+    st.caption("Segui questo ordine: estrazione dati 2026 -> predizione -> conferma visiva prima del voto finale.")
+    step = st.selectbox(
+        "Step",
+        ["1) Estrazione (soccerdata)", "2) Predizione (predictor)", "3) Visualizzazione (mplsoccer)"],
+        index=0,
+        key="flow_step",
+    )
+
+    if step == "1) Estrazione (soccerdata)":
+        season = st.number_input("Stagione target", min_value=2018, max_value=2035, value=2026, step=1, key="flow_season")
+        st.write("- Scarica statistiche avanzate squadra (xG, possesso, produzione offensiva).")
+        st.write("- Aggiorna cache locale per usare i dati nel quadro e nelle viste tattiche.")
+        if st.button("Esegui step 1: estrazione", type="primary", key="flow_extract"):
+            with st.spinner("Scarico FBref + Understat..."):
+                from modules.data_update.upcoming import build_upcoming
+
+                fb = download_fbref_context(seasons=[int(season)])
+                us = download_understat_context(seasons=[int(season)])
+                n_up = len(build_upcoming())
+            if fb.get("error") and us.get("error"):
+                st.error(f"FBref: {fb.get('error')} | Understat: {us.get('error')}")
+            else:
+                st.success(
+                    f"Estrazione completata - FBref squadre: {fb.get('n_teams', 0)} | "
+                    f"Understat squadre: {us.get('n_teams', 0)} | calendario: {n_up}"
+                )
+
+    elif step == "2) Predizione (predictor)":
+        st.write("- Rigenera il calendario pronosticato con modello + Monte Carlo + quote.")
+        st.write("- Valuta il voto con EV/edge, allineamento mercato e consenso del quadro.")
+        if st.button("Esegui step 2: predizione", type="primary", key="flow_predict"):
+            with st.spinner("Ricalcolo upcoming predictions..."):
+                from modules.data_update.upcoming import build_upcoming
+
+                rows = build_upcoming()
+            st.success(f"Predizione aggiornata su {len(rows)} partite.")
+            if rows:
+                df_rows = pd.DataFrame(rows)
+                st.dataframe(
+                    _prepare_calendario_show(df_rows).head(20),
+                    width="stretch",
+                    hide_index=True,
+                )
+
+    else:
+        st.write("- Confronta visivamente forze/debolezze squadra con radar mplsoccer.")
+        st.write("- Usa il radar per confermare o ridimensionare il voto della giocata.")
+        if upcoming:
+            opts = [f"{m['home']} vs {m['away']} ({m.get('league') or '-'})" for m in upcoming]
+            chosen = st.selectbox("Partita da visualizzare", opts, key="flow_match")
+            row = upcoming[opts.index(chosen)]
+            home, away = row["home"], row["away"]
+            fig, tbl = plot_team_radar(home, away)
+            st.pyplot(fig)
+            tbl_show = tbl.rename(columns={home: f"{home} (0-100)", away: f"{away} (0-100)"})
+            st.dataframe(tbl_show, width="stretch", hide_index=True)
+            st.caption("Il radar e la tabella sono supporto decisionale: EV/Kelly restano invariati.")
+        else:
+            st.info("Nessuna partita disponibile. Esegui prima lo step 1 e 2.")
 
 with tab_cal:
     if not upcoming:

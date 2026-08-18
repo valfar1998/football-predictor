@@ -21,6 +21,8 @@ from modules.montecarlo import MonteCarloSimulator
 from modules.calibration import run_full_calibration
 from modules.predictor import MatchPredictor
 from modules.tipsters import fetch_tipsters
+from modules.data_update.fbref_context import lookup_team_context, load_fbref_team_index
+from modules.data_update.understat_context import lookup_understat_team, load_understat_team_index
 
 OUT_DIR = ROOT / "data" / "processed"
 
@@ -65,6 +67,41 @@ def refresh_odds_pipeline(*, asian: bool = True) -> dict:
         asian_info["n_clubelo"] = 0 if elo is None or elo.empty else int(len(elo))
     except Exception as exc:
         asian_info["clubelo_error"] = str(exc)
+    try:
+        from modules.data_update.cups import download_org_cups
+
+        cups_info = download_org_cups()
+    except Exception as exc:
+        cups_info = {"n_cup_files": 0, "error": str(exc)}
+        print(f"skip coppe org: {exc}")
+    try:
+        from modules.data_update.thesportsdb import download_cup_fixtures
+
+        tsdb_info = download_cup_fixtures()
+    except Exception as exc:
+        tsdb_info = {"n_cup_files": 0, "error": str(exc)}
+        print(f"skip coppe TheSportsDB: {exc}")
+    try:
+        from modules.data_update.api_football import download_cup_fixtures as download_api_football_cups
+
+        apif_info = download_api_football_cups()
+    except Exception as exc:
+        apif_info = {"n_cup_files": 0, "error": str(exc)}
+        print(f"skip coppe API-Football: {exc}")
+    try:
+        from modules.data_update.fbref_context import download_fbref_context
+
+        fbref_info = download_fbref_context()
+    except Exception as exc:
+        fbref_info = {"ok": False, "n_teams": 0, "error": str(exc)}
+        print(f"skip FBref context: {exc}")
+    try:
+        from modules.data_update.understat_context import download_understat_context
+
+        understat_info = download_understat_context()
+    except Exception as exc:
+        understat_info = {"ok": False, "n_teams": 0, "error": str(exc)}
+        print(f"skip Understat context: {exc}")
     tips_info: dict = {}
     try:
         tips = fetch_tipsters()
@@ -72,7 +109,17 @@ def refresh_odds_pipeline(*, asian: bool = True) -> dict:
     except Exception as exc:
         tips_info = {"tipster_error": str(exc)}
     upcoming = build_upcoming()
-    return {"n_upcoming": len(upcoming), "source": "football-data.co.uk + asianbetsoccer", **asian_info, **tips_info}
+    return {
+        "n_upcoming": len(upcoming),
+        "source": "football-data.co.uk + football-data.org + thesportsdb + asianbetsoccer",
+        **asian_info,
+        **tips_info,
+        **{f"cups_{k}": v for k, v in cups_info.items()},
+        **{f"tsdb_{k}": v for k, v in tsdb_info.items()},
+        **{f"apif_{k}": v for k, v in apif_info.items()},
+        **{f"fbref_{k}": v for k, v in fbref_info.items()},
+        **{f"understat_{k}": v for k, v in understat_info.items()},
+    }
 
 
 def asian_odds_pipeline(*, days: int = 14, book: str = "bet365") -> dict:
@@ -92,6 +139,34 @@ def asian_odds_pipeline(*, days: int = 14, book: str = "bet365") -> dict:
         elo_info["n_clubelo"] = 0 if elo is None or elo.empty else int(len(elo))
     except Exception as exc:
         elo_info["clubelo_error"] = str(exc)
+    tsdb_info: dict = {}
+    try:
+        from modules.data_update.thesportsdb import download_cup_fixtures
+
+        tsdb_info = download_cup_fixtures()
+    except Exception as exc:
+        tsdb_info = {"error": str(exc)}
+    apif_info: dict = {}
+    try:
+        from modules.data_update.api_football import download_cup_fixtures as download_api_football_cups
+
+        apif_info = download_api_football_cups()
+    except Exception as exc:
+        apif_info = {"error": str(exc)}
+    fbref_info: dict = {}
+    try:
+        from modules.data_update.fbref_context import download_fbref_context
+
+        fbref_info = download_fbref_context()
+    except Exception as exc:
+        fbref_info = {"error": str(exc)}
+    understat_info: dict = {}
+    try:
+        from modules.data_update.understat_context import download_understat_context
+
+        understat_info = download_understat_context()
+    except Exception as exc:
+        understat_info = {"error": str(exc)}
     upcoming = build_upcoming()
     return {
         "n_asian": len(rows),
@@ -101,6 +176,10 @@ def asian_odds_pipeline(*, days: int = 14, book: str = "bet365") -> dict:
         "days": days,
         **tips_info,
         **elo_info,
+        **{f"tsdb_{k}": v for k, v in tsdb_info.items()},
+        **{f"apif_{k}": v for k, v in apif_info.items()},
+        **{f"fbref_{k}": v for k, v in fbref_info.items()},
+        **{f"understat_{k}": v for k, v in understat_info.items()},
     }
 
 
@@ -165,6 +244,14 @@ def predict_pipeline(home: str, away: str, n_sims: int = 10_000) -> dict:
         },
         "expected_goals": {"home": pred["lambda_home"], "away": pred["lambda_away"]},
         "features": pred.get("features") or {},
+        "fbref_context": {
+            "home": lookup_team_context(pred["home_team"], load_fbref_team_index()),
+            "away": lookup_team_context(pred["away_team"], load_fbref_team_index()),
+        },
+        "understat_context": {
+            "home": lookup_understat_team(pred["home_team"], load_understat_team_index()),
+            "away": lookup_understat_team(pred["away_team"], load_understat_team_index()),
+        },
         "montecarlo": sim,
     }
     dest = OUT_DIR / "last_prediction.json"
