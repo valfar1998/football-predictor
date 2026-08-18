@@ -1,4 +1,4 @@
-name: Telegram Asian alerts
+name: Telegram alerts
 
 on:
   schedule:
@@ -8,20 +8,36 @@ on:
 jobs:
   notify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+          cache: pip
+          cache-dependency-path: requirements-cloud.txt
+
+      - name: Dipendenze cloud
+        run: pip install -r requirements-cloud.txt
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/models/best_model.joblib
+            data/processed/features.csv
+          key: cloud-model-${{ github.run_id }}
+          restore-keys: |
+            cloud-model-
 
       - uses: actions/cache/restore@v4
         with:
           path: data/processed/telegram_alerts_sent.json
-          key: telegram-alerts-sent-v1
+          key: telegram-sent-${{ github.run_id }}
+          restore-keys: |
+            telegram-sent-
 
-      - name: Scarica Asian e avvisa Telegram
+      - name: Asian + calendario + Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -32,4 +48,4 @@ jobs:
         if: always() && hashFiles('data/processed/telegram_alerts_sent.json') != ''
         with:
           path: data/processed/telegram_alerts_sent.json
-          key: telegram-alerts-sent-v1
+          key: telegram-sent-${{ github.run_id }}
