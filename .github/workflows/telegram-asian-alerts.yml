@@ -8,7 +8,7 @@ on:
 jobs:
   notify:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -37,11 +37,26 @@ jobs:
           restore-keys: |
             telegram-sent-
 
-      - name: Asian + calendario + Telegram
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/raw/asian_odds.json
+            data/raw/pinnacle_odds.json
+            data/raw/odds-api-remaining.txt
+            data/raw/betfair_odds.json
+          key: odds-cache-${{ github.run_id }}
+          restore-keys: |
+            odds-cache-
+
+      - name: Asian + Pinnacle + Betfair + Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FOOTBALL_DATA_ORG_TOKEN: ${{ secrets.FOOTBALL_DATA_ORG_TOKEN }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
+          BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
+          BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
           PYTHONUTF8: "1"
         run: python scripts/notify_cloud.py
 
@@ -50,3 +65,13 @@ jobs:
         with:
           path: data/processed/telegram_alerts_sent.json
           key: telegram-sent-${{ github.run_id }}
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            data/raw/asian_odds.json
+            data/raw/pinnacle_odds.json
+            data/raw/odds-api-remaining.txt
+            data/raw/betfair_odds.json
+          key: odds-cache-${{ github.run_id }}

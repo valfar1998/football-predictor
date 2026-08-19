@@ -60,6 +60,33 @@ def _venue_fields(fx: pd.Series) -> dict:
     }
 
 
+_BOOK_FILL = (
+    ("odd_home", "1"),
+    ("odd_draw", "X"),
+    ("odd_away", "2"),
+    ("odd_over_25", "over_2.5"),
+    ("odd_under_25", "under_2.5"),
+)
+
+
+def _fill_book_odds(
+    odds: dict,
+    odds_source: str,
+    match: dict | None,
+    source_name: str,
+) -> tuple[dict, str]:
+    if not match:
+        return odds, odds_source
+    filled = False
+    for src_k, dst_k in _BOOK_FILL:
+        if odds.get(dst_k) is None and match.get(src_k) is not None:
+            odds[dst_k] = match[src_k]
+            filled = True
+    if filled and odds_source not in {"asianbetsoccer"}:
+        odds_source = source_name
+    return odds, odds_source
+
+
 def _val_fields(play: dict | None, extra: dict | None = None) -> dict:
     val = (play or {}).get("validation") or {}
     if not val and extra:
@@ -94,6 +121,21 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
     from modules.advisor.tactics import build_calendar_index, match_tactics
 
     cal_idx = build_calendar_index()
+
+    # Cache quote esterne: zero chiamate API durante il ciclo
+    _pinnacle_events: list[dict] = []
+    _betfair_events: list[dict] = []
+    try:
+        from modules.data_update.odds_api import load_pinnacle_cache
+        _pinnacle_events = load_pinnacle_cache()
+    except Exception:
+        pass
+    try:
+        from modules.data_update.betfair import load_betfair_cache
+        _betfair_events = load_betfair_cache()
+    except Exception:
+        pass
+
     rows: list[dict] = []
     skipped = 0
 
@@ -122,6 +164,23 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
                         odds[k] = v
                 odds_source = "asianbetsoccer"
                 market_move = summarize_moves(asian)
+            # Pinnacle / Betfair: riempiono solo i buchi (non sovrascrivono Asian)
+            _pinnacle_match = None
+            if _pinnacle_events:
+                try:
+                    from modules.data_update.odds_api import lookup_pinnacle
+                    _pinnacle_match = lookup_pinnacle(home, away, events=_pinnacle_events, kickoff_date=fx["date"].strftime("%Y-%m-%d"))
+                except Exception:
+                    pass
+            odds, odds_source = _fill_book_odds(odds, odds_source, _pinnacle_match, "pinnacle")
+            _bf_match = None
+            if _betfair_events:
+                try:
+                    from modules.data_update.betfair import lookup_betfair
+                    _bf_match = lookup_betfair(home, away, events=_betfair_events, kickoff_date=fx["date"].strftime("%Y-%m-%d"))
+                except Exception:
+                    pass
+            odds, odds_source = _fill_book_odds(odds, odds_source, _bf_match, "betfair")
             stub = {
                 "match": f"{home} vs {away}",
                 "model_probabilities": {},
@@ -269,6 +328,22 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
                     odds[k] = v
             odds_source = "asianbetsoccer"
             market_move = summarize_moves(asian)
+        _pinnacle_match = None
+        if _pinnacle_events:
+            try:
+                from modules.data_update.odds_api import lookup_pinnacle
+                _pinnacle_match = lookup_pinnacle(home, away, events=_pinnacle_events, kickoff_date=fx["date"].strftime("%Y-%m-%d"))
+            except Exception:
+                pass
+        odds, odds_source = _fill_book_odds(odds, odds_source, _pinnacle_match, "pinnacle")
+        _bf_match = None
+        if _betfair_events:
+            try:
+                from modules.data_update.betfair import lookup_betfair
+                _bf_match = lookup_betfair(home, away, events=_betfair_events, kickoff_date=fx["date"].strftime("%Y-%m-%d"))
+            except Exception:
+                pass
+        odds, odds_source = _fill_book_odds(odds, odds_source, _bf_match, "betfair")
         prediction = {
             "match": f"{pred['home_team']} vs {pred['away_team']}",
             "model_probabilities": {

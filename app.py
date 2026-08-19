@@ -579,11 +579,14 @@ def render_advice(
                 )
                 kq = play.get("kelly_quarter")
                 st.metric("Kelly ¼", f"{kq:.1%}" if kq is not None else "—", border=True)
-                st.metric(
-                    "Fonte",
-                    play.get("odds_source") or ("ipotetica" if play.get("odds_real") is False else "—"),
-                    border=True,
-                )
+                odds_src = play.get("odds_source") or ("ipotetica" if play.get("odds_real") is False else "—")
+                odds_sharp_val = play.get("odds_sharp")
+                fonte_label = odds_src
+                if odds_sharp_val and str(odds_src).lower() not in {"asianbetsoccer"}:
+                    fonte_label = f"{odds_src} · sharp {odds_sharp_val}"
+                elif odds_src == "pinnacle":
+                    fonte_label = "Pinnacle (sharp)"
+                st.metric("Fonte", fonte_label, border=True)
             if play.get("value_note"):
                 st.caption(play["value_note"])
         meta = play.get("meta_analysis") or advice.get("meta_analysis") or {}
@@ -874,8 +877,10 @@ with st.sidebar:
 
         st.caption(telegram_status())
         st.caption(
-            "Cloud GitHub: spread Raro ogni 30 min; voti ≥9 dopo il workflow Cloud train (settimanale). "
-            "Serve TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID nei secret del repo."
+            "Cloud GitHub ogni 30 min: Asian + Betfair + Pinnacle (~1 fetch Pinnacle/giorno) "
+            "e avvisi Telegram (spread Raro; voti ≥9 se c’è il modello dal train). "
+            "Secret: TELEGRAM_*, FOOTBALL_DATA_ORG_TOKEN, ODDS_API_KEY, BETFAIR_APP_KEY, "
+            "BETFAIR_USERNAME, BETFAIR_PASSWORD."
         )
     except Exception:
         st.caption("Telegram: modulo avvisi non disponibile.")
@@ -910,6 +915,81 @@ with st.sidebar:
                     n = info.get("n_cup_fixtures") or 0
                     comps = ", ".join(info.get("competitions") or []) or "nessuna coppa in finestra"
                     st.success(f"Coppe: {n} match · {comps} · calendario {upcoming_n} partite")
+                    st.rerun()
+
+    with st.expander("Quote Pinnacle (The Odds API)"):
+        st.caption("Chiave gratis su the-odds-api.com · 500 chiamate/mese · 1 fetch/giorno basta.")
+        from modules.data_update.odds_api import _api_key as _pinn_key, remaining_calls, save_api_key as _save_pinn_key
+        pinn_configured = bool(_pinn_key())
+        pinn_rem = remaining_calls()
+        if pinn_configured:
+            st.caption(f"Chiave impostata. Chiamate rimanenti: {pinn_rem if pinn_rem is not None else 'n/d'}/mese.")
+        odds_api_key = st.text_input(
+            "Chiave The Odds API",
+            type="password",
+            help="Gratis su the-odds-api.com/account. Inserisci e premi Scarica.",
+        )
+        if odds_api_key.strip():
+            _save_pinn_key(odds_api_key.strip())
+            st.caption("Chiave salvata.")
+        if st.button("Scarica quote Pinnacle", width="stretch"):
+            if not bool(_pinn_key()):
+                st.error("Incolla prima la chiave API.")
+            else:
+                with st.spinner("Scarico quote Pinnacle…"):
+                    from modules.data_update.odds_api import fetch_pinnacle_odds
+                    from modules.data_update.upcoming import build_upcoming
+                    pinn = fetch_pinnacle_odds(force=True)
+                    upcoming_n = len(build_upcoming())
+                if not pinn.get("ok"):
+                    st.error(pinn.get("error") or "Errore fetch Pinnacle")
+                else:
+                    rem = pinn.get("remaining")
+                    st.success(
+                        f"Pinnacle: {pinn.get('n_events', 0)} partite · "
+                        f"chiamate rimanenti {rem if rem is not None else 'n/d'} · "
+                        f"calendario {upcoming_n} partite"
+                    )
+                    st.rerun()
+
+    with st.expander("Quote Betfair Exchange"):
+        st.caption(
+            "Delayed App Key già salvata. Serve anche username e password Betfair.it "
+            "(login API, non vanno in git). Dati ritardati, gratis."
+        )
+        from modules.data_update.betfair import (
+            app_key_configured,
+            fetch_betfair_odds,
+            login_configured,
+            save_credentials,
+        )
+        if app_key_configured():
+            st.caption("App Key impostata (FP3 Delayed).")
+        else:
+            st.caption("App Key mancante.")
+        bf_user = st.text_input("Username Betfair", value="annaabbaaaa@gmail.com")
+        bf_pwd = st.text_input(
+            "Password Betfair",
+            type="password",
+            help="Salvata solo in .env locale. Necessaria per scaricare le quote.",
+        )
+        if bf_user.strip() and bf_pwd.strip():
+            save_credentials(bf_user.strip(), bf_pwd.strip())
+            st.caption("Credenziali salvate nel .env.")
+        if st.button("Scarica quote Betfair", width="stretch"):
+            if not login_configured():
+                st.error("Inserisci username e password Betfair, poi riprova.")
+            else:
+                with st.spinner("Login e download quote Exchange…"):
+                    from modules.data_update.upcoming import build_upcoming
+                    bf = fetch_betfair_odds(force=True)
+                    upcoming_n = len(build_upcoming())
+                if not bf.get("ok"):
+                    st.error(bf.get("error") or "Errore fetch Betfair")
+                else:
+                    st.success(
+                        f"Betfair: {bf.get('n_events', 0)} partite · calendario {upcoming_n} partite"
+                    )
                     st.rerun()
 
     with st.expander("Quote Asian e tipster"):

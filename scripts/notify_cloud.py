@@ -40,6 +40,35 @@ def main() -> None:
         print("asian vuoto: niente cache nuova")
         info["kept_previous_cache"] = True
 
+    # Pinnacle: 1 chiamata/giorno (piano gratis 500/mese). Cache 20h anche su Actions.
+    try:
+        from modules.data_update.odds_api import fetch_pinnacle_odds
+
+        pinn = fetch_pinnacle_odds(max_age_hours=20.0)
+        info["pinnacle_events"] = pinn.get("n_events", 0)
+        info["pinnacle_from_cache"] = pinn.get("from_cache")
+        info["pinnacle_remaining"] = pinn.get("remaining")
+        if not pinn.get("ok") and pinn.get("error"):
+            info["pinnacle_error"] = pinn["error"]
+            print(f"skip Pinnacle: {pinn['error']}")
+    except Exception as exc:
+        info["pinnacle_error"] = str(exc)
+        print(f"skip Pinnacle: {exc}")
+
+    # Betfair Delayed: refresh ogni run (~30 min). Se fallisce resta la cache Actions.
+    try:
+        from modules.data_update.betfair import fetch_betfair_odds
+
+        bf = fetch_betfair_odds(force=True, days=7)
+        info["betfair_events"] = bf.get("n_events", 0)
+        info["betfair_from_cache"] = bf.get("from_cache")
+        if not bf.get("ok") and bf.get("error"):
+            info["betfair_error"] = bf["error"]
+            print(f"skip Betfair: {bf['error']}")
+    except Exception as exc:
+        info["betfair_error"] = str(exc)
+        print(f"skip Betfair: {exc}")
+
     upcoming: list[dict] | None = []
     if _has_model():
         try:

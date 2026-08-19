@@ -6,6 +6,13 @@ __pycache__/
 data/raw/football-data.org.token
 data/raw/thesportsdb.key
 data/raw/api-football.key
+data/raw/odds-api.key
+data/raw/oddspapi.key
+data/raw/betfair.appkey
+data/raw/betfair.session.json
+data/raw/betfair_odds.json
+data/raw/pinnacle_odds.json
+data/raw/odds-api-remaining.txt
 .streamlit/secrets.toml
 data/processed/*.csv
 data/models/*.joblib

@@ -7,7 +7,7 @@ from typing import Any
 
 from modules.calibration.config import load_calibration, prob_bin_factor
 
-REAL_SOURCES = {"book", "asianbetsoccer"}
+REAL_SOURCES = {"book", "asianbetsoccer", "pinnacle", "betfair"}
 
 
 def _clamp_score(value: float) -> int:

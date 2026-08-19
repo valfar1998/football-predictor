@@ -60,6 +60,28 @@ def refresh_odds_pipeline(*, asian: bool = True) -> dict:
         rows = fetch_asian_odds(days=14, book="bet365")
         path = save_asian_odds(rows)
         asian_info = {"n_asian": len(rows), "asian_cache": str(path)}
+    # Pinnacle da The Odds API (1 chiamata/giorno, cache 20h)
+    try:
+        from modules.data_update.odds_api import fetch_pinnacle_odds
+        pinn = fetch_pinnacle_odds()
+        asian_info["pinnacle_events"] = pinn.get("n_events", 0)
+        asian_info["pinnacle_remaining"] = pinn.get("remaining")
+        asian_info["pinnacle_from_cache"] = pinn.get("from_cache", False)
+        if not pinn.get("ok") and pinn.get("error"):
+            asian_info["pinnacle_error"] = pinn["error"]
+    except Exception as exc:
+        asian_info["pinnacle_error"] = str(exc)
+        print(f"skip Pinnacle odds: {exc}")
+    try:
+        from modules.data_update.betfair import fetch_betfair_odds
+        bf = fetch_betfair_odds()
+        asian_info["betfair_events"] = bf.get("n_events", 0)
+        asian_info["betfair_from_cache"] = bf.get("from_cache", False)
+        if not bf.get("ok") and bf.get("error"):
+            asian_info["betfair_error"] = bf["error"]
+    except Exception as exc:
+        asian_info["betfair_error"] = str(exc)
+        print(f"skip Betfair odds: {exc}")
     try:
         from modules.data_update.clubelo import fetch_clubelo
 
@@ -157,6 +179,24 @@ def notify_refresh_pipeline(*, days: int = 4, book: str = "bet365") -> dict:
         else:
             print("asian vuoto: tengo la cache precedente")
             asian_info["kept_previous_cache"] = True
+        # Pinnacle: aggiorna solo se cache stantia (>20h), altrimenti usa quella esistente.
+        # Non brucia chiamate API nel refresh notturno.
+        try:
+            from modules.data_update.odds_api import fetch_pinnacle_odds
+            pinn = fetch_pinnacle_odds(max_age_hours=20.0)
+            asian_info["pinnacle_events"] = pinn.get("n_events", 0)
+            asian_info["pinnacle_from_cache"] = pinn.get("from_cache", True)
+        except Exception as exc:
+            asian_info["pinnacle_error"] = str(exc)
+        try:
+            from modules.data_update.betfair import fetch_betfair_odds
+            bf = fetch_betfair_odds(max_age_hours=6.0)
+            asian_info["betfair_events"] = bf.get("n_events", 0)
+            asian_info["betfair_from_cache"] = bf.get("from_cache", True)
+            if not bf.get("ok") and bf.get("error"):
+                asian_info["betfair_error"] = bf["error"]
+        except Exception as exc:
+            asian_info["betfair_error"] = str(exc)
         upcoming = build_upcoming()
         return {"n_upcoming": len(upcoming), "days": days, "book": book, **asian_info}
     finally:
