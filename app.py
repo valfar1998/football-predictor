@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import unicodedata
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -28,6 +29,7 @@ from modules.data_update.fbref_context import download_fbref_context
 from modules.data_update.understat_context import download_understat_context
 from modules.data_update.statsbomb_context import download_statsbomb_context
 from modules.data_update.sofascore_context import download_sofascore_context
+from modules.data_update.fotmob_context import download_fotmob_context
 from modules.data_update.parse import load_fixtures
 
 ROOT = Path(__file__).resolve().parent
@@ -94,7 +96,7 @@ def _quota_consiglio(row) -> float | None:
     return None
 
 
-def _filter_by_date(df: pd.DataFrame, col: str = "date") -> pd.DataFrame:
+def _filter_by_date(df: pd.DataFrame, col: str = "date", *, key: str = "cal_dates") -> pd.DataFrame:
     if col not in df.columns or df.empty:
         return df
     dates = pd.to_datetime(df[col], errors="coerce").dt.date
@@ -102,7 +104,17 @@ def _filter_by_date(df: pd.DataFrame, col: str = "date") -> pd.DataFrame:
     if valid.empty:
         return df
     dmin, dmax = valid.min(), valid.max()
-    picked = st.date_input("Intervallo date", value=(dmin, dmax), min_value=dmin, max_value=dmax)
+    today = date.today()
+    # Default: da oggi (o dalla prima data disponibile se tutto è futuro).
+    start = min(max(today, dmin), dmax)
+    # Chiave con la data odierna: ogni giorno riparte da oggi senza restare sul vecchio range.
+    picked = st.date_input(
+        "Intervallo date",
+        value=(start, dmax),
+        min_value=dmin,
+        max_value=dmax,
+        key=f"{key}_{today.isoformat()}",
+    )
     if isinstance(picked, tuple):
         d1, d2 = picked[0], picked[-1]
     else:
@@ -135,6 +147,7 @@ def _render_validation(val: dict | None) -> None:
     stab = val.get("stability") or {}
     form = val.get("form") or {}
     p_adj = val.get("p_validated") or {}
+    wx = val.get("weather") or {}
     with st.container(border=True):
         st.markdown("**Validazione (non EV)**")
         with st.container(horizontal=True):
@@ -170,9 +183,47 @@ def _render_validation(val: dict | None) -> None:
                 delta=(f"{form.get('delta_unified'):+.1f}" if form.get("delta_unified") else None),
                 border=True,
             )
+            simv = val.get("sportly_sim") or {}
+            if simv.get("ready") or simv.get("status"):
+                st.metric(
+                    "Sim",
+                    simv.get("status") or "n/d",
+                    delta=(f"{simv.get('delta_unified'):+.1f}" if simv.get("delta_unified") else None),
+                    border=True,
+                )
+            dsig = val.get("data_signal") or {}
+            if dsig.get("ready") or dsig.get("status"):
+                st.metric(
+                    "Dati",
+                    dsig.get("status") or "n/d",
+                    delta=(f"{dsig.get('delta_unified'):+.1f}" if dsig.get("delta_unified") else None),
+                    border=True,
+                )
+            agr = val.get("agreement") or {}
+            if agr.get("ready") or agr.get("status"):
+                st.metric(
+                    "Accordo",
+                    agr.get("status") or "n/d",
+                    delta=(None if agr.get("agree_share") is None else f"{agr['agree_share']:.0%}"),
+                    border=True,
+                )
+            if wx:
+                st.metric(
+                    "Meteo",
+                    wx.get("flag") or "n/d",
+                    delta=(None if wx.get("precip_mm") is None else f"{wx['precip_mm']} mm"),
+                    border=True,
+                )
         bits = []
         if venue.get("venue"):
             bits.append(venue["venue"])
+        if wx.get("city") or wx.get("temp_c") is not None:
+            wx_bits = [str(wx.get("city") or "").strip()]
+            if wx.get("temp_c") is not None:
+                wx_bits.append(f"{wx['temp_c']}°C")
+            if wx.get("wind_kmh") is not None:
+                wx_bits.append(f"vento {wx['wind_kmh']} km/h")
+            bits.append(" ".join(b for b in wx_bits if b))
         if p_adj:
             bits.append(f"P' stadio {p_adj.get('home', 0):.0%}/{p_adj.get('draw', 0):.0%}/{p_adj.get('away', 0):.0%}")
         if val.get("delta_unified"):
@@ -184,6 +235,120 @@ def _render_validation(val: dict | None) -> None:
             st.caption("Warning: " + " · ".join(warns[:4]))
         if form.get("incoherent"):
             st.caption("Forma incoerente: risultati e xG non coincidono.")
+        dsig = val.get("data_signal") or {}
+        if dsig.get("notes"):
+            st.caption("Dati: " + " · ".join(str(n) for n in dsig["notes"][:3] if n))
+
+
+def _render_data_signal(sig: dict | None) -> None:
+    if not sig or not sig.get("ready"):
+        return
+    with st.container(border=True):
+        st.markdown("**Analisi dati** (xG · forma · casa/trasferta · classifiche)")
+        with st.container(horizontal=True):
+            st.metric("Lean", sig.get("lean") or "—", border=True)
+            st.metric(
+                "Edge",
+                "—" if sig.get("edge") is None else f"{float(sig['edge']):+.2f}",
+                border=True,
+            )
+            st.metric(
+                "Confidenza",
+                "—" if sig.get("confidence") is None else f"{float(sig['confidence']):.0%}",
+                border=True,
+            )
+            st.metric("Fattori", str(sig.get("n_factors") or 0), border=True)
+        factors = sig.get("factors") or []
+        if factors:
+            bits = [
+                f"{f.get('name')}: {float(f.get('edge') or 0):+.2f} (w={f.get('weight')})"
+                for f in factors[:6]
+            ]
+            st.caption(" · ".join(bits))
+        if sig.get("note"):
+            st.caption(str(sig["note"]))
+
+
+def _render_sportly_sim(sim: dict | None, *, home: str = "Casa", away: str = "Trasferta") -> None:
+    if not sim or not sim.get("ready"):
+        return
+    xg = sim.get("xg") or {}
+    mom = sim.get("momentum") or {}
+    press = sim.get("pressure") or {}
+    shots = sim.get("shots") or {}
+    trend = sim.get("live_trend") or []
+    tv = sim.get("tactical_validation") or {}
+    with st.container(border=True):
+        st.markdown("**Sportly-sim (interno, non live)**")
+        st.caption(sim.get("note") or "")
+        with st.container(horizontal=True):
+            st.metric("Lean sim", sim.get("lean") or "—", border=True)
+            st.metric(
+                "xG sim",
+                f"{xg.get('home', '—')} – {xg.get('away', '—')}",
+                border=True,
+            )
+            st.metric(
+                "Tiri",
+                f"{shots.get('home_n', '—')}–{shots.get('away_n', '—')}",
+                border=True,
+            )
+            st.metric(
+                "Validazione",
+                tv.get("status") or "n/d",
+                delta=(f"{tv.get('delta_unified'):+.1f}" if tv.get("delta_unified") else None),
+                border=True,
+            )
+        if tv.get("notes"):
+            st.caption(tv["notes"][0])
+        mins = xg.get("minutes") or mom.get("minutes") or []
+        if mins and xg.get("cum_home") and xg.get("cum_away"):
+            st.caption("xG cumulato simulato")
+            st.line_chart(
+                {
+                    "minuto": mins,
+                    home: xg["cum_home"],
+                    away: xg["cum_away"],
+                },
+                x="minuto",
+                y=[home, away],
+            )
+        if mins and mom.get("values"):
+            st.caption("Momentum (positivo = casa)")
+            st.line_chart({"minuto": mins, "momentum": mom["values"]}, x="minuto", y="momentum")
+        if mins and press.get("home") and press.get("away"):
+            st.caption("Pressione sintetica")
+            st.line_chart(
+                {
+                    "minuto": mins,
+                    f"press {home}": press["home"],
+                    f"press {away}": press["away"],
+                },
+                x="minuto",
+                y=[f"press {home}", f"press {away}"],
+            )
+        if trend:
+            st.caption(
+                "Trend live simulato: "
+                + " · ".join(f"{p.get('from')}-{p.get('to')}' {p.get('lean')}" for p in trend)
+            )
+        smap = shots.get("map") or []
+        if smap:
+            with st.expander("Shot map sintetica", expanded=False):
+                st.dataframe(
+                    [
+                        {
+                            "Squadra": home if s.get("team") == "home" else away,
+                            "X": s.get("x"),
+                            "Y": s.get("y"),
+                            "xG": s.get("xg"),
+                            "On target": "sì" if s.get("on_target") else "no",
+                        }
+                        for s in smap
+                    ],
+                    width="stretch",
+                    hide_index=True,
+                )
 
 
 def _pp(val: float | None) -> str | None:
@@ -345,7 +510,7 @@ def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
         "score_reason_1", "score_reason_2", "skip_reason", "probability",
         "quota_pick", "fair_odds", "edge_pp", "ev_cons", "ev_sharp",
         "odds_real", "value_note",
-        "venue_flag", "validation_summary", "validation_delta",
+        "venue_flag", "weather_flag", "validation_summary", "validation_delta",
         "movement_level", "line_move", "movement_summary", "movement_comment", "market_align",
         "drop_1", "drop_x", "drop_2",
         "odd_1", "odd_x", "odd_2", "odd_over_25", "odd_under_25", "odds_source",
@@ -410,6 +575,7 @@ def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
             "odds_real": "Quota reale",
             "value_note": "Nota value",
             "venue_flag": "Stadio",
+            "weather_flag": "Meteo",
             "validation_summary": "Validazione",
             "validation_delta": "Δ validazione",
             "movement_level": "Movimento",
@@ -602,11 +768,24 @@ def render_advice(
                 st.caption(f"Lettura finale: {meta.get('label', 'n/d')} · {meta.get('note', '')}")
         val = play.get("validation") or (advice.get("quadro") or {}).get("validation")
         _render_validation(val)
+        _render_sportly_sim(
+            advice.get("sportly_sim") or (pred.get("sportly_sim") if isinstance(pred, dict) else None),
+            home=str(advice.get("home") or "Casa"),
+            away=str(advice.get("away") or "Trasferta"),
+        )
+        _render_data_signal(
+            advice.get("data_signal")
+            or (pred.get("data_signal") if isinstance(pred, dict) else None)
+            or ((val or {}).get("data_signal") if isinstance(val, dict) else None)
+        )
         alt = advice.get("play_alt")
         if alt and alt["code"] != play["code"]:
             st.caption(f"Alternativa: **{alt['code']}** {alt['name']} · {alt['score']}/10")
         xg = advice.get("expected_goals") or {}
-        st.caption(f"xG attesi {xg.get('home', '—')} – {xg.get('away', '—')}")
+        st.caption(
+            f"xG attesi {xg.get('home', '—')} – {xg.get('away', '—')} "
+            "· ensemble XGB + Dixon-Coles (Understat/meteo in λ se presenti)"
+        )
         move = advice.get("market_move")
         align = advice.get("market_align") or {}
         if move:
@@ -757,8 +936,8 @@ def render_advice(
 
 st.title("Consiglio mercati")
 st.caption(
-    "Tre livelli: **modello** (soldi: EV/Kelly/Gioca), **voto unificato** (ordine in tabella), "
-    "**fonti extra** (quadro, non cambiano EV). A sinistra basta **Aggiorna dati + modello**."
+    "Tre livelli: **modello** (soldi: EV/Kelly/Gioca; ensemble XGB+Poisson), **voto unificato** (ordine in tabella), "
+    "**fonti extra** (quadro). Understat e meteo entrano nelle λ, non nell'EV. A sinistra basta **Aggiorna dati + modello**."
 )
 with st.expander("Come funziona — cosa fa ogni pezzo", expanded=False):
     st.markdown(
@@ -784,6 +963,10 @@ Togli la spunta **Nascondi no-bet** se vuoi vedere Premier/Serie A/Liga: quelle 
 
 - **Matchup tattico** (FBref Big 5): possesso vs blocco, cross vs difesa stretta, transizioni.
 - **Fatica / calendario**: riposo reale fino al kickoff, 3 partite in 7 giorni, flag viaggi (MLS, Brasile, Argentina, …). Entra anche nelle feature al prossimo training.
+- **Ensemble 1X2**: XGBoost + Poisson/Dixon-Coles. Understat xG entra nelle λ (non nel train storico, per evitare leakage). Meteo Open-Meteo su città stadio.
+- **Sportly-sim interno**: xG cumulato, momentum, pressione, shot map e trend a blocchi — sintetici da λ/stile, senza API Sportly/FotMob. Solo quadro/validazione (±0.5 sul voto unificato).
+- **Quote implicite** come feature di train (open/close football-data). Servono `--train` / Aggiorna dati + modello.
+- **Calibrazione T per campionato** (dopo `--calibrate`, se la lega ha ≥120 OOF).
 - **Tre combo nel voto unificato (18%)**: 1) FBref+Sofascore+WhoScored stile · 2) assenze WhoScored × peso xG+xA FBref · 3) value+Asian. EV/Kelly restano sul modello, non sulla formula tattica.
 - **WhoScored** (bottone, lento): preview con assenze *confermate*. Transfermarkt market value non ha libreria ufficiale: il peso è il contributo FBref in campo.
 - **Validazione automatica** (non entra in EV/Kelly): stadio neutro/alternativo (−2%/−1% su P casa, piccolo taglio al voto), tactical score vs favorito (±0.5), gap modello–mercato >15 pp (voto value −1), ML vs Monte Carlo grezzo >8% (voto probabilità −1), forma ultime 5 (±0.3, warning se risultati ≠ xG). Stadio da football-data.org / API-Football / TheSportsDB, non da scraping.
@@ -819,7 +1002,7 @@ Non ricalcolano EV/Kelly e **non creano pick**. Se ci sono, pesano al massimo un
 | **ClubElo** | Forza storica Elo |
 | **FBref / Understat** | Stats / xG (Big 5 circa) |
 | **StatsBomb / Sofascore** | Open data / classifica; copertura stretta |
-| **Storico locale (SQLite)** | Le partite *tue* già viste (anche N/D). Dopo 30 esiti e 6 match/squadra entra al 12% del voto |
+| **Storico locale (SQLite)** | Le partite *tue* già viste (anche N/D). Dopo 30 esiti e 6 match/squadra entra al 12% del voto (fino al 18% con abbastanza chiusure globali/di lega) |
 
 ---
 
@@ -1030,12 +1213,13 @@ with st.sidebar:
         cal = load_calibration()
         if cal.get("fitted_at"):
             st.caption(
-                f"Calibrazione: T={cal.get('temperature', 1):.2f}, "
-                f"EV min={cal.get('min_ev_play', 0.025):.0%}"
+                f"Calibrazione: T={cal.get('temperature', 1):.2f}"
+                + (f" · {len(cal.get('temperature_by_league') or {})} T di lega" if cal.get("temperature_by_league") else "")
+                + f", EV min={cal.get('min_ev_play', 0.025):.0%}"
             )
 
     with st.expander("Contesto extra (non entra in EV)"):
-        st.caption("Solo quadro/voto unificato. FBref e Understat coprono soprattutto le Big 5.")
+        st.caption("Quadro e voto. Understat xG entra anche nelle λ Poisson (Big 5). Meteo Open-Meteo se c'è la città dello stadio.")
         if st.button("FBref", width="stretch"):
             with st.spinner("Scarico statistiche squadra FBref e aggiorno calendario…"):
                 from modules.data_update.upcoming import build_upcoming
@@ -1081,6 +1265,21 @@ with st.sidebar:
                 st.error(f"Sofascore: {info['error']}")
             else:
                 st.success(f"Sofascore: {info.get('n_teams', 0)} squadre · calendario {upcoming_n}")
+                st.rerun()
+        if st.button("FotMob (classifica + match)", width="stretch"):
+            with st.spinner("Scarico classifiche e calendario FotMob…"):
+                from modules.data_update.upcoming import build_upcoming
+
+                info = download_fotmob_context(days=7)
+                upcoming_n = len(build_upcoming())
+            errs = info.get("errors") or ([] if not info.get("error") else [info["error"]])
+            if errs and not info.get("n_teams") and not info.get("n_matches"):
+                st.error(f"FotMob: {errs[0]}")
+            else:
+                st.success(
+                    f"FotMob: {info.get('n_teams', 0)} squadre · "
+                    f"{info.get('n_matches', 0)} partite · calendario {upcoming_n}"
+                )
                 st.rerun()
         if st.button("WhoScored assenze (lento)", width="stretch"):
             with st.spinner("Preview WhoScored: assenze confermate, max 18 partite Big 5…"):
@@ -1289,6 +1488,16 @@ with tab_cal:
                         st.caption(f"Mix: {row.get('meta_note')}")
                     val = row.get("validation") if isinstance(row.get("validation"), dict) else None
                     _render_validation(val)
+                    pred_row = row.get("prediction") if isinstance(row.get("prediction"), dict) else {}
+                    _render_sportly_sim(
+                        pred_row.get("sportly_sim") or (row.get("sportly_sim") if isinstance(row.get("sportly_sim"), dict) else None),
+                        home=str(row.get("home") or "Casa"),
+                        away=str(row.get("away") or "Trasferta"),
+                    )
+                    _render_data_signal(
+                        pred_row.get("data_signal")
+                        or (row.get("data_signal") if isinstance(row.get("data_signal"), dict) else None)
+                    )
                     quadro = row.get("quadro") if isinstance(row.get("quadro"), dict) else None
                     sources = None if not quadro else quadro.get("sources")
                     if sources:
@@ -1359,7 +1568,15 @@ with tab_mkt:
             valid = dates.dropna()
             if not valid.empty:
                 dmin, dmax = valid.min(), valid.max()
-                picked = st.date_input("Intervallo date", value=(dmin, dmax), min_value=dmin, max_value=dmax, key="mkt_dates")
+                today = date.today()
+                start = min(max(today, dmin), dmax)
+                picked = st.date_input(
+                    "Intervallo date",
+                    value=(start, dmax),
+                    min_value=dmin,
+                    max_value=dmax,
+                    key=f"mkt_dates_{today.isoformat()}",
+                )
                 if isinstance(picked, tuple):
                     d1, d2 = picked[0], picked[-1]
                 else:
@@ -1497,7 +1714,7 @@ with tab_one:
                 st.error("Scegli due squadre diverse.")
             else:
                 with st.spinner("Calcolo modello + Monte Carlo..."):
-                    pred = predict_pipeline(home, away, n_sims)
+                    pred = predict_pipeline(home, away, n_sims, odds=extra_odds)
                 render_advice(pred, extra_odds)
         elif last:
             st.caption("Ultima predizione salvata")
@@ -1506,6 +1723,85 @@ with tab_one:
 with tab_eval:
     cal = load_calibration()
     summary = cal.get("backtest_summary") or {}
+
+    with st.expander("Disaccordi modello (debug)", expanded=False):
+        st.caption("Confronta lean ML/MC/dati/mercato sulle partite del calendario caricato.")
+        if upcoming:
+            disc_rows = []
+            for u in upcoming:
+                pred = u.get("prediction") if isinstance(u.get("prediction"), dict) else {}
+                ml = pred.get("model_probabilities") or {}
+                mc = pred.get("montecarlo") or {}
+                ds = pred.get("data_signal") or u.get("data_signal") or {}
+                sa = u.get("source_agreement") or {}
+
+                def _lean(p1, px, p2):
+                    vals = [("1", p1), ("X", px), ("2", p2)]
+                    vals = [(k, v) for k, v in vals if v is not None]
+                    if not vals:
+                        return None
+                    return max(vals, key=lambda t: t[1])[0]
+
+                ml_l = _lean(ml.get("home_win"), ml.get("draw"), ml.get("away_win"))
+                mc_l = _lean(mc.get("home_win"), mc.get("draw"), mc.get("away_win"))
+                ds_l = ds.get("lean") if isinstance(ds, dict) else None
+                pick = u.get("pick")
+                flags = []
+                if ml_l and mc_l and ml_l != mc_l:
+                    flags.append("ML≠MC")
+                if ml_l and ds_l and ml_l != ds_l:
+                    flags.append("ML≠dati")
+                if pick in {"1", "X", "2"} and ml_l and pick != ml_l:
+                    flags.append("pick≠ML")
+                if sa.get("status") in {"spezzato", "debole"}:
+                    flags.append(f"accordo:{sa.get('status')}")
+                iv = u.get("prob_intervals") or (mc.get("prob_intervals") if isinstance(mc, dict) else {}) or {}
+                if iv.get("fragile"):
+                    flags.append("IC fragile")
+                if flags:
+                    disc_rows.append(
+                        {
+                            "Partita": f"{u.get('home')} vs {u.get('away')}",
+                            "Pick": pick,
+                            "ML": ml_l,
+                            "MC": mc_l,
+                            "Dati": ds_l,
+                            "Accordo": sa.get("agree_share"),
+                            "Flag": ", ".join(flags),
+                            "Voto": u.get("score_unified") or u.get("score"),
+                        }
+                    )
+            if disc_rows:
+                st.dataframe(pd.DataFrame(disc_rows), width="stretch", hide_index=True)
+            else:
+                st.caption("Nessun disaccordo evidente sul calendario filtrato.")
+        else:
+            st.caption("Calendario vuoto.")
+
+    with st.expander("Paper trading (SQLite)", expanded=False):
+        from modules.advisor.paper_stats import paper_trading_report
+        from modules.advisor.residual_ev import fit_residual_ev
+
+        if st.button("Aggiorna report paper + residual EV"):
+            fit_info = fit_residual_ev()
+            st.write(fit_info)
+        rep = paper_trading_report()
+        if not rep.get("ok"):
+            st.warning(rep.get("error") or "report non disponibile")
+        elif not rep.get("n"):
+            st.caption(rep.get("note") or "nessun esito")
+        else:
+            st.metric("Settled", rep["n"], delta=f"hit {rep.get('hit_rate', 0):.0%}")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**Per voto**")
+                st.dataframe(pd.DataFrame(rep.get("by_score") or []), width="stretch", hide_index=True)
+            with c2:
+                st.markdown("**Per pick**")
+                st.dataframe(pd.DataFrame(rep.get("by_pick") or []), width="stretch", hide_index=True)
+            st.markdown("**Per lega (top)**")
+            st.dataframe(pd.DataFrame(rep.get("by_league") or []), width="stretch", hide_index=True)
+
     if not cal.get("fitted_at") and not summary:
         st.info("Nessuna valutazione. Premi **Calibra probabilità (backtest)** nella colonna a sinistra (meglio dopo **Aggiorna dati + modello** per lo split rolling).")
     else:
@@ -1514,7 +1810,9 @@ with tab_eval:
             "Le scommesse simulate usano ¼ Kelly con cap, edge minimo 2–3% e scarto se Pinnacle non offre edge."
         )
         split = summary.get("split") or cal.get("split") or "—"
-        st.caption(f"Protocollo: **{split}** · T={cal.get('temperature', 1):.2f} · EV min {cal.get('min_ev_play', 0.025):.1%}")
+        n_lg = len(cal.get("temperature_by_league") or {})
+        lg_bit = f" · T per {n_lg} campionati" if n_lg else ""
+        st.caption(f"Protocollo: **{split}** · T={cal.get('temperature', 1):.2f}{lg_bit} · EV min {cal.get('min_ev_play', 0.025):.1%}")
         with st.container(horizontal=True):
             st.metric("Brier", f"{cal.get('brier_multiclass_calibrated') or cal.get('brier_favorite_calibrated') or '—'}", border=True)
             st.metric("Log-loss", f"{cal.get('log_loss_calibrated') or summary.get('prob_log_loss') or '—'}", border=True)

@@ -56,7 +56,7 @@ def _src(
 def validation_source(validation: dict[str, Any] | None) -> dict[str, Any]:
     val = validation or {}
     notes: list[str] = []
-    for key in ("venue", "tactical", "market", "stability", "form"):
+    for key in ("venue", "tactical", "market", "stability", "form", "sportly_sim", "data_signal"):
         block = val.get(key) or {}
         notes.extend((block.get("notes") or [])[:2])
     p_adj = val.get("p_validated") or {}
@@ -66,7 +66,7 @@ def validation_source(validation: dict[str, Any] | None) -> dict[str, Any]:
         head = f"{head} · Δ voto {delta:+.1f}"
     return _src(
         "Validazione",
-        "stadio · tattica · mercato · ML/MC · forma (non EV)",
+        "stadio · tattica · mercato · ML/MC · forma · sim · dati (non EV)",
         None,
         p1=p_adj.get("home"),
         px=p_adj.get("draw"),
@@ -96,12 +96,13 @@ def build_quadro(
     understat = prediction.get("understat_context") or {}
     statsbomb = prediction.get("statsbomb_context") or {}
     sofascore = prediction.get("sofascore_context") or {}
+    fotmob = prediction.get("fotmob_context") or {}
     local_hist = prediction.get("history_context") or {}
     if not local_hist:
         try:
             from modules.data_update.history import lookup_history_match
 
-            local_hist = lookup_history_match(home, away)
+            local_hist = lookup_history_match(home, away, league=prediction.get("league"))
         except Exception:
             local_hist = {}
     p_draw = float(mc.get("draw") or ml.get("draw") or 0.26)
@@ -133,7 +134,7 @@ def build_quadro(
                 p1=ml.get("home_win"),
                 px=ml.get("draw"),
                 p2=ml.get("away_win"),
-                note="feature forma/Elo interno/xG proxy",
+                note="ensemble XGB + Dixon-Coles (λ da rolling xG, Understat se c'è)",
             )
         )
 
@@ -407,7 +408,7 @@ def build_quadro(
         sources.append(
             _src(
                 "Understat",
-                "xG reale storico",
+                "xG reale (anche in λ Poisson)",
                 _lean_1x2(p1, px, p2),
                 p1=p1,
                 px=px,
@@ -415,7 +416,8 @@ def build_quadro(
                 note=(
                     f"xGdiff {us_h.get('xg_diff', 'n/d')} vs {us_a.get('xg_diff', 'n/d')} · "
                     f"xG {us_h.get('xg_for', 'n/d')}/{us_h.get('xg_against', 'n/d')} vs "
-                    f"{us_a.get('xg_for', 'n/d')}/{us_a.get('xg_against', 'n/d')}"
+                    f"{us_a.get('xg_for', 'n/d')}/{us_a.get('xg_against', 'n/d')} · "
+                    f"blend 38% nelle λ"
                 ),
             )
         )
@@ -423,7 +425,7 @@ def build_quadro(
         sources.append(
             _src(
                 "Understat",
-                "xG reale storico",
+                "xG reale (anche in λ Poisson)",
                 None,
                 missing=True,
                 note="una sola squadra in cache, nessun lean",
@@ -503,6 +505,137 @@ def build_quadro(
     else:
         sources.append(_src("Sofascore", "classifica attuale", None, missing=True, note="contesto non disponibile"))
 
+    fm_h = fotmob.get("home") or {}
+    fm_a = fotmob.get("away") or {}
+    fm_m = fotmob.get("match") or {}
+    fm_note_bits: list[str] = []
+    if fm_m.get("match_id"):
+        fm_note_bits.append(f"id {fm_m['match_id']}")
+        if fm_m.get("league"):
+            fm_note_bits.append(str(fm_m["league"]))
+        if fm_m.get("finished"):
+            fm_note_bits.append(f"FT {fm_m.get('score') or ''}".strip())
+        elif fm_m.get("started"):
+            fm_note_bits.append("live")
+        else:
+            fm_note_bits.append("pre-match")
+    if fm_h and fm_a:
+        played_ok = float(fm_h.get("played") or 0) >= 1 and float(fm_a.get("played") or 0) >= 1
+        if played_ok:
+            try:
+                p_h2 = _clamp01(
+                    0.5
+                    + (float(fm_h.get("ppg") or 0) - float(fm_a.get("ppg") or 0)) * 0.16
+                    + (float(fm_h.get("gd_pg") or 0) - float(fm_a.get("gd_pg") or 0)) * 0.04
+                )
+            except (TypeError, ValueError):
+                p_h2 = 0.5
+            p1, px, p2 = _two_way_to_1x2(p_h2, p_draw)
+            sources.append(
+                _src(
+                    "FotMob",
+                    "classifica + calendario live",
+                    _lean_1x2(p1, px, p2),
+                    p1=p1,
+                    px=px,
+                    p2=p2,
+                    note=(
+                        f"PPG {fm_h.get('ppg', 'n/d')} vs {fm_a.get('ppg', 'n/d')} · "
+                        f"Pts {fm_h.get('pts', 'n/d')}-{fm_a.get('pts', 'n/d')}"
+                        + ((" · " + " · ".join(fm_note_bits)) if fm_note_bits else "")
+                    ).strip(),
+                )
+            )
+        else:
+            sources.append(
+                _src(
+                    "FotMob",
+                    "classifica + calendario live",
+                    None,
+                    missing=True,
+                    note=(
+                        "stagione ancora senza punti in classifica"
+                        + ((" · " + " · ".join(fm_note_bits)) if fm_note_bits else "")
+                    ),
+                )
+            )
+    elif fm_m.get("match_id"):
+        sources.append(
+            _src(
+                "FotMob",
+                "classifica + calendario live",
+                None,
+                missing=True,
+                note="partita in calendario, classifica squadre non matchata · " + " · ".join(fm_note_bits),
+            )
+        )
+    elif fm_h or fm_a:
+        sources.append(
+            _src("FotMob", "classifica + calendario live", None, missing=True, note="una sola squadra in cache")
+        )
+    else:
+        sources.append(
+            _src("FotMob", "classifica + calendario live", None, missing=True, note="contesto non disponibile")
+        )
+
+    sim = prediction.get("sportly_sim") or {}
+    if sim.get("ready"):
+        tv = sim.get("tactical_validation") or {}
+        sources.append(
+            _src(
+                "Sportly-sim",
+                "xG/momentum/pressione sintetici",
+                sim.get("lean") or _lean_1x2(sim.get("p_1"), sim.get("p_x"), sim.get("p_2")),
+                p1=sim.get("p_1"),
+                px=sim.get("p_x"),
+                p2=sim.get("p_2"),
+                note=(
+                    f"xG {sim.get('xg', {}).get('home', 'n/d')}/{sim.get('xg', {}).get('away', 'n/d')} · "
+                    f"tiri {(sim.get('shots') or {}).get('home_n', '?')}-{(sim.get('shots') or {}).get('away_n', '?')} · "
+                    f"{tv.get('status') or 'n/d'}"
+                    + (f" · {tv['notes'][0]}" if tv.get("notes") else "")
+                ),
+            )
+        )
+    else:
+        sources.append(
+            _src(
+                "Sportly-sim",
+                "xG/momentum/pressione sintetici",
+                None,
+                missing=True,
+                note=sim.get("note") or "simulazione non disponibile",
+            )
+        )
+
+    data_sig = prediction.get("data_signal") or {}
+    if data_sig.get("ready"):
+        sources.append(
+            _src(
+                "Analisi dati",
+                "xG · forma · casa/trasferta · classifiche",
+                data_sig.get("lean") or _lean_1x2(data_sig.get("p_1"), data_sig.get("p_x"), data_sig.get("p_2")),
+                p1=data_sig.get("p_1"),
+                px=data_sig.get("p_x"),
+                p2=data_sig.get("p_2"),
+                note=(
+                    f"edge {data_sig.get('edge', 'n/d')} · conf {float(data_sig.get('confidence') or 0):.0%} · "
+                    f"{data_sig.get('n_factors', 0)} fattori"
+                    + (f" · {data_sig.get('note')}" if data_sig.get("note") else "")
+                ),
+            )
+        )
+    else:
+        sources.append(
+            _src(
+                "Analisi dati",
+                "xG · forma · casa/trasferta · classifiche",
+                None,
+                missing=True,
+                note=data_sig.get("note") or "segnale non calcolato",
+            )
+        )
+
     hist_h = (local_hist or {}).get("home") or {}
     hist_a = (local_hist or {}).get("away") or {}
     if local_hist.get("ready") and hist_h and hist_a:
@@ -523,7 +656,12 @@ def build_quadro(
                 note=(
                     f"PPG {hist_h.get('ppg')} vs {hist_a.get('ppg')} · "
                     f"n {hist_h.get('n')}/{hist_a.get('n')} · "
-                    f"peso voto {w}% · chiusi globali {local_hist.get('n_global')}"
+                    f"peso voto {w}% · chiusi {local_hist.get('n_global')}"
+                    + (
+                        f" · lega {local_hist.get('n_league')}"
+                        if local_hist.get("n_league")
+                        else ""
+                    )
                 ),
             )
         )
@@ -584,6 +722,36 @@ def build_quadro(
                 missing=not move,
                 note=(move.get("movement_level") or "n/d") if move else "niente Asian su questa partita",
             )
+        )
+
+    wx = prediction.get("weather") or {}
+    if wx.get("flag") or wx.get("precip_mm") is not None or wx.get("temp_c") is not None:
+        bits: list[str] = []
+        if wx.get("city"):
+            bits.append(str(wx["city"]))
+        if wx.get("temp_c") is not None:
+            bits.append(f"{wx['temp_c']}°C")
+        if wx.get("precip_mm") is not None:
+            bits.append(f"{wx['precip_mm']} mm")
+        if wx.get("wind_kmh") is not None:
+            bits.append(f"vento {wx['wind_kmh']} km/h")
+        try:
+            adj = float(wx.get("lambda_adj") or 1)
+        except (TypeError, ValueError):
+            adj = 1.0
+        if abs(adj - 1.0) > 1e-6:
+            bits.append(f"λ ×{adj}")
+        sources.append(
+            _src(
+                "Meteo",
+                "Open-Meteo forecast",
+                None,
+                note=f"{wx.get('flag') or 'ok'}" + ((" · " + " · ".join(bits)) if bits else ""),
+            )
+        )
+    else:
+        sources.append(
+            _src("Meteo", "Open-Meteo forecast", None, missing=True, note="città stadio assente o forecast non disponibile")
         )
 
     if validation:
@@ -666,23 +834,29 @@ def build_quadro(
         }
 
     gaps = [
-        "xG vero Understat/FBref (qui è proxy da gol/forma)",
         "infortuni e formazioni (XI live / Elo giocatore: nessuna fonte ufficiale gratis)",
         "motivazioni e clima (salvezza, rotazioni da comunicato: il mercato Asian è il proxy)",
-        "meteo",
         "altri book oltre football-data (Avg OddsPortal/BetBrain) e Bet365 Asian",
         "OddsPortal/BetExplorer in tempo reale (niente libreria ufficiale, solo scraper)",
     ]
+    if not (wx.get("flag") or wx.get("precip_mm") is not None or wx.get("temp_c") is not None):
+        gaps.insert(0, "meteo (Open-Meteo: manca la città dello stadio)")
+    if not (us_h or us_a):
+        gaps.insert(0, "xG Understat (λ da rolling gol/forma; FBref gls/90 solo fallback)")
     if not club:
         gaps.insert(0, "ClubElo (download fallito o squadra assente)")
     if not (fb_h or fb_a):
         gaps.insert(0, "FBref team stats (copertura lega/squadra limitata)")
-    if not (us_h or us_a):
-        gaps.insert(0, "Understat xG storico (copertura lega/squadra limitata)")
     if not (sb_h or sb_a):
         gaps.insert(0, "StatsBomb open data (poche stagioni club, soprattutto storiche)")
     if not (sofa_h or sofa_a):
         gaps.insert(0, "Sofascore classifica (Big 5, soccerdata)")
+    if not (fm_h or fm_a or fm_m.get("match_id")):
+        gaps.insert(0, "FotMob classifica/calendario (API /api/data, non ufficiale)")
+    if not ((prediction.get("sportly_sim") or {}).get("ready")):
+        gaps.insert(0, "Sportly-sim (λ gol assenti o sim non calcolata)")
+    if not ((prediction.get("data_signal") or {}).get("ready")):
+        gaps.insert(0, "Analisi dati (servono feature e/o Understat/FBref/classifica)")
     if not (local_hist or {}).get("ready"):
         gaps.insert(0, "Storico locale (SQLite): poche partite chiuse per entrare nel voto")
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from typing import Any
 
 import numpy as np
 
@@ -130,6 +131,8 @@ class MonteCarloSimulator:
                 "draw": round(float(np.sqrt(p_d_raw * (1.0 - p_d_raw) / n)), 4),
                 "away_win": round(float(np.sqrt(p_a_raw * (1.0 - p_a_raw) / n)), 4),
             },
+            # Bande di incertezza empiriche (bootstrap su blocchi): proxy conformal pre-match.
+            "prob_intervals": _mc_intervals(hg, ag, n_boot=40, seed=self.seed),
             **{k: round(v, 4) for k, v in over.items()},
             **{k: round(v, 4) for k, v in under.items()},
             **{k: round(v, 4) for k, v in home_ou.items()},
@@ -137,3 +140,61 @@ class MonteCarloSimulator:
             **{k: round(v, 4) for k, v in combos.items()},
             "most_likely_scores": scorelines,
         }
+
+
+def _mc_intervals(
+    hg: np.ndarray,
+    ag: np.ndarray,
+    *,
+    n_boot: int = 40,
+    seed: int = 42,
+    alpha: float = 0.10,
+) -> dict[str, Any]:
+    """Percentili bootstrap 1X2 (90% se alpha=0.10). Non è conformal full-calibrated."""
+    rng = np.random.default_rng(seed + 7)
+    n = len(hg)
+    if n < 100:
+        return {"ready": False}
+    ph, pd_, pa = [], [], []
+    block = max(50, n // n_boot)
+    for _ in range(n_boot):
+        idx = rng.integers(0, n, size=block)
+        h, a = hg[idx], ag[idx]
+        ph.append(float((h > a).mean()))
+        pd_.append(float((h == a).mean()))
+        pa.append(float((h < a).mean()))
+    lo_q, hi_q = 100 * alpha / 2, 100 * (1 - alpha / 2)
+
+    def band(vals: list[float], point: float) -> dict[str, float]:
+        arr = np.asarray(vals, dtype=float)
+        lo, hi = float(np.percentile(arr, lo_q)), float(np.percentile(arr, hi_q))
+        return {
+            "p": round(point, 4),
+            "lo": round(lo, 4),
+            "hi": round(hi, 4),
+            "width": round(hi - lo, 4),
+        }
+
+    p_h = float((hg > ag).mean())
+    p_d = float((hg == ag).mean())
+    p_a = float((hg < ag).mean())
+    bands = {
+        "1": band(ph, p_h),
+        "X": band(pd_, p_d),
+        "2": band(pa, p_a),
+    }
+    # Stabilità: pick MC più stretto → più solido
+    top = max(bands, key=lambda k: bands[k]["p"])
+    width = bands[top]["width"]
+    stable = width <= 0.06
+    fragile = width >= 0.12
+    return {
+        "ready": True,
+        "alpha": alpha,
+        "method": "mc_bootstrap",
+        "bands": bands,
+        "top": top,
+        "top_width": round(width, 4),
+        "stable": stable,
+        "fragile": fragile,
+    }

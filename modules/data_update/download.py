@@ -132,6 +132,13 @@ def download_all(*, seasons: tuple[str, ...] = SEASON_ZIPS) -> dict:
     except Exception as exc:
         sofascore = {"ok": False, "n_teams": 0, "error": str(exc)}
         print(f"skip Sofascore context: {exc}")
+    try:
+        from modules.data_update.fotmob_context import download_fotmob_context
+
+        fotmob = download_fotmob_context(days=7)
+    except Exception as exc:
+        fotmob = {"ok": False, "n_teams": 0, "n_matches": 0, "error": str(exc)}
+        print(f"skip FotMob context: {exc}")
     elo_n = 0
     try:
         from modules.data_update.clubelo import fetch_clubelo
@@ -152,6 +159,8 @@ def download_all(*, seasons: tuple[str, ...] = SEASON_ZIPS) -> dict:
         "understat_teams": understat.get("n_teams", 0),
         "statsbomb_teams": statsbomb.get("n_teams", 0),
         "sofascore_teams": sofascore.get("n_teams", 0),
+        "fotmob_teams": fotmob.get("n_teams", 0),
+        "fotmob_matches": fotmob.get("n_matches", 0),
         "n_clubelo": elo_n,
         "source": BASE,
     }

@@ -36,7 +36,7 @@ class ModelTrainer:
 
     def split(self, feat: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, np.ndarray, np.ndarray, LabelEncoder]:
         # split temporale: ultime partite nel test, più realistico di uno shuffle puro
-        feat = feat.sort_values("date")
+        feat = self._with_feature_cols(feat).sort_values("date")
         cut = int(len(feat) * (1 - self.test_size))
         train_df, test_df = feat.iloc[:cut], feat.iloc[cut:]
         if len(test_df) < 50:
@@ -51,6 +51,14 @@ class ModelTrainer:
         y_train = encoder.transform(train_df["result"])
         y_test = encoder.transform(test_df["result"])
         return x_train, x_test, y_train, y_test, encoder
+
+    @staticmethod
+    def _with_feature_cols(feat: pd.DataFrame) -> pd.DataFrame:
+        out = feat.copy()
+        for col in FeatureEngineer.FEATURE_COLS:
+            if col not in out.columns:
+                out[col] = 0.0
+        return out
 
     def rolling_folds(
         self,
@@ -94,7 +102,7 @@ class ModelTrainer:
         """Walk-forward expanding: probabilità OOF per metriche oneste."""
         from modules.calibration.metrics import probability_metrics
 
-        feat = feat.sort_values("date").reset_index(drop=True)
+        feat = self._with_feature_cols(feat).sort_values("date").reset_index(drop=True)
         encoder = LabelEncoder()
         encoder.fit(LABELS)
         x_cols = FeatureEngineer.FEATURE_COLS

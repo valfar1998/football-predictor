@@ -138,6 +138,14 @@ def refresh_odds_pipeline(*, asian: bool = True) -> dict:
     except Exception as exc:
         statsbomb_info = {"ok": False, "n_teams": 0, "error": str(exc)}
         print(f"skip StatsBomb context: {exc}")
+    fotmob_info: dict = {}
+    try:
+        from modules.data_update.fotmob_context import download_fotmob_context
+
+        fotmob_info = download_fotmob_context(days=7)
+    except Exception as exc:
+        fotmob_info = {"ok": False, "n_teams": 0, "n_matches": 0, "error": str(exc)}
+        print(f"skip FotMob context: {exc}")
     tips_info: dict = {}
     try:
         tips = fetch_tipsters()
@@ -157,6 +165,7 @@ def refresh_odds_pipeline(*, asian: bool = True) -> dict:
         **{f"fbref_{k}": v for k, v in fbref_info.items()},
         **{f"understat_{k}": v for k, v in understat_info.items()},
         **{f"statsbomb_{k}": v for k, v in statsbomb_info.items()},
+        **{f"fotmob_{k}": v for k, v in fotmob_info.items()},
     }
 
 
@@ -251,6 +260,13 @@ def asian_odds_pipeline(*, days: int = 14, book: str = "bet365") -> dict:
         understat_info = download_understat_context()
     except Exception as exc:
         understat_info = {"error": str(exc)}
+    fotmob_info: dict = {}
+    try:
+        from modules.data_update.fotmob_context import download_fotmob_context
+
+        fotmob_info = download_fotmob_context(days=7)
+    except Exception as exc:
+        fotmob_info = {"error": str(exc)}
     upcoming = build_upcoming()
     return {
         "n_asian": len(rows),
@@ -264,6 +280,7 @@ def asian_odds_pipeline(*, days: int = 14, book: str = "bet365") -> dict:
         **{f"apif_{k}": v for k, v in apif_info.items()},
         **{f"fbref_{k}": v for k, v in fbref_info.items()},
         **{f"understat_{k}": v for k, v in understat_info.items()},
+        **{f"fotmob_{k}": v for k, v in fotmob_info.items()},
     }
 
 
@@ -311,9 +328,25 @@ def train_pipeline() -> dict:
     }
 
 
-def predict_pipeline(home: str, away: str, n_sims: int = 10_000) -> dict:
+def predict_pipeline(home: str, away: str, n_sims: int = 10_000, odds: dict | None = None, league: str | None = None) -> dict:
+    from modules.data_update.history import lookup_history_match
+    from modules.predictor.predict import context_xg
+
     predictor = MatchPredictor()
-    pred = predictor.predict(home, away)
+    fb_idx = load_fbref_team_index()
+    us_idx = load_understat_team_index()
+    fb_h = lookup_team_context(home, fb_idx)
+    fb_a = lookup_team_context(away, fb_idx)
+    us_h = lookup_understat_team(home, us_idx)
+    us_a = lookup_understat_team(away, us_idx)
+    pred = predictor.predict(
+        home,
+        away,
+        league=league,
+        odds=odds,
+        ext_xg_home=context_xg(us_h, fb_h),
+        ext_xg_away=context_xg(us_a, fb_a),
+    )
     sim = MonteCarloSimulator(n_sims=n_sims).simulate(
         pred["lambda_home"],
         pred["lambda_away"],
@@ -329,15 +362,26 @@ def predict_pipeline(home: str, away: str, n_sims: int = 10_000) -> dict:
         "expected_goals": {"home": pred["lambda_home"], "away": pred["lambda_away"]},
         "features": pred.get("features") or {},
         "fbref_context": {
-            "home": lookup_team_context(pred["home_team"], load_fbref_team_index()),
-            "away": lookup_team_context(pred["away_team"], load_fbref_team_index()),
+            "home": lookup_team_context(pred["home_team"], fb_idx) or fb_h,
+            "away": lookup_team_context(pred["away_team"], fb_idx) or fb_a,
         },
         "understat_context": {
-            "home": lookup_understat_team(pred["home_team"], load_understat_team_index()),
-            "away": lookup_understat_team(pred["away_team"], load_understat_team_index()),
+            "home": lookup_understat_team(pred["home_team"], us_idx) or us_h,
+            "away": lookup_understat_team(pred["away_team"], us_idx) or us_a,
         },
         "montecarlo": sim,
+        "league": league or "",
+        "home": pred["home_team"],
+        "away": pred["away_team"],
+        "history_context": lookup_history_match(pred["home_team"], pred["away_team"], league=league),
+        "ensemble": pred.get("ensemble"),
     }
+    try:
+        from modules.sportly_sim import build_sportly_sim
+
+        out["sportly_sim"] = build_sportly_sim(out)
+    except Exception:
+        out["sportly_sim"] = {"ready": False}
     dest = OUT_DIR / "last_prediction.json"
     dest.write_text(json.dumps(out, indent=2), encoding="utf-8")
     out["saved_to"] = str(dest)

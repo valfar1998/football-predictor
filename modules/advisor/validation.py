@@ -260,12 +260,14 @@ def check_stability(prediction: dict[str, Any]) -> dict[str, Any]:
     if std_h is None and mc.get("n_sims"):
         n = max(1, int(mc["n_sims"]))
         std_h = sqrt(h_mc * (1.0 - h_mc) / n)
-    if diff < STABLE_OK:
+    if diff <= 0.04:
+        status, delta, note = "ok", 0.5, f"ML vs MC {diff:.1%} (quasi identici: +0.5)"
+    elif diff < STABLE_OK:
         status, delta, note = "ok", 0.0, f"ML vs MC {diff:.1%} (<5%)"
     elif diff <= STABLE_WARN:
         status, delta, note = "warning", 0.0, f"ML vs MC {diff:.1%} (5–8%: warning)"
     else:
-        status, delta, note = "riduci", -1.0, f"ML vs MC {diff:.1%} (>8%: voto probabilità −1)"
+        status, delta, note = "riduci", -0.5, f"ML vs MC {diff:.1%} (>8%: −0.5)"
     return {
         "ready": True,
         "diff": round(diff, 4),
@@ -350,6 +352,34 @@ def check_form(prediction: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def check_sportly_sim(prediction: dict[str, Any]) -> dict[str, Any]:
+    """Validazione tattica automatica dal modulo Sportly-sim interno."""
+    block = (prediction.get("sportly_sim") or {}).get("tactical_validation") or {}
+    if not block.get("ready"):
+        return {
+            "ready": False,
+            "status": "n/d",
+            "delta_unified": 0.0,
+            "notes": ["Sportly-sim non disponibile"],
+        }
+    return {
+        "ready": True,
+        "status": block.get("status") or "n/d",
+        "lean": block.get("lean"),
+        "agrees": block.get("agrees") or [],
+        "disagrees": block.get("disagrees") or [],
+        "delta_unified": float(block.get("delta_unified") or 0),
+        "notes": list(block.get("notes") or []),
+    }
+
+
+def check_data_signal(prediction: dict[str, Any], play: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Algoritmo dati (xG/forma/casa/classifiche) → micro Δ voto."""
+    from modules.advisor.data_signal import data_signal_validation
+
+    return data_signal_validation(prediction, play)
+
+
 def run_validation(
     *,
     prediction: dict[str, Any] | None,
@@ -358,11 +388,30 @@ def run_validation(
 ) -> dict[str, Any]:
     prediction = prediction or {}
     play = play or {}
+    # genera sim al volo se manca (singola partita / advise senza upcoming)
+    if not (prediction.get("sportly_sim") or {}).get("ready"):
+        try:
+            from modules.sportly_sim import build_sportly_sim
+
+            prediction = dict(prediction)
+            prediction["sportly_sim"] = build_sportly_sim(prediction)
+        except Exception:
+            pass
+    if not (prediction.get("data_signal") or {}).get("ready"):
+        try:
+            from modules.advisor.data_signal import build_data_signal
+
+            prediction = dict(prediction)
+            prediction["data_signal"] = build_data_signal(prediction)
+        except Exception:
+            pass
     venue = check_venue(prediction)
     tactical = check_tactical(prediction)
     market = check_market(play, grouped)
     stability = check_stability(prediction)
     form = check_form(prediction)
+    sportly = check_sportly_sim(prediction)
+    data_sig = check_data_signal(prediction, play)
 
     mc = prediction.get("montecarlo") or {}
     ml = prediction.get("model_probabilities") or {}
@@ -379,12 +428,14 @@ def run_validation(
         + float(market.get("delta_unified") or 0)
         + float(stability.get("delta_unified") or 0)
         + float(form.get("delta_unified") or 0)
+        + float(sportly.get("delta_unified") or 0)
+        + float(data_sig.get("delta_unified") or 0)
     )
     delta_prob = float(tactical.get("delta_prob") or 0) + float(stability.get("delta_prob") or 0)
     delta_value = float(market.get("delta_value") or 0)
 
     warnings: list[str] = []
-    for block in (venue, tactical, market, stability, form):
+    for block in (venue, tactical, market, stability, form, sportly, data_sig):
         if block.get("status") in {"warning", "contrario", "riduci", "negativa"}:
             warnings.extend(block.get("notes") or [])
         elif block.get("incoherent"):
@@ -396,6 +447,8 @@ def run_validation(
         f"mercato {market.get('status')}",
         f"ML/MC {stability.get('status')}",
         f"forma {form.get('status')}",
+        f"sim {sportly.get('status')}",
+        f"dati {data_sig.get('status')}",
     ]
     return {
         "venue": venue,
@@ -403,6 +456,8 @@ def run_validation(
         "market": market,
         "stability": stability,
         "form": form,
+        "sportly_sim": sportly,
+        "data_signal": data_sig,
         "p_validated": p_adj,
         "delta_unified": round(delta_unified, 3),
         "delta_prob": round(delta_prob, 3),

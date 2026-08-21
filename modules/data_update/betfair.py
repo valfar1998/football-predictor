@@ -212,8 +212,13 @@ def login(*, force: bool = False) -> str:
         cached = _read_session()
         if cached:
             try:
-                _post_form(KEEPALIVE_URL, {}, {"X-Application": app_key, "X-Authentication": cached})
-                return cached
+                alive = _post_form(
+                    KEEPALIVE_URL,
+                    {},
+                    {"X-Application": app_key, "X-Authentication": cached},
+                )
+                if str(alive.get("status") or "").upper() == "SUCCESS":
+                    return cached
             except Exception:
                 pass
     user, pwd = _credentials()
@@ -393,6 +398,82 @@ def _group_events(catalogue: list[dict]) -> dict[str, dict]:
     return grouped
 
 
+def _fetch_catalogue_and_books(
+    token: str,
+    app_key: str,
+    *,
+    days: int,
+) -> list[dict]:
+    now = datetime.now(timezone.utc)
+    catalogue: list[dict] = []
+    # Finestre da 6h: riduce TOO_MUCH_DATA rispetto al giorno intero.
+    steps = max(1, int(days) * 4)
+    for i in range(steps):
+        start = now + timedelta(hours=6 * i)
+        end = now + timedelta(hours=6 * (i + 1))
+        catalogue.extend(_catalogue_range(token, app_key, start, end))
+    grouped = _group_events(catalogue)
+    market_ids = []
+    for row in grouped.values():
+        market_ids.extend([mid for mid in row["markets"].values() if mid])
+    books = {str(b.get("marketId")): b for b in _market_books(token, app_key, market_ids)}
+
+    events: list[dict] = []
+    for row in grouped.values():
+        ev = {
+            "event_id": row["event_id"],
+            "home": row["home"],
+            "away": row["away"],
+            "commence_time": row["commence_time"],
+            "competition": row["competition"],
+            "odd_home": None,
+            "odd_draw": None,
+            "odd_away": None,
+            "odd_over_25": None,
+            "odd_under_25": None,
+        }
+        match_id = row["markets"].get("MATCH_ODDS")
+        if match_id and match_id in books:
+            names = row["runners"].get("MATCH_ODDS") or {}
+            leftover: list[tuple[str, float]] = []
+            for runner in books[match_id].get("runners") or []:
+                sid = runner.get("selectionId")
+                name = names.get(int(sid) if sid is not None else -1, "")
+                price = _best_back(runner)
+                if price is None:
+                    continue
+                if _is_draw(name):
+                    ev["odd_draw"] = price
+                elif _team_match(row["home"], name):
+                    ev["odd_home"] = price
+                elif _team_match(row["away"], name):
+                    ev["odd_away"] = price
+                else:
+                    leftover.append((name, price))
+            if leftover and (ev["odd_home"] is None or ev["odd_away"] is None):
+                for name, price in leftover:
+                    if ev["odd_home"] is None:
+                        ev["odd_home"] = price
+                    elif ev["odd_away"] is None:
+                        ev["odd_away"] = price
+        ou_id = row["markets"].get("OVER_UNDER_25")
+        if ou_id and ou_id in books:
+            names = row["runners"].get("OVER_UNDER_25") or {}
+            for runner in books[ou_id].get("runners") or []:
+                sid = runner.get("selectionId")
+                name = names.get(int(sid) if sid is not None else -1, "")
+                price = _best_back(runner)
+                if price is None:
+                    continue
+                if _is_over_25(name):
+                    ev["odd_over_25"] = price
+                elif _is_under_25(name):
+                    ev["odd_under_25"] = price
+        if ev["odd_home"] or ev["odd_away"] or ev["odd_over_25"]:
+            events.append(ev)
+    return events
+
+
 def fetch_betfair_odds(*, force: bool = False, days: int = 7, max_age_hours: float = 6.0) -> dict:
     """Scarica 1X2 e Over/Under 2.5 Exchange per il calcio in arrivo."""
     if not force and CACHE.exists():
@@ -425,72 +506,15 @@ def fetch_betfair_odds(*, force: bool = False, days: int = 7, max_age_hours: flo
         return {"ok": False, "error": "BETFAIR_APP_KEY non trovata", "n_events": 0, "events": [], "from_cache": False}
 
     try:
-        token = login()
-        now = datetime.now(timezone.utc)
-        catalogue: list[dict] = []
-        for offset in range(days):
-            start = now + timedelta(days=offset)
-            end = now + timedelta(days=offset + 1)
-            catalogue.extend(_catalogue_range(token, app_key, start, end))
-        grouped = _group_events(catalogue)
-        market_ids = []
-        for row in grouped.values():
-            market_ids.extend([mid for mid in row["markets"].values() if mid])
-        books = {str(b.get("marketId")): b for b in _market_books(token, app_key, market_ids)}
-
-        events: list[dict] = []
-        for row in grouped.values():
-            ev = {
-                "event_id": row["event_id"],
-                "home": row["home"],
-                "away": row["away"],
-                "commence_time": row["commence_time"],
-                "competition": row["competition"],
-                "odd_home": None,
-                "odd_draw": None,
-                "odd_away": None,
-                "odd_over_25": None,
-                "odd_under_25": None,
-            }
-            match_id = row["markets"].get("MATCH_ODDS")
-            if match_id and match_id in books:
-                names = row["runners"].get("MATCH_ODDS") or {}
-                leftover: list[tuple[str, float]] = []
-                for runner in books[match_id].get("runners") or []:
-                    sid = runner.get("selectionId")
-                    name = names.get(int(sid) if sid is not None else -1, "")
-                    price = _best_back(runner)
-                    if price is None:
-                        continue
-                    if _is_draw(name):
-                        ev["odd_draw"] = price
-                    elif _team_match(row["home"], name):
-                        ev["odd_home"] = price
-                    elif _team_match(row["away"], name):
-                        ev["odd_away"] = price
-                    else:
-                        leftover.append((name, price))
-                if leftover and (ev["odd_home"] is None or ev["odd_away"] is None):
-                    for name, price in leftover:
-                        if ev["odd_home"] is None:
-                            ev["odd_home"] = price
-                        elif ev["odd_away"] is None:
-                            ev["odd_away"] = price
-            ou_id = row["markets"].get("OVER_UNDER_25")
-            if ou_id and ou_id in books:
-                names = row["runners"].get("OVER_UNDER_25") or {}
-                for runner in books[ou_id].get("runners") or []:
-                    sid = runner.get("selectionId")
-                    name = names.get(int(sid) if sid is not None else -1, "")
-                    price = _best_back(runner)
-                    if price is None:
-                        continue
-                    if _is_over_25(name):
-                        ev["odd_over_25"] = price
-                    elif _is_under_25(name):
-                        ev["odd_under_25"] = price
-            if ev["odd_home"] or ev["odd_away"] or ev["odd_over_25"]:
-                events.append(ev)
+        token = login(force=force)
+        try:
+            events = _fetch_catalogue_and_books(token, app_key, days=days)
+        except RuntimeError as exc:
+            # Sessione “viva” al keepAlive ma rifiutata dall’Exchange → re-login forzato.
+            if "INVALID_SESSION" not in str(exc):
+                raise
+            token = login(force=True)
+            events = _fetch_catalogue_and_books(token, app_key, days=days)
 
         payload = {
             "fetched_at": datetime.now(timezone.utc).isoformat(),

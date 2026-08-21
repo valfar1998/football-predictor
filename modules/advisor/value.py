@@ -102,6 +102,78 @@ def realization_factor(league: str | None, group: str | None, cal: dict | None =
     return float(min(found))
 
 
+# Lega “stretta” (cap più alto) vs alta varianza (cap più basso) sul voto value/composito.
+_LOW_VAR_LEAGUES = (
+    "brasileiro",
+    "brazil",
+    "serie a brazil",
+    "brasileirão",
+    "eredivisie",
+    "primeira liga",
+    "liga portugal",
+    "saudi",
+    "allsvenskan",
+)
+_HIGH_VAR_LEAGUES = (
+    "serie b",
+    "championship",
+    "2. bundesliga",
+    "2 bundesliga",
+    "ligue 2",
+    "segunda",
+    "laliga2",
+    "eerste divisie",
+    "league one",
+    "league two",
+    "national league",
+    "3. liga",
+)
+
+
+def league_cap_adj(league: str | None, cal: dict | None = None) -> int:
+    """+1 leghe più strette, −1 alta varianza. Override soft da calibration.by_league."""
+    name = str(league or "").strip().lower()
+    if not name:
+        return 0
+    adj = 0
+    if any(k in name for k in _HIGH_VAR_LEAGUES):
+        adj = -1
+    elif any(k in name for k in _LOW_VAR_LEAGUES):
+        adj = 1
+    cal = cal or load_calibration()
+    for row in cal.get("by_league") or []:
+        lg = str(row.get("league") or "").strip().lower()
+        if not lg or (lg != name and name not in lg and lg not in name):
+            continue
+        if int(row.get("n") or 0) < 40:
+            break
+        realiz = row.get("realization")
+        if realiz is None:
+            break
+        r = float(realiz)
+        if r < 0.45:
+            adj = min(adj, -1)
+        elif r > 0.85:
+            adj = max(adj, 1)
+        break
+    return int(adj)
+
+
+def prob_score_cap(prob: float, *, league: str | None = None, cal: dict | None = None) -> int | None:
+    """Cap sul voto da probabilità: <20→4 … <35→7, spostato ±1 per varianza lega."""
+    if prob >= 0.35:
+        return None
+    if prob < 0.20:
+        base = 4
+    elif prob < 0.25:
+        base = 5
+    elif prob < 0.30:
+        base = 6
+    else:
+        base = 7
+    return max(3, min(9, base + league_cap_adj(league, cal)))
+
+
 def score_value_from_edge(
     *,
     edge_pp: float | None,
@@ -110,6 +182,9 @@ def score_value_from_edge(
     realization: float,
     real_odds: bool,
     steam_against: bool,
+    prob: float | None = None,
+    league: str | None = None,
+    cal: dict | None = None,
 ) -> int | None:
     if not real_odds or edge_pp is None:
         return None
@@ -129,6 +204,10 @@ def score_value_from_edge(
         raw = min(raw, 8)
     if steam_against:
         raw -= 1.5
+    if prob is not None:
+        cap = prob_score_cap(float(prob), league=league, cal=cal)
+        if cap is not None:
+            raw = min(raw, cap)
     return _clamp_score(raw)
 
 
@@ -283,7 +362,11 @@ def enrich_value(
         realization=realiz,
         real_odds=real,
         steam_against=steam_against,
+        prob=p_cons,
+        league=league,
+        cal=cal,
     )
+    out["league"] = league or out.get("league")
     if not real:
         out["value_note"] = "quota ipotetica: nessun voto value"
     elif edge_pp is not None:

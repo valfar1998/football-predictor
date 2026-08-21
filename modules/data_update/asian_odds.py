@@ -845,13 +845,28 @@ def move_alignment(pick: str | None, moves: dict | None) -> dict:
         elif overish or underish:
             disagrees.append("totale")
 
-    delta = 0
+    # Scala sul movimento: stabile 0 · leggero ±0.5 · medio ±1 · forte ±2 · fortissimo/raro ±3
+    lvl = str(moves.get("movement_level") or "Stabile")
+    mag = {
+        "Stabile": 0.0,
+        "Leggero": 0.5,
+        "Medio": 1.0,
+        "Forte": 2.0,
+        "Fortissimo": 3.0,
+        "Raro": 3.0,
+    }.get(lvl)
+    if mag is None:
+        # fallback su strength legacy se il livello non è riconosciuto
+        strength = int(moves.get("strength") or 0)
+        mag = 0.0 if strength <= 0 else 0.5 if strength == 1 else 1.0 if strength == 2 else 2.0
+
+    delta = 0.0
     if agrees and not disagrees:
-        delta = 1 + (1 if (moves.get("strength") or 0) >= 2 else 0)
+        delta = mag
     elif disagrees and not agrees:
-        delta = -1 - (1 if (moves.get("strength") or 0) >= 2 else 0)
+        delta = -mag
     elif agrees and disagrees:
-        delta = 0
+        delta = 0.0
 
     if delta > 0:
         label = "allineato"
@@ -861,7 +876,7 @@ def move_alignment(pick: str | None, moves: dict | None) -> dict:
         label = "misto"
     else:
         label = "stabile"
-    return {"agrees": agrees, "disagrees": disagrees, "delta": delta, "label": label}
+    return {"agrees": agrees, "disagrees": disagrees, "delta": delta, "label": label, "magnitude": mag}
 
 
 def asian_to_advisor_odds(row: dict) -> dict[str, float | None]:

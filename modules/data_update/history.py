@@ -2,7 +2,8 @@
 
 Non usa MySQL: per un'app locale SQLite evita server, password e dipendenze extra.
 Dopo MIN_GLOBAL_SETTLED partite chiuse e MIN_TEAM_MATCHES per squadra, lo storico
-entra nel voto unificato con peso HISTORY_WEIGHT (12%).
+entra nel voto unificato con peso da HISTORY_WEIGHT (12%) fino a HISTORY_WEIGHT_MAX (18%)
+quando ci sono abbastanza esiti globali e di lega.
 """
 
 from __future__ import annotations
@@ -22,7 +23,10 @@ DB = PROCESSED / "our_history.sqlite"
 
 MIN_TEAM_MATCHES = 6
 MIN_GLOBAL_SETTLED = 30
+MIN_GLOBAL_BOOST = 80
+MIN_LEAGUE_SETTLED = 20
 HISTORY_WEIGHT = 0.12
+HISTORY_WEIGHT_MAX = 0.18
 
 _CREATE = """
 CREATE TABLE IF NOT EXISTS matches (
@@ -264,8 +268,126 @@ def settle_from_results(results: pd.DataFrame) -> dict[str, Any]:
         conn.close()
 
 
+def _fetch_world_results(*, days_back: int = 3) -> pd.DataFrame:
+    """Scarica i risultati degli ultimi N giorni da TheSportsDB e API-Football."""
+    import json
+    import os
+    from datetime import date, timedelta
+    from urllib.request import Request, urlopen
+
+    UA = "Mozilla/5.0 (compatible; football-predictor/1.0; +local)"
+    TSDB_BASE = "https://www.thesportsdb.com/api/v1/json"
+    APIF_BASE = "https://v3.football.api-sports.io"
+
+    def _tsdb_key() -> str:
+        for k in ("THESPORTSDB_API_KEY", "THESPORTSDB_KEY"):
+            val = (os.environ.get(k) or "").strip()
+            if val and not (len(val) == 32 and all(c in "0123456789abcdefABCDEF" for c in val)):
+                return val
+        p = ROOT / "data" / "raw" / "thesportsdb.key"
+        if p.exists():
+            val = p.read_text(encoding="utf-8").strip()
+            if val and not (len(val) == 32 and all(c in "0123456789abcdefABCDEF" for c in val)):
+                return val
+        return "123"
+
+    def _apif_key() -> str | None:
+        for k in ("API_FOOTBALL_KEY", "APISPORTS_KEY"):
+            val = (os.environ.get(k) or "").strip()
+            if val:
+                return val
+        p = ROOT / "data" / "raw" / "api-football.key"
+        if p.exists():
+            val = p.read_text(encoding="utf-8").strip()
+            if val:
+                return val
+        return None
+
+    from modules.data_update.team_names import resolve_known_team
+
+    rows: list[dict] = []
+    today = date.today()
+    tsdb_key = _tsdb_key()
+    apif_key = _apif_key()
+
+    for i in range(1, days_back + 1):
+        day = today - timedelta(days=i)
+        day_s = day.isoformat()
+
+        # TheSportsDB: eventsday restituisce anche partite con risultati
+        try:
+            url = f"{TSDB_BASE}/{tsdb_key}/eventsday.php?d={day_s}&s=Soccer"
+            req = Request(url, headers={"User-Agent": UA})
+            with urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            for ev in data.get("events") or []:
+                home_raw = str(ev.get("strHomeTeam") or "").strip()
+                away_raw = str(ev.get("strAwayTeam") or "").strip()
+                hg = ev.get("intHomeScore")
+                ag = ev.get("intAwayScore")
+                if not home_raw or not away_raw or hg is None or ag is None:
+                    continue
+                try:
+                    hg, ag = int(hg), int(ag)
+                except (TypeError, ValueError):
+                    continue
+                rows.append({
+                    "date": pd.Timestamp(day_s),
+                    "home_team": resolve_known_team(home_raw) or home_raw,
+                    "away_team": resolve_known_team(away_raw) or away_raw,
+                    "home_goals": hg,
+                    "away_goals": ag,
+                })
+        except Exception:
+            pass
+
+        # API-Football: risultati del giorno
+        if apif_key:
+            try:
+                from urllib.parse import urlencode
+                q = urlencode({"date": day_s})
+                req = Request(
+                    f"{APIF_BASE}/fixtures?{q}",
+                    headers={"User-Agent": UA, "x-apisports-key": apif_key},
+                )
+                with urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                for item in data.get("response") or []:
+                    fx = item.get("fixture") or {}
+                    status = str((fx.get("status") or {}).get("short") or "")
+                    if status not in {"FT", "AET", "PEN"}:
+                        continue
+                    teams = item.get("teams") or {}
+                    goals = item.get("goals") or {}
+                    home_raw = str((teams.get("home") or {}).get("name") or "").strip()
+                    away_raw = str((teams.get("away") or {}).get("name") or "").strip()
+                    hg = goals.get("home")
+                    ag = goals.get("away")
+                    if not home_raw or not away_raw or hg is None or ag is None:
+                        continue
+                    try:
+                        hg, ag = int(hg), int(ag)
+                    except (TypeError, ValueError):
+                        continue
+                    rows.append({
+                        "date": pd.Timestamp(day_s),
+                        "home_team": resolve_known_team(home_raw) or home_raw,
+                        "away_team": resolve_known_team(away_raw) or away_raw,
+                        "home_goals": hg,
+                        "away_goals": ag,
+                    })
+            except Exception:
+                pass
+
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    df = df.drop_duplicates(subset=["date", "home_team", "away_team"], keep="last")
+    return df
+
+
 def settle_pending() -> dict[str, Any]:
-    """Chiude i match archiviati usando coppe (org) e risultati football-data.co.uk."""
+    """Chiude i match archiviati usando coppe (org), football-data.co.uk e risultati mondiali."""
     conn = _connect()
     try:
         _migrate_jsonl(conn)
@@ -290,6 +412,17 @@ def settle_pending() -> dict[str, Any]:
         settled += int(settle_from_results(hist).get("settled") or 0)
     except Exception:
         pass
+    # Fonti mondiali: TheSportsDB + API-Football per i risultati degli ultimi giorni
+    # Coprono le 700+ partite internazionali non presenti nei CSV football-data.co.uk
+    try:
+        world = _fetch_world_results(days_back=3)
+        if not world.empty:
+            n = int(settle_from_results(world).get("settled") or 0)
+            settled += n
+            if n:
+                print(f"storico locale: {n} partite chiuse da fonti mondiali (TSDB/API-Football)")
+    except Exception as exc:
+        print(f"skip world results settle: {exc}")
     summary = history_summary()
     summary["settled"] = settled
     return summary
@@ -325,9 +458,18 @@ def _team_form(conn: sqlite3.Connection, team: str) -> dict[str, Any] | None:
     }
 
 
-def lookup_history_match(home: str, away: str) -> dict[str, Any]:
+def _history_weight(n_global: int, n_league: int = 0) -> float:
+    w = HISTORY_WEIGHT
+    if int(n_global) >= MIN_GLOBAL_BOOST:
+        w = 0.15
+    if int(n_league) >= MIN_LEAGUE_SETTLED:
+        w += 0.03
+    return min(HISTORY_WEIGHT_MAX, w)
+
+
+def lookup_history_match(home: str, away: str, league: str | None = None) -> dict[str, Any]:
     """Segnale per il quadro/voto: pronto solo dopo abbastanza esiti locali."""
-    empty = {"ready": False, "n_global": 0, "home": None, "away": None}
+    empty = {"ready": False, "n_global": 0, "n_league": 0, "home": None, "away": None, "weight": HISTORY_WEIGHT}
     if not DB.exists() and not JSONL.exists():
         return empty
     from modules.data_update.team_names import resolve_known_team
@@ -338,15 +480,24 @@ def lookup_history_match(home: str, away: str) -> dict[str, Any]:
     try:
         _migrate_jsonl(conn)
         n_global = conn.execute("SELECT COUNT(*) FROM matches WHERE result IS NOT NULL").fetchone()[0]
+        n_league = 0
+        lg = str(league or "").strip()
+        if lg:
+            n_league = conn.execute(
+                "SELECT COUNT(*) FROM matches WHERE result IS NOT NULL AND league = ?",
+                (lg,),
+            ).fetchone()[0]
         h = _team_form(conn, home)
         a = _team_form(conn, away)
         ready = int(n_global) >= MIN_GLOBAL_SETTLED and h is not None and a is not None
         return {
             "ready": ready,
             "n_global": int(n_global),
+            "n_league": int(n_league),
+            "league": lg or None,
             "min_team": MIN_TEAM_MATCHES,
             "min_global": MIN_GLOBAL_SETTLED,
-            "weight": HISTORY_WEIGHT,
+            "weight": _history_weight(int(n_global), int(n_league)),
             "home": h,
             "away": a,
         }
@@ -368,7 +519,7 @@ def history_summary() -> dict[str, Any]:
             "ready": int(settled) >= MIN_GLOBAL_SETTLED,
             "min_global": MIN_GLOBAL_SETTLED,
             "min_team": MIN_TEAM_MATCHES,
-            "weight": HISTORY_WEIGHT,
+            "weight": _history_weight(int(settled), 0),
             "path": str(DB),
         }
     finally:

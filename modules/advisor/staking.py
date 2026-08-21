@@ -80,6 +80,9 @@ def no_bet_reasons(
     min_rank: int = LIQUID_AGAINST_RANK,
     min_pp: float = LIQUID_AGAINST_PP,
     sharp_ev: float | None = None,
+    agreement: dict[str, Any] | None = None,
+    prob_intervals: dict[str, Any] | None = None,
+    residual: dict[str, Any] | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     ev = play.get("ev_cons")
@@ -95,6 +98,27 @@ def no_bet_reasons(
         reasons.append(f"Pinnacle/sharp non offre edge ({sharp_ev:+.1%})")
     if market_too_liquid_against(play, market_move, alignment, min_rank=min_rank, min_pp=min_pp):
         reasons.append("mercato troppo liquido contrario (steam forte, quota pick allungata)")
+    if agreement and agreement.get("block_no_bet"):
+        reasons.append(
+            "fonti in disaccordo sul pick ("
+            + (agreement.get("notes") or ["quadro spezzato"])[0]
+            + ")"
+        )
+    iv = prob_intervals or {}
+    if iv.get("ready") and iv.get("fragile"):
+        code = str(play.get("code") or "")
+        bands = iv.get("bands") or {}
+        band = bands.get(code) if code in bands else bands.get(iv.get("top"))
+        if band and float(band.get("width") or 0) >= 0.12:
+            reasons.append(
+                f"probabilità instabile (intervallo {band.get('lo'):.0%}–{band.get('hi'):.0%})"
+            )
+    if residual and residual.get("ready") and residual.get("adj_ev") is not None:
+        if float(residual["adj_ev"]) < min_edge and float(ev or 0) >= min_edge:
+            reasons.append(
+                f"residual EV riduce l'edge a {float(residual['adj_ev']):+.1%} "
+                f"({residual.get('note') or 'second-stage'})"
+            )
     return reasons
 
 

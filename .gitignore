@@ -12,7 +12,11 @@ data/raw/betfair.appkey
 data/raw/betfair.session.json
 data/raw/betfair_odds.json
 data/raw/pinnacle_odds.json
+data/raw/weather_cache.json
+data/raw/geocode_cache.json
 data/raw/odds-api-remaining.txt
+data/processed/fotmob_matches.json
+data/processed/fotmob_team_context.csv
 .streamlit/secrets.toml
 data/processed/*.csv
 data/models/*.joblib

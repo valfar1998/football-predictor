@@ -82,8 +82,10 @@ class FeatureEngineer:
                     "home_matches_7d": m7_h,
                     "away_matches_7d": m7_a,
                     "congestion_diff": m7_h - m7_a,
+                    "days_into_season": self._days_into_season(m["date"], m.get("season")),
                     "n_home_hist": h_stats["n"],
                     "n_away_hist": a_stats["n"],
+                    **self._market_features(m),
                 }
             )
 
@@ -156,9 +158,63 @@ class FeatureEngineer:
         return int(max((current - prev).days, 1))
 
     @staticmethod
+    def _days_into_season(current, season) -> float:
+        """Giorni dall'inizio stagione (proxy 1 luglio). Smorza le prime giornate."""
+        cur = pd.Timestamp(current)
+        year = int(cur.year)
+        # stagione europea: se mese < 7, stagione iniziata luglio anno-1
+        start_year = year if cur.month >= 7 else year - 1
+        s = str(season or "")
+        digits = "".join(ch for ch in s if ch.isdigit())
+        if len(digits) >= 4:
+            try:
+                start_year = int(digits[:4])
+            except ValueError:
+                pass
+        start = pd.Timestamp(year=start_year, month=7, day=1)
+        return float(max(0, (cur - start).days))
+
+    @staticmethod
     def _matches_in_days(dates: deque, current: pd.Timestamp, window: int) -> int:
         cur = pd.Timestamp(current)
         return sum(1 for d in dates if 0 < (cur - pd.Timestamp(d)).days <= window)
+
+    @staticmethod
+    def _odd_val(m, *names: str) -> float | None:
+        for name in names:
+            if name not in getattr(m, "index", []):
+                if not isinstance(m, dict) or name not in m:
+                    continue
+            try:
+                val = float(m[name])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if val > 1.01:
+                return val
+        return None
+
+    @classmethod
+    def implied_1x2(cls, m) -> tuple[float, float, float, float, float]:
+        """p_home, p_draw, p_away, overround, has_market (0/1). Close se c'è, altrimenti open."""
+        o1 = cls._odd_val(m, "odd_home_close", "odd_home", "1")
+        ox = cls._odd_val(m, "odd_draw_close", "odd_draw", "X", "x")
+        o2 = cls._odd_val(m, "odd_away_close", "odd_away", "2")
+        if not o1 or not ox or not o2:
+            return 0.34, 0.28, 0.38, 0.0, 0.0
+        i1, ix, i2 = 1.0 / o1, 1.0 / ox, 1.0 / o2
+        tot = i1 + ix + i2
+        return i1 / tot, ix / tot, i2 / tot, round(tot - 1.0, 4), 1.0
+
+    @classmethod
+    def _market_features(cls, m) -> dict[str, float]:
+        p1, px, p2, ov, has = cls.implied_1x2(m)
+        return {
+            "mkt_p_home": p1,
+            "mkt_p_draw": px,
+            "mkt_p_away": p2,
+            "mkt_overround": ov,
+            "mkt_has": has,
+        }
 
     def save(self, feat: pd.DataFrame, name: str = "features.csv") -> Path:
         dest = PROCESSED / name
@@ -174,4 +230,6 @@ class FeatureEngineer:
         "home_elo", "away_elo", "elo_diff",
         "month", "weekday", "home_rest_days", "away_rest_days", "rest_diff",
         "home_matches_7d", "away_matches_7d", "congestion_diff",
+        "days_into_season",
+        "mkt_p_home", "mkt_p_draw", "mkt_p_away", "mkt_overround", "mkt_has",
     ]

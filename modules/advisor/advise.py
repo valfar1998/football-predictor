@@ -12,7 +12,7 @@ from modules.advisor.staking import (
     no_bet_reasons,
     quarter_kelly,
 )
-from modules.advisor.value import PLAY_VALUE_KEYS, enrich_value
+from modules.advisor.value import PLAY_VALUE_KEYS, enrich_value, prob_score_cap
 from modules.advisor.quadro import build_quadro, validation_source
 from modules.advisor.validation import apply_to_play, run_validation
 
@@ -197,6 +197,7 @@ def _meta_analysis(
     quadro: dict[str, Any] | None,
     legs: tuple[str, ...] | None = None,
     validation: dict[str, Any] | None = None,
+    history_weight: float | None = None,
 ) -> dict[str, Any]:
     """Unico indicatore: value+kelly+asian+workflow+storico. Gambe assenti restano a 0 (non si ricalcola)."""
     metrics_nd = _value_metrics_missing(play)
@@ -270,7 +271,19 @@ def _meta_analysis(
         "history": history_norm,
         "combos": combos_norm,
     }
-    weights = {"value": 0.28, "kelly": 0.16, "asian": 0.18, "workflow": 0.10, "history": 0.10, "combos": 0.18}
+    extra = 0.0
+    if hist_ok and history_weight is not None:
+        hw = min(0.18, max(0.10, float(history_weight)))
+        extra = hw - 0.10
+    hw = 0.10 + extra
+    weights = {
+        "value": 0.28 - extra * 0.5,
+        "kelly": 0.16,
+        "asian": 0.18,
+        "workflow": 0.10,
+        "history": hw,
+        "combos": 0.18 - extra * 0.5,
+    }
     # Gambe assenti restano 0 sul denominatore pieno: niente ricalcolo che gonfia il workflow.
     measured = {
         "value": not metrics_nd,
@@ -437,6 +450,7 @@ def advise_uncovered(
         market_move=market_move,
         quadro=quadro,
         validation=validation,
+        history_weight=(prediction.get("history_context") or {}).get("weight"),
     )
     play["score_unified"] = meta["score"]
     play["meta_analysis"] = meta
@@ -466,11 +480,44 @@ def advise_uncovered(
     }
 
 
+def _borderline_penalty(prob: float, group: str) -> float:
+    """Penalità proporzionale sotto la soglia “comoda” (non un −1 fisso)."""
+    if group == "1x2":
+        # ~37% → −0.3 · ~33% → −1.2 · ~28% → −2.0
+        soft_hi, soft_lo, max_pen = 0.39, 0.28, 2.0
+    elif group in {"ou", "btts", "team"}:
+        soft_hi, soft_lo, max_pen = 0.52, 0.42, 1.5
+    elif group == "combo":
+        soft_hi, soft_lo, max_pen = 0.24, 0.16, 1.5
+    else:
+        soft_hi, soft_lo, max_pen = 0.55, 0.48, 1.0
+    if prob >= soft_hi:
+        return 0.0
+    span = max(1e-6, soft_hi - soft_lo)
+    return float(min(max_pen, max_pen * (soft_hi - prob) / span))
+
+
+def _ml_mc_adjust(divergence: float, *, has_ml: bool) -> float:
+    """+0.5 se ML≈MC, −0.5 se divergono; malus più forti oltre 8–12 pp."""
+    if not has_ml:
+        return 0.0
+    if divergence <= 0.04:
+        return 0.5
+    if divergence > 0.12:
+        return -1.5
+    if divergence > 0.08:
+        return -0.75
+    if divergence > 0.05:
+        return -0.5
+    return 0.0
+
+
 def score_composite(market: dict[str, Any]) -> int:
     """Voto giocabilità: probabilità, robustezza ML/MC, value, Kelly e calibrazione storica."""
     cal = load_calibration()
     prob = float(market["probability"])
     group = market.get("group") or "1x2"
+    league = market.get("league")
     sp = int(market.get("score_prob") or 1)
     sv = market.get("score_value")
     ev = market.get("ev_cons")
@@ -492,18 +539,19 @@ def score_composite(market: dict[str, Any]) -> int:
         else 0.52
     )
     divergence = _ml_mc_divergence(prob, ml_prob)
+    has_ml = ml_prob is not None
 
     if prob < min_prob:
         if sv is not None and ev is not None and ev > 0:
             raw = min(5, 1 + sp * 0.45 + sv * 0.25)
         else:
             raw = float(sp)
-        if divergence > 0.10:
-            raw -= 1.0
-        elif divergence > 0.06:
-            raw -= 0.5
+        raw += _ml_mc_adjust(divergence, has_ml=has_ml)
         if bin_n < cal.get("min_bin_samples", 30):
             raw = min(raw, cal.get("low_sample_max_score", 6))
+        cap = prob_score_cap(prob, league=league, cal=cal)
+        if cap is not None:
+            raw = min(raw, cap)
         return _clamp_score(raw)
 
     if sv is None or ev is None or ev <= 0:
@@ -511,17 +559,8 @@ def score_composite(market: dict[str, Any]) -> int:
     else:
         raw = 0.58 * sp + 0.42 * sv
 
-    if group == "1x2" and prob < 0.38:
-        raw -= 1.0
-    elif group in {"ou", "btts", "team"} and prob < 0.50:
-        raw -= 0.5
-    elif group == "combo" and prob < 0.22:
-        raw -= 0.75
-
-    if divergence > 0.12:
-        raw -= 1.5
-    elif divergence > 0.08:
-        raw -= 0.75
+    raw -= _borderline_penalty(prob, group)
+    raw += _ml_mc_adjust(divergence, has_ml=has_ml)
 
     if odds and float(odds) > 1.01:
         stake_p = float(market.get("p_cons") or prob)
@@ -535,6 +574,11 @@ def score_composite(market: dict[str, Any]) -> int:
 
     if bin_n < cal.get("min_bin_samples", 30):
         raw = min(raw, cal.get("low_sample_max_score", 6))
+
+    cap = prob_score_cap(prob, league=league, cal=cal)
+    if cap is not None:
+        # Lega a bassa varianza alza di 1 il tetto; alta varianza lo abbassa.
+        raw = min(raw, float(cap))
 
     return _clamp_score(raw)
 
@@ -1055,18 +1099,19 @@ def advise(
         from modules.data_update.asian_odds import MOVE_RANK, move_alignment
 
         alignment = move_alignment(play.get("code"), market_move)
-        delta = alignment.get("delta") or 0
+        delta = float(alignment.get("delta") or 0)
+        # Asian già nella gamba value: smorza solo mezzo punto di bonus allineamento
         if delta > 0 and odds_from_asian:
-            delta = max(0, delta - 1)
+            delta = max(0.0, delta - 0.5)
         lvl = market_move.get("movement_level") or "Stabile"
         if alignment.get("label") == "contrario" and MOVE_RANK.get(lvl, 0) >= MOVE_RANK["Forte"]:
             score_cap = 5 if lvl == "Raro" else 6
-            delta = min(delta, -1)
+            delta = min(delta, -1.0)
         if delta:
             play = dict(play)
-            play["score"] = _clamp_score((play.get("score") or 1) + delta)
+            play["score"] = int(max(1, min(10, round(float(play.get("score") or 1) + delta))))
         if score_cap is not None and play.get("score") is not None:
-            play["score"] = min(play["score"], score_cap)
+            play["score"] = min(int(play["score"]), score_cap)
         play["market_align"] = alignment["label"]
         _, open_odd, curr_odd = _pick_drop(play, market_move)
         from modules.advisor.staking import clv_prob as _clv
@@ -1133,29 +1178,120 @@ def advise(
     pred = dict(prediction)
     pred.setdefault("home", home)
     pred.setdefault("away", away)
+    if not (pred.get("sportly_sim") or {}).get("ready"):
+        try:
+            from modules.sportly_sim import build_sportly_sim
+
+            pred["sportly_sim"] = build_sportly_sim(pred)
+        except Exception:
+            pred["sportly_sim"] = {"ready": False}
+    if not (pred.get("data_signal") or {}).get("ready"):
+        try:
+            from modules.advisor.data_signal import build_data_signal
+
+            pred["data_signal"] = build_data_signal(pred)
+        except Exception:
+            pred["data_signal"] = {"ready": False}
     validation = run_validation(prediction=pred, play=play, grouped=grouped)
     play = apply_to_play(play, validation)
     quadro = build_quadro(
         home=home,
         away=away,
         play=play,
-        prediction=prediction,
+        prediction=pred,
         grouped=grouped,
         alignment=alignment,
         market_move=market_move,
         tipster=play.get("tipster") or tipster,
         validation=validation,
     )
+
+    # Accordo fonti + intervalli MC + residual EV (dopo quadro)
+    from modules.advisor.agreement import source_agreement
+    from modules.advisor.residual_ev import predict_residual
+
+    agree = source_agreement(quadro, play_code=play.get("code"), play_group=play.get("group"))
+    play["source_agreement"] = agree
+    intervals = (pred.get("montecarlo") or {}).get("prob_intervals") or {}
+    play["prob_intervals"] = intervals
+    move_rank = None
+    try:
+        from modules.data_update.asian_odds import MOVE_RANK
+
+        move_rank = MOVE_RANK.get((market_move or {}).get("movement_level") or "Stabile", 0)
+    except Exception:
+        move_rank = 0
+    residual = predict_residual(
+        play,
+        agree_share=agree.get("agree_share"),
+        data_edge=(pred.get("data_signal") or {}).get("edge"),
+        move_rank=move_rank,
+    )
+    play["residual_ev"] = residual
+
+    validation = dict(validation or {})
+    validation["agreement"] = agree
+    validation["prob_intervals"] = intervals
+    validation["residual_ev"] = residual
+    extra_delta = float(agree.get("delta_unified") or 0)
+    if intervals.get("ready"):
+        if intervals.get("fragile"):
+            extra_delta -= 0.25
+        elif intervals.get("stable"):
+            extra_delta += 0.25
+    if residual.get("ready") and residual.get("residual") is not None:
+        # residual negativo = overconfidence → piccolo malus voto
+        extra_delta += max(-0.5, min(0.5, float(residual["residual"]) * 2.0))
+    validation["delta_unified"] = round(float(validation.get("delta_unified") or 0) + extra_delta, 3)
+    bits = list(str(validation.get("summary") or "").split(" · ")) if validation.get("summary") else []
+    bits.append(f"accordo {agree.get('status')}")
+    if intervals.get("ready"):
+        bits.append("IC " + ("stabile" if intervals.get("stable") else "fragile" if intervals.get("fragile") else "ok"))
+    validation["summary"] = " · ".join(b for b in bits if b)
+
+    if play.get("action") not in {"invalido", "n/d"} and play.get("odds_real"):
+        reasons = no_bet_reasons(
+            play,
+            market_move=market_move,
+            alignment=alignment,
+            min_edge=float(cal.get("min_ev_play", MIN_EDGE)),
+            min_rank=int(cal.get("liquid_against_rank", 3)),
+            min_pp=float(cal.get("liquid_against_pp", 2.0)),
+            sharp_ev=play.get("ev_sharp"),
+            agreement=agree,
+            prob_intervals=intervals,
+            residual=residual,
+        )
+        if reasons:
+            play["action"] = "no_bet"
+            play["no_bet_reasons"] = reasons
+            play["kelly_quarter"] = 0.0
+            play["score"] = min(int(play.get("score") or 1), 5)
+        else:
+            play["action"] = "gioca"
+            play["no_bet_reasons"] = []
+
     meta = _meta_analysis(
         play,
         alignment=alignment,
         market_move=market_move,
         quadro=quadro,
         validation=validation,
+        history_weight=(pred.get("history_context") or {}).get("weight"),
     )
+    # ri-applica delta accordo/IC sul voto unificato
+    if extra_delta:
+        meta = dict(meta)
+        meta["score"] = int(max(1, min(10, round(meta["score"] + extra_delta))))
     play["score_unified"] = meta["score"]
     play["meta_analysis"] = meta
-    reason2 = (reason2 + " · " if reason2 else "") + f"Voto unificato {meta['score']}/10 ({meta['note']})"
+    play["validation"] = validation
+    if play.get("action") not in {"invalido", "n/d"}:
+        reason2 = (reason2 + " · " if reason2 else "") + f"Voto unificato {meta['score']}/10 ({meta['note']})"
+        if agree.get("ready"):
+            reason2 += f" · accordo {agree.get('agree_share')}"
+    else:
+        reason1 = play["no_bet_reasons"][0] if play.get("no_bet_reasons") else reason1
 
     return {
         "match": prediction.get("match"),
@@ -1180,6 +1316,12 @@ def advise(
         "score_reason_2": reason2,
         "meta_analysis": meta,
         "quadro": quadro,
+        "sportly_sim": pred.get("sportly_sim"),
+        "data_signal": pred.get("data_signal"),
+        "source_agreement": agree,
+        "prob_intervals": intervals,
+        "residual_ev": residual,
+        "validation": validation,
     }
 
 

@@ -10,6 +10,7 @@ CAL_PATH = ROOT / "data" / "models" / "calibration.json"
 
 DEFAULTS = {
     "temperature": 1.0,
+    "temperature_by_league": {},
     "min_ev_play": 0.025,
     "min_ev_strong_value": 0.06,
     "min_prob_1x2_value": 0.35,

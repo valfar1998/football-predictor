@@ -99,6 +99,15 @@ def calibrate_from_features(feat: pd.DataFrame | None = None) -> dict:
     temperature = fit_temperature(proba_test, y_test)
     cal_proba = apply_temperature(proba_test, temperature)
 
+    temperature_by_league: dict[str, float] = {}
+    if oof is not None and "league" in oof:
+        leagues = np.asarray(oof["league"])[valid]
+        for lg in sorted({str(x) for x in leagues if str(x) and str(x) != "nan"}):
+            mask = leagues.astype(str) == lg
+            if int(mask.sum()) < 120:
+                continue
+            temperature_by_league[lg] = round(fit_temperature(proba_test[mask], y_test[mask]), 4)
+
     fav_idx = proba_test.argmax(axis=1)
     fav_p_raw = proba_test[np.arange(len(proba_test)), fav_idx]
     fav_p_cal = cal_proba[np.arange(len(cal_proba)), fav_idx]
@@ -125,6 +134,7 @@ def calibrate_from_features(feat: pd.DataFrame | None = None) -> dict:
         "fitted_at": datetime.now(timezone.utc).isoformat(),
         "split": split_kind,
         "temperature": temperature,
+        "temperature_by_league": temperature_by_league,
         "reliability_1x2": rel_1x2,
         "reliability_ou25": [],
         "brier_favorite_raw": round(brier_raw, 4),

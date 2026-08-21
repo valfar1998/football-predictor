@@ -14,10 +14,17 @@ from modules.data_update.fbref_context import load_fbref_team_index, lookup_team
 from modules.data_update.understat_context import load_understat_team_index, lookup_understat_team
 from modules.data_update.statsbomb_context import load_statsbomb_team_index, lookup_statsbomb_team
 from modules.data_update.sofascore_context import load_sofascore_team_index, lookup_sofascore_team
+from modules.data_update.fotmob_context import (
+    load_fotmob_matches,
+    load_fotmob_team_index,
+    lookup_fotmob_match,
+    lookup_fotmob_team,
+)
 from modules.data_update.parse import load_fixtures
 from modules.data_update.venues import update_home_venues
 from modules.montecarlo import MonteCarloSimulator
 from modules.predictor import MatchPredictor
+from modules.predictor.predict import context_xg
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "data" / "processed" / "upcoming_predictions.json"
@@ -87,17 +94,80 @@ def _fill_book_odds(
     return odds, odds_source
 
 
-def _val_fields(play: dict | None, extra: dict | None = None) -> dict:
+def _xg_pair(us_row: dict | None, fb_row: dict | None) -> tuple[float, float] | None:
+    return context_xg(us_row, fb_row)
+
+
+def _collect_match_odds(
+    fx: pd.Series,
+    home: str,
+    away: str,
+    pinnacle_events: list[dict],
+    betfair_events: list[dict],
+) -> tuple[dict, str, dict | None]:
+    odds = {
+        "1": _odd(fx, "odd_home"),
+        "X": _odd(fx, "odd_draw"),
+        "2": _odd(fx, "odd_away"),
+        "over_2.5": _odd(fx, "odd_over_25"),
+        "under_2.5": _odd(fx, "odd_under_25"),
+    }
+    src = str(fx.get("source") or "")
+    if src.startswith("fixtures-cups-asian") or "asian" in src:
+        odds_source = "asianbetsoccer"
+    elif src.startswith("fd.org") or src.startswith("fixtures-cups"):
+        odds_source = "football-data.org"
+    else:
+        odds_source = src or "football-data.co.uk"
+    day = fx["date"].strftime("%Y-%m-%d")
+    market_move = None
+    asian = find_asian_odds(home, away, day)
+    if asian:
+        ao = asian_to_advisor_odds(asian)
+        for key, val in ao.items():
+            if val is not None:
+                odds[key] = val
+        odds_source = "asianbetsoccer"
+        market_move = summarize_moves(asian)
+    pinnacle_match = None
+    if pinnacle_events:
+        try:
+            from modules.data_update.odds_api import lookup_pinnacle
+
+            pinnacle_match = lookup_pinnacle(
+                home, away, events=pinnacle_events, kickoff_date=day
+            )
+        except Exception:
+            pass
+    odds, odds_source = _fill_book_odds(odds, odds_source, pinnacle_match, "pinnacle")
+    bf_match = None
+    if betfair_events:
+        try:
+            from modules.data_update.betfair import lookup_betfair
+
+            bf_match = lookup_betfair(home, away, events=betfair_events, kickoff_date=day)
+        except Exception:
+            pass
+    odds, odds_source = _fill_book_odds(odds, odds_source, bf_match, "betfair")
+    return odds, odds_source, market_move
+
+
+def _val_fields(play: dict | None, extra: dict | None = None, weather: dict | None = None) -> dict:
     val = (play or {}).get("validation") or {}
     if not val and extra:
         val = extra.get("validation") or (extra.get("quadro") or {}).get("validation") or {}
+    if weather:
+        val = dict(val) if val else {}
+        val["weather"] = weather
     venue = val.get("venue") or {}
+    wx = weather or val.get("weather") or {}
     return {
         "validation": val or None,
         "validation_summary": val.get("summary"),
         "validation_delta": val.get("delta_unified"),
         "venue_flag": venue.get("flag"),
         "venue_name": venue.get("venue") or "",
+        "weather_flag": wx.get("flag"),
     }
 
 
@@ -118,6 +188,8 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
     understat_idx = load_understat_team_index()
     statsbomb_idx = load_statsbomb_team_index()
     sofascore_idx = load_sofascore_team_index()
+    fotmob_idx = load_fotmob_team_index()
+    fotmob_matches = load_fotmob_matches()
     from modules.advisor.tactics import build_calendar_index, match_tactics
 
     cal_idx = build_calendar_index()
@@ -136,64 +208,61 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
     except Exception:
         pass
 
+    from modules.data_update.history import lookup_history_match
+    from modules.data_update.weather import lookup_weather, prefetch_weather
+
+    wx_items = []
+    for _, fx0 in fixtures.iterrows():
+        city = _fx_text(fx0, "venue_city")
+        try:
+            day0 = fx0["date"].strftime("%Y-%m-%d")
+        except Exception:
+            day0 = str(fx0.get("date") or "")[:10]
+        if city and day0:
+            wx_items.append({"city": city, "date": day0})
+    try:
+        wx_idx = prefetch_weather(wx_items)
+    except Exception:
+        wx_idx = {}
+
     rows: list[dict] = []
     skipped = 0
 
     for _, fx in fixtures.iterrows():
         home = resolve_known_team(str(fx["home_team"]), team_idx) or str(fx["home_team"])
         away = resolve_known_team(str(fx["away_team"]), team_idx) or str(fx["away_team"])
+        league = str(fx.get("league") or "") or None
+        day = fx["date"].strftime("%Y-%m-%d")
+        city = _fx_text(fx, "venue_city")
+        wx = lookup_weather(city, day, wx_idx) if city else None
+        odds, odds_source, market_move = _collect_match_odds(
+            fx, home, away, _pinnacle_events, _betfair_events
+        )
+        fb_h = lookup_team_context(home, fbref_idx)
+        fb_a = lookup_team_context(away, fbref_idx)
+        us_h = lookup_understat_team(home, understat_idx)
+        us_a = lookup_understat_team(away, understat_idx)
+        hist = lookup_history_match(home, away, league=league)
         try:
-            pred = predictor.predict(home, away, kickoff=fx["date"])
+            pred = predictor.predict(
+                home,
+                away,
+                kickoff=fx["date"],
+                league=league,
+                odds=odds,
+                ext_xg_home=_xg_pair(us_h, fb_h),
+                ext_xg_away=_xg_pair(us_a, fb_a),
+                weather=wx,
+            )
         except KeyError as exc:
             skipped += 1
-            odds = {
-                "1": _odd(fx, "odd_home"),
-                "X": _odd(fx, "odd_draw"),
-                "2": _odd(fx, "odd_away"),
-                "over_2.5": _odd(fx, "odd_over_25"),
-                "under_2.5": _odd(fx, "odd_under_25"),
-            }
-            src = str(fx.get("source") or "")
-            odds_source = str(src)
-            asian = find_asian_odds(home, away, fx["date"].strftime("%Y-%m-%d"))
-            market_move = None
-            if asian:
-                ao = asian_to_advisor_odds(asian)
-                for k, v in ao.items():
-                    if v is not None:
-                        odds[k] = v
-                odds_source = "asianbetsoccer"
-                market_move = summarize_moves(asian)
-            # Pinnacle / Betfair: riempiono solo i buchi (non sovrascrivono Asian)
-            _pinnacle_match = None
-            if _pinnacle_events:
-                try:
-                    from modules.data_update.odds_api import lookup_pinnacle
-                    _pinnacle_match = lookup_pinnacle(home, away, events=_pinnacle_events, kickoff_date=fx["date"].strftime("%Y-%m-%d"))
-                except Exception:
-                    pass
-            odds, odds_source = _fill_book_odds(odds, odds_source, _pinnacle_match, "pinnacle")
-            _bf_match = None
-            if _betfair_events:
-                try:
-                    from modules.data_update.betfair import lookup_betfair
-                    _bf_match = lookup_betfair(home, away, events=_betfair_events, kickoff_date=fx["date"].strftime("%Y-%m-%d"))
-                except Exception:
-                    pass
-            odds, odds_source = _fill_book_odds(odds, odds_source, _bf_match, "betfair")
             stub = {
                 "match": f"{home} vs {away}",
                 "model_probabilities": {},
                 "expected_goals": {},
                 "features": {},
-                "fbref_context": {
-                    "home": lookup_team_context(home, fbref_idx),
-                    "away": lookup_team_context(away, fbref_idx),
-                },
-                "understat_context": {
-                    "home": lookup_understat_team(home, understat_idx),
-                    "away": lookup_understat_team(away, understat_idx),
-                },
+                "fbref_context": {"home": fb_h, "away": fb_a},
+                "understat_context": {"home": us_h, "away": us_a},
                 "statsbomb_context": {
                     "home": lookup_statsbomb_team(home, statsbomb_idx),
                     "away": lookup_statsbomb_team(away, statsbomb_idx),
@@ -202,11 +271,18 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
                     "home": lookup_sofascore_team(home, sofascore_idx),
                     "away": lookup_sofascore_team(away, sofascore_idx),
                 },
+                "fotmob_context": {
+                    "home": lookup_fotmob_team(home, fotmob_idx),
+                    "away": lookup_fotmob_team(away, fotmob_idx),
+                    "match": lookup_fotmob_match(home, away, day, fotmob_matches),
+                },
                 "montecarlo": {},
                 "league": str(fx.get("league") or ""),
                 "country": str(fx.get("country") or ""),
                 "home": home,
                 "away": away,
+                "weather": wx,
+                "history_context": hist,
                 **_venue_fields(fx),
             }
             stub["tactical"] = match_tactics(
@@ -297,7 +373,7 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
                     "tipster_n": None if not play.get("tipster") else play["tipster"].get("n_sources"),
                     "markets": [],
                     "prediction": stub,
-                    **_val_fields(play, uncovered),
+                    **_val_fields(play, uncovered, weather=wx),
                 }
             )
             continue
@@ -306,44 +382,6 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
             pred["lambda_away"],
             model_probs={"home_win": pred["home_win"], "draw": pred["draw"], "away_win": pred["away_win"]},
         )
-        odds = {
-            "1": _odd(fx, "odd_home"),
-            "X": _odd(fx, "odd_draw"),
-            "2": _odd(fx, "odd_away"),
-            "over_2.5": _odd(fx, "odd_over_25"),
-            "under_2.5": _odd(fx, "odd_under_25"),
-        }
-        odds_source = "football-data.co.uk"
-        src = str(fx.get("source") or "")
-        if src.startswith("fixtures-cups-asian") or "asian" in src:
-            odds_source = "asianbetsoccer"
-        elif src.startswith("fd.org") or src.startswith("fixtures-cups"):
-            odds_source = "football-data.org"
-        asian = find_asian_odds(home, away, fx["date"].strftime("%Y-%m-%d"))
-        market_move = None
-        if asian:
-            ao = asian_to_advisor_odds(asian)
-            for k, v in ao.items():
-                if v is not None:
-                    odds[k] = v
-            odds_source = "asianbetsoccer"
-            market_move = summarize_moves(asian)
-        _pinnacle_match = None
-        if _pinnacle_events:
-            try:
-                from modules.data_update.odds_api import lookup_pinnacle
-                _pinnacle_match = lookup_pinnacle(home, away, events=_pinnacle_events, kickoff_date=fx["date"].strftime("%Y-%m-%d"))
-            except Exception:
-                pass
-        odds, odds_source = _fill_book_odds(odds, odds_source, _pinnacle_match, "pinnacle")
-        _bf_match = None
-        if _betfair_events:
-            try:
-                from modules.data_update.betfair import lookup_betfair
-                _bf_match = lookup_betfair(home, away, events=_betfair_events, kickoff_date=fx["date"].strftime("%Y-%m-%d"))
-            except Exception:
-                pass
-        odds, odds_source = _fill_book_odds(odds, odds_source, _bf_match, "betfair")
         prediction = {
             "match": f"{pred['home_team']} vs {pred['away_team']}",
             "model_probabilities": {
@@ -354,12 +392,12 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
             "expected_goals": {"home": pred["lambda_home"], "away": pred["lambda_away"]},
             "features": pred.get("features") or {},
             "fbref_context": {
-                "home": lookup_team_context(pred["home_team"], fbref_idx),
-                "away": lookup_team_context(pred["away_team"], fbref_idx),
+                "home": lookup_team_context(pred["home_team"], fbref_idx) or fb_h,
+                "away": lookup_team_context(pred["away_team"], fbref_idx) or fb_a,
             },
             "understat_context": {
-                "home": lookup_understat_team(pred["home_team"], understat_idx),
-                "away": lookup_understat_team(pred["away_team"], understat_idx),
+                "home": lookup_understat_team(pred["home_team"], understat_idx) or us_h,
+                "away": lookup_understat_team(pred["away_team"], understat_idx) or us_a,
             },
             "statsbomb_context": {
                 "home": lookup_statsbomb_team(pred["home_team"], statsbomb_idx),
@@ -369,11 +407,21 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
                 "home": lookup_sofascore_team(pred["home_team"], sofascore_idx),
                 "away": lookup_sofascore_team(pred["away_team"], sofascore_idx),
             },
+            "fotmob_context": {
+                "home": lookup_fotmob_team(pred["home_team"], fotmob_idx),
+                "away": lookup_fotmob_team(pred["away_team"], fotmob_idx),
+                "match": lookup_fotmob_match(
+                    pred["home_team"], pred["away_team"], day, fotmob_matches
+                ),
+            },
             "montecarlo": mc,
             "league": str(fx.get("league") or ""),
             "country": str(fx.get("country") or ""),
             "home": pred["home_team"],
             "away": pred["away_team"],
+            "weather": wx,
+            "history_context": hist,
+            "ensemble": pred.get("ensemble"),
             **_venue_fields(fx),
         }
         prediction["tactical"] = match_tactics(
@@ -389,6 +437,19 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
             sofa_away=prediction["sofascore_context"]["away"],
             ml=prediction.get("model_probabilities"),
         )
+        try:
+            from modules.sportly_sim import build_sportly_sim
+
+            prediction["date"] = day
+            prediction["sportly_sim"] = build_sportly_sim(prediction)
+        except Exception:
+            prediction["sportly_sim"] = {"ready": False, "note": "sim fallita"}
+        try:
+            from modules.advisor.data_signal import build_data_signal
+
+            prediction["data_signal"] = build_data_signal(prediction)
+        except Exception:
+            prediction["data_signal"] = {"ready": False, "note": "analisi dati fallita"}
         advice = advise(
             prediction,
             odds,
@@ -509,9 +570,21 @@ def build_upcoming(n_sims: int = 4000) -> list[dict]:
                 "p_btts": mc.get("btts"),
                 "markets": slim_markets,
                 "prediction": prediction,
-                **_val_fields(play, advice),
+                "source_agreement": advice.get("source_agreement") or play.get("source_agreement"),
+                "prob_intervals": advice.get("prob_intervals") or play.get("prob_intervals"),
+                "residual_ev": advice.get("residual_ev") or play.get("residual_ev"),
+                **_val_fields(play, advice, weather=wx),
             }
         )
+
+    try:
+        from modules.data_update.fotmob_context import enrich_top_picks_fotmob
+
+        fm_info = enrich_top_picks_fotmob(rows, min_score=7, max_n=12)
+        if fm_info.get("n_enriched"):
+            print(f"FotMob details top picks: {fm_info['n_enriched']}/{fm_info.get('n_candidates', 0)}")
+    except Exception as exc:
+        print(f"skip FotMob details top-N: {exc}")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")

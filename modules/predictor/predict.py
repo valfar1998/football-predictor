@@ -20,6 +20,29 @@ def _norm(name: str) -> str:
     return normalize_team(name)
 
 
+def context_xg(us_row: dict | None, fb_row: dict | None) -> tuple[float, float] | None:
+    """xG Understat (for, against); FBref gls/90 solo fallback attacco (ga_p90 è G+A, non xGA)."""
+
+    def _pos(val) -> float | None:
+        try:
+            num = float(val)
+        except (TypeError, ValueError):
+            return None
+        if num != num or num <= 0.05:
+            return None
+        return num
+
+    if us_row:
+        xf = _pos(us_row.get("xg_for"))
+        if xf:
+            return xf, _pos(us_row.get("xg_against")) or 0.0
+    if fb_row:
+        gls = _pos(fb_row.get("gls_p90"))
+        if gls:
+            return gls, 0.0
+    return None
+
+
 def _json_num(val):
     if val is None or (isinstance(val, float) and np.isnan(val)):
         return None
@@ -45,23 +68,27 @@ class MatchPredictor:
         self.feature_cols = bundle["feature_cols"]
         self.features = pd.read_csv(self.features_path, parse_dates=["date"])
         self._index_last_seen()
-        self._temperature = self._load_temperature()
 
-    def _load_temperature(self) -> float:
+    def _temperature_for(self, league: str | None) -> float:
         try:
             from modules.calibration.config import load_calibration
 
-            return float(load_calibration().get("temperature", 1.0))
+            cal = load_calibration()
+            by = cal.get("temperature_by_league") or {}
+            if league and str(league) in by:
+                return float(by[str(league)])
+            return float(cal.get("temperature", 1.0))
         except Exception:
             return 1.0
 
-    def _calibrate_probs(self, p_h: float, p_d: float, p_a: float) -> tuple[float, float, float]:
-        if abs(self._temperature - 1.0) < 1e-6:
+    def _calibrate_probs(self, p_h: float, p_d: float, p_a: float, *, league: str | None = None) -> tuple[float, float, float]:
+        temperature = self._temperature_for(league)
+        if abs(temperature - 1.0) < 1e-6:
             return p_h, p_d, p_a
         try:
             from modules.calibration.calibrate import apply_temperature_dict
 
-            return apply_temperature_dict(p_h, p_d, p_a, self._temperature)
+            return apply_temperature_dict(p_h, p_d, p_a, temperature)
         except Exception:
             return p_h, p_d, p_a
 
@@ -148,6 +175,11 @@ class MatchPredictor:
                 "home_matches_7d": m7_h,
                 "away_matches_7d": m7_a,
                 "congestion_diff": m7_h - m7_a,
+                "mkt_p_home": 0.34,
+                "mkt_p_draw": 0.28,
+                "mkt_p_away": 0.38,
+                "mkt_overround": 0.0,
+                "mkt_has": 0.0,
             }
         return pd.Series(payload)
 
@@ -156,13 +188,32 @@ class MatchPredictor:
         dates = pd.to_datetime(self.features.loc[mask, "date"], errors="coerce")
         return int(((dates >= kickoff - pd.Timedelta(days=7)) & (dates < kickoff)).sum())
 
-    def predict(self, home_team: str, away_team: str, kickoff=None) -> dict:
+    def predict(
+        self,
+        home_team: str,
+        away_team: str,
+        kickoff=None,
+        *,
+        league: str | None = None,
+        odds: dict | None = None,
+        ext_xg_home: tuple[float, float] | None = None,
+        ext_xg_away: tuple[float, float] | None = None,
+        weather: dict | None = None,
+    ) -> dict:
         from modules.data_update.team_names import known_team_index, resolve_known_team
+        from modules.predictor.poisson import blend_1x2, dixon_coles_1x2
 
         idx = known_team_index(self.last_idx.keys())
         home_team = resolve_known_team(home_team, idx) or _norm(home_team)
         away_team = resolve_known_team(away_team, idx) or _norm(away_team)
         row = self._latest_row(home_team, away_team, kickoff=kickoff)
+        if odds:
+            p1, px, p2, ov, has = FeatureEngineer.implied_1x2(odds)
+            row["mkt_p_home"] = p1
+            row["mkt_p_draw"] = px
+            row["mkt_p_away"] = p2
+            row["mkt_overround"] = ov
+            row["mkt_has"] = has
         present = [c for c in self.feature_cols if c in row.index]
         x = pd.DataFrame([row[present]])
         for c in self.feature_cols:
@@ -170,16 +221,35 @@ class MatchPredictor:
                 x[c] = 0
         x = x[self.feature_cols]
         proba = self.model.predict_proba(x)[0]
-        # allinea all'ordine encoder (H, D, A)
         mapping = {cls: float(p) for cls, p in zip(self.encoder.classes_, proba)}
         p_h = mapping.get("H", 0.0)
         p_d = mapping.get("D", 0.0)
         p_a = mapping.get("A", 0.0)
-        p_h, p_d, p_a = self._calibrate_probs(p_h, p_d, p_a)
-        total = p_h + p_d + p_a
-        p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
+
         lam_h = float(max(0.35, row["home_xg_avg"] * 0.7 + (1.35 - row["away_xga_avg"]) * 0.15 + 0.25))
         lam_a = float(max(0.25, row["away_xg_avg"] * 0.7 + (1.15 - row["home_xga_avg"]) * 0.15))
+        if ext_xg_home and ext_xg_home[0]:
+            lam_h = 0.62 * lam_h + 0.38 * float(ext_xg_home[0])
+        if ext_xg_away and ext_xg_away[0]:
+            lam_a = 0.62 * lam_a + 0.38 * float(ext_xg_away[0])
+        wx_adj = 1.0
+        if weather and weather.get("lambda_adj"):
+            try:
+                wx_adj = float(weather["lambda_adj"])
+            except (TypeError, ValueError):
+                wx_adj = 1.0
+        lam_h = max(0.25, lam_h * wx_adj)
+        lam_a = max(0.20, lam_a * wx_adj)
+
+        dc = dixon_coles_1x2(lam_h, lam_a)
+        p_h, p_d, p_a = blend_1x2((p_h, p_d, p_a), dc, ml_weight=0.62)
+        p_h, p_d, p_a = self._calibrate_probs(p_h, p_d, p_a, league=league)
+        total = p_h + p_d + p_a
+        p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
+        features = {k: _json_num(row[k]) if k in row.index else None for k in self.feature_cols}
+        for key in ("mkt_p_home", "mkt_p_draw", "mkt_p_away", "mkt_overround", "mkt_has"):
+            if key in row.index:
+                features[key] = _json_num(row[key])
         return {
             "home_team": _norm(home_team),
             "away_team": _norm(away_team),
@@ -188,7 +258,8 @@ class MatchPredictor:
             "away_win": round(p_a, 4),
             "lambda_home": round(lam_h, 3),
             "lambda_away": round(lam_a, 3),
-            "features": {k: _json_num(row[k]) for k in self.feature_cols},
+            "features": features,
+            "ensemble": "xgb+dixon-coles",
         }
 
 
