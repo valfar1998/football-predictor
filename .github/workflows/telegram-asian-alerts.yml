@@ -32,6 +32,22 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
+          path: |
+            data/models/calibration.json
+            data/models/conformal.json
+          key: cloud-learn-${{ github.run_id }}
+          restore-keys: |
+            cloud-learn-
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: data/processed/upcoming_predictions.json
+          key: cloud-upcoming-${{ github.run_id }}
+          restore-keys: |
+            cloud-upcoming-
+
+      - uses: actions/cache/restore@v4
+        with:
           path: data/processed/telegram_alerts_sent.json
           key: telegram-sent-${{ github.run_id }}
           restore-keys: |
@@ -48,15 +64,10 @@ jobs:
           restore-keys: |
             odds-cache-
 
-      - name: Asian + Pinnacle + Betfair + Telegram
+      - name: Asian + Telegram (no apprendimento)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          FOOTBALL_DATA_ORG_TOKEN: ${{ secrets.FOOTBALL_DATA_ORG_TOKEN }}
-          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-          BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
-          BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
-          BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
           PYTHONUTF8: "1"
         run: python scripts/notify_cloud.py
 

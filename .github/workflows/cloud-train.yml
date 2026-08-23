@@ -1,4 +1,5 @@
 # 05:00 UTC = 07:00 in Italia (ora legale). In inverno è 06:00.
+# Train + calendario + archive/settle/learn + Telegram (tutto insieme la mattina).
 name: Aggiorna dati e modello
 
 on:
@@ -9,7 +10,7 @@ on:
 jobs:
   train:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -21,6 +22,33 @@ jobs:
 
       - name: Dipendenze cloud
         run: pip install -r requirements-cloud.txt
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/processed/our_history.sqlite
+            data/processed/our_history.sqlite-wal
+            data/processed/our_history.sqlite-shm
+          key: cloud-history-${{ github.run_id }}
+          restore-keys: |
+            cloud-history-
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/models/residual_ev.json
+            data/models/data_signal_weights.json
+            data/models/online_learn_report.json
+          key: cloud-learn-${{ github.run_id }}
+          restore-keys: |
+            cloud-learn-
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: data/processed/upcoming_predictions.json
+          key: cloud-upcoming-${{ github.run_id }}
+          restore-keys: |
+            cloud-upcoming-
 
       - name: Scarica storico e allena
         env:
@@ -46,6 +74,7 @@ jobs:
         with:
           path: |
             data/models/best_model.joblib
+            data/models/market_models.joblib
             data/processed/features.csv
           key: cloud-model-${{ github.run_id }}
 
@@ -67,8 +96,7 @@ jobs:
           restore-keys: |
             odds-cache-
 
-      - name: Asian + Pinnacle + Betfair + Telegram
-        # Betfair soft-fail gestito in scripts/notify_cloud.py (log betfair_soft_fail).
+      - name: Calendario + apprendi + Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -78,13 +106,54 @@ jobs:
           BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
           BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
           PYTHONUTF8: "1"
+          CLOUD_DAILY_LEARN: "1"
+          CLOUD_FULL_REBUILD: "1"
         run: python scripts/notify_cloud.py
+
+      - name: Upload apprendimento (artefatto)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cloud-learn-${{ github.run_id }}
+          path: |
+            data/models/calibration.json
+            data/models/residual_ev.json
+            data/models/data_signal_weights.json
+            data/models/online_learn_report.json
+          if-no-files-found: ignore
+          retention-days: 14
 
       - uses: actions/cache/save@v4
         if: always() && hashFiles('data/processed/telegram_alerts_sent.json') != ''
         with:
           path: data/processed/telegram_alerts_sent.json
           key: telegram-sent-${{ github.run_id }}
+
+      - uses: actions/cache/save@v4
+        if: always() && hashFiles('data/processed/our_history.sqlite') != ''
+        with:
+          path: |
+            data/processed/our_history.sqlite
+            data/processed/our_history.sqlite-wal
+            data/processed/our_history.sqlite-shm
+          key: cloud-history-${{ github.run_id }}
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            data/models/calibration.json
+            data/models/residual_ev.json
+            data/models/data_signal_weights.json
+            data/models/online_learn_report.json
+            data/models/conformal.json
+          key: cloud-learn-${{ github.run_id }}
+
+      - uses: actions/cache/save@v4
+        if: always() && hashFiles('data/processed/upcoming_predictions.json') != ''
+        with:
+          path: data/processed/upcoming_predictions.json
+          key: cloud-upcoming-${{ github.run_id }}
 
       - uses: actions/cache/save@v4
         if: always()

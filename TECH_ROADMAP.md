@@ -35,9 +35,10 @@ Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-22** (dopo backfill synthe
 |--------|---------|
 | UI **Aggiorna dati + modello** / **Solo quote** / `--update` / `--odds-update` | `archive_upcoming` + `settle_pending` |
 | Task Scheduler + `scripts/notify_refresh_hidden.vbs` | refresh locale senza UI |
-| GHA Telegram ogni 30′ | stesso flusso se modello in cache Actions |
-| GHA `Ritreno settimanale` (dom 04:00 UTC) | train cloud + artefatti `best_model` + `market_models` + `features.csv` |
-| UI / CLI **Scarica modello da GitHub** (`--pull-model`) | installa ultimo artefatto Actions in locale (no train 1h+) |
+| GHA `Aggiorna dati e modello` (05:00 UTC ≈ 07:00 IT) | train + calendario + archive/settle/**learn** + Telegram |
+| GHA Telegram ogni 30′ | solo alert (usa modello/calendario in cache) |
+| GHA `Ritreno settimanale` (dom 04:00 UTC) | train pesante + artefatti `best_model` + `market_models` |
+| UI / CLI **Scarica modello da GitHub** (`--pull-model`) | modello cloud in locale (no train 1h+) |
 
 **Per far crescere lo storico ricco:** ogni giorno (o almeno prima delle partite che segui) lancia **Solo quote e calendario** o **Aggiorna dati + modello** così `archive_upcoming` salva EV/quote/fattori **pre-match**; dopo il risultato, `settle_pending` chiude la riga e **Apprendi da partite chiuse** aggiorna calibrazione/residual/pesi.
 
