@@ -12,8 +12,11 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+st.set_page_config(page_title="Football Predictor", page_icon="⚽", layout="wide")
+
 from main import predict_pipeline
 from modules.advisor.advise import advise, format_advice
+from modules.advisor.vote_copy import render_vote_copy
 from modules.calibration.config import load_calibration
 from modules.data_update.asian_odds import (
     MOVE_FILTER_OPTIONS,
@@ -21,6 +24,7 @@ from modules.data_update.asian_odds import (
     MOVE_RANK,
     find_asian_odds,
     load_asian_odds,
+    spread_playability,
     summarize_moves,
 )
 from modules.predictor import list_known_teams, list_team_meta
@@ -39,13 +43,19 @@ UPCOMING = ROOT / "data" / "processed" / "upcoming_predictions.json"
 GROUP_LABEL = {
     "1x2": "1X2",
     "dc": "Doppia chance / DNB",
+    "ah": "Asian Handicap 0",
     "ou": "Over / Under",
     "btts": "Gol / No gol",
+    "multigol": "Multigol",
+    "parity": "Pari / Dispari",
+    "exact": "Risultato esatto",
     "team": "Gol squadra",
+    "cards": "Cartellini",
+    "corners": "Corner",
+    "scorer": "Marcatori (xG+XI)",
     "combo": "Combo (risultato + O/U / Gol)",
 }
 
-st.set_page_config(page_title="Football Predictor", page_icon="⚽", layout="wide")
 st.markdown(
     """
     <style>
@@ -127,6 +137,42 @@ def _pct(val: float | None) -> str | None:
     if val is None:
         return None
     return f"{float(val):+.0%}"
+
+
+def _as_frac(val) -> float:
+    """Converte EV/edge/prob in frazione float (0.05 = 5%). Accetta anche stringhe '+5%'."""
+    if val is None:
+        return float("nan")
+    try:
+        if isinstance(val, (int, float)):
+            if pd.isna(val):
+                return float("nan")
+            return float(val)
+    except (TypeError, ValueError):
+        pass
+    s = str(val).strip().replace(",", ".")
+    if not s or s.lower() in {"none", "nan", "—", "-", "n/d"}:
+        return float("nan")
+    pct = s.endswith("%")
+    s = s[:-1].strip() if pct else s
+    s = s.replace("+", "").replace(" ", "")
+    try:
+        x = float(s)
+    except ValueError:
+        return float("nan")
+    # "5%" oppure 5 scritto come punti percentuali → frazione
+    if pct or abs(x) > 1.5:
+        x = x / 100.0
+    return x
+
+
+def _frac_series(s: pd.Series | None, *, fill: float | None = None) -> pd.Series:
+    if s is None:
+        return pd.Series(dtype=float)
+    out = s.map(_as_frac)
+    if fill is not None:
+        out = out.fillna(fill)
+    return out
 
 
 def _safe_pct(val) -> str:
@@ -359,18 +405,57 @@ def _pp(val: float | None) -> str | None:
 
 def _sort_calendario(view: pd.DataFrame, mode: str) -> pd.DataFrame:
     out = view.copy()
+    if mode == "Indice gioca":
+        from modules.advisor.play_rank import ensure_play_rank_df
+
+        out = ensure_play_rank_df(out)
+        ev = out["ev_cons"] if "ev_cons" in out.columns else out.get("ev")
+        out["_ev"] = _frac_series(ev if isinstance(ev, pd.Series) else pd.Series(ev, index=out.index), fill=-99)
+        return out.sort_values(
+            ["play_rank", "_ev", "score_unified"],
+            ascending=False,
+            na_position="last",
+        ).drop(columns=["_ev"], errors="ignore")
+    if mode in {"Consigliato", "Consigliato (lettura)"}:
+        # 1) Gioca prima  2) EV  3) Score/voto  4) Confidence  5) Risk basso  6) Priorità
+        act_rank = {"gioca": 3, "no_bet": 2, "n/d": 1, "invalido": 0}
+        if "action" in out.columns:
+            out["_act"] = out["action"].map(lambda x: act_rank.get(str(x), 1)).fillna(1)
+        else:
+            out["_act"] = 1
+        ev = out["ev_cons"] if "ev_cons" in out.columns else out.get("ev")
+        out["_ev"] = _frac_series(ev if isinstance(ev, pd.Series) else pd.Series(ev, index=out.index), fill=-99)
+        out["_s100"] = pd.to_numeric(out["score_100"], errors="coerce").fillna(-1) if "score_100" in out.columns else -1
+        out["_uni"] = pd.to_numeric(out["score_unified"], errors="coerce").fillna(-1) if "score_unified" in out.columns else -1
+        out["_conf"] = pd.to_numeric(out["confidence_100"], errors="coerce").fillna(0) if "confidence_100" in out.columns else 0
+        out["_risk_inv"] = 100 - pd.to_numeric(out["risk_100"], errors="coerce").fillna(50) if "risk_100" in out.columns else 50
+        out["_prio"] = pd.to_numeric(out["priority_100"], errors="coerce").fillna(0) if "priority_100" in out.columns else 0
+        return out.sort_values(
+            ["_act", "_ev", "_s100", "_uni", "_conf", "_risk_inv", "_prio"],
+            ascending=False,
+            na_position="last",
+        ).drop(columns=["_act", "_ev", "_s100", "_uni", "_conf", "_risk_inv", "_prio"])
     if mode == "Data (più vicine)":
         if "date" in out.columns:
             return out.sort_values(["date", "time"], ascending=True, na_position="last")
         return out
+    if mode == "Priorità":
+        if "priority_100" in out.columns:
+            return out.sort_values(
+                ["priority_100", "score_100", "score_unified", "score"],
+                ascending=False,
+                na_position="last",
+            )
+        if "score_100" in out.columns:
+            return out.sort_values(["score_100", "score_unified"], ascending=False, na_position="last")
     if mode == "Voto unificato":
         if "score_unified" in out.columns:
             return out.sort_values(["score_unified", "score", "probability"], ascending=False, na_position="last")
         return out.sort_values(["score", "probability"], ascending=False, na_position="last")
     if mode == "EV cons. %":
         ev = out["ev_cons"] if "ev_cons" in out.columns else out.get("ev")
-        out["_sort"] = pd.to_numeric(ev, errors="coerce").fillna(-99)
-        return out.sort_values("_sort", ascending=False).drop(columns="_sort")
+        out["_sort"] = _frac_series(ev if isinstance(ev, pd.Series) else pd.Series(ev, index=out.index), fill=-99)
+        return out.sort_values("_sort", ascending=False, na_position="last").drop(columns="_sort")
     if mode == "Movimento mercato (maggiore)":
         out["_sort"] = out["movement_level"].map(MOVE_RANK).fillna(0)
         if "line_move" in out.columns:
@@ -379,11 +464,15 @@ def _sort_calendario(view: pd.DataFrame, mode: str) -> pd.DataFrame:
             out["_sort"] = out["_sort"] * 100 + out["spread_score"].fillna(0)
         return out.sort_values("_sort", ascending=False).drop(columns="_sort")
     if mode == "Value (edge vs mercato)":
-        edge = out["edge_pp"] if "edge_pp" in out.columns else pd.Series(index=out.index, dtype=float)
-        cons = out["ev_cons"] if "ev_cons" in out.columns else pd.Series(index=out.index, dtype=float)
-        out["_sort"] = edge.fillna(cons).fillna(out["ev"] if "ev" in out.columns else -99).fillna(-99)
-        return out.sort_values("_sort", ascending=False).drop(columns="_sort")
-    return out.sort_values(["score", "probability"], ascending=False, na_position="last")
+        edge = _frac_series(out["edge_pp"]) if "edge_pp" in out.columns else pd.Series(float("nan"), index=out.index)
+        cons = _frac_series(out["ev_cons"]) if "ev_cons" in out.columns else pd.Series(float("nan"), index=out.index)
+        fallback = _frac_series(out["ev"]) if "ev" in out.columns else pd.Series(-99.0, index=out.index)
+        out["_sort"] = edge.fillna(cons).fillna(fallback).fillna(-99)
+        return out.sort_values("_sort", ascending=False, na_position="last").drop(columns="_sort")
+    if mode == "Consiglio (voto)":
+        return out.sort_values(["score", "probability"], ascending=False, na_position="last")
+    # fallback = stesso del Consigliato
+    return _sort_calendario(out, "Consigliato")
 
 
 def _asian_radar_table(min_rank: int) -> pd.DataFrame:
@@ -503,12 +592,16 @@ def _display_text(v) -> str:
 
 
 def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
+    # Dopo partita: Indice gioca → Azione → EV → voto → pick → value/Kelly → resto
     wanted = [
         "date", "time", "country", "league", "home", "away",
-        "pick", "pick_name", "action", "score", "score_unified", "meta_label", "meta_note", "kelly_quarter", "clv",
+        "play_rank", "action", "ev_cons", "score_unified",
+        "pick", "pick_name", "kelly_quarter", "edge_pp",
+        "quota_pick", "fair_odds", "probability", "ev_sharp", "clv",
+        "score_100", "score_band", "confidence_100", "risk_100", "priority_100",
+        "bet_rec_label", "score", "meta_label", "meta_note",
         "quadro_consenso", "quadro_n", "tipster_consensus", "tipster_agree",
-        "score_reason_1", "score_reason_2", "skip_reason", "probability",
-        "quota_pick", "fair_odds", "edge_pp", "ev_cons", "ev_sharp",
+        "score_reason_1", "score_reason_2", "skip_reason",
         "odds_real", "value_note",
         "venue_flag", "weather_flag", "validation_summary", "validation_delta",
         "movement_level", "line_move", "movement_summary", "movement_comment", "market_align",
@@ -516,20 +609,12 @@ def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
         "odd_1", "odd_x", "odd_2", "odd_over_25", "odd_under_25", "odds_source",
     ]
     show = view[[c for c in wanted if c in view.columns]].copy()
-    if "probability" in show.columns:
-        show["probability"] = show["probability"].map(lambda x: f"{x:.0%}" if pd.notna(x) else None)
-    if "edge_pp" in show.columns:
-        show["edge_pp"] = show["edge_pp"].map(_pct)
-    if "ev_cons" in show.columns:
-        show["ev_cons"] = show["ev_cons"].map(_pct)
-    if "ev_sharp" in show.columns:
-        show["ev_sharp"] = show["ev_sharp"].map(_pct)
+    # Tieni EV/edge/prob come numeri (frazione): così click-sort e "Ordina per EV" non fanno 5% > 45%
+    for col in ("ev_cons", "edge_pp", "ev_sharp", "kelly_quarter", "clv", "probability"):
+        if col in show.columns:
+            show[col] = _frac_series(show[col])
     if "odds_real" in show.columns:
         show["odds_real"] = show["odds_real"].map(lambda x: "Sì" if bool(x) else "No")
-    if "kelly_quarter" in show.columns:
-        show["kelly_quarter"] = show["kelly_quarter"].map(lambda x: f"{x:.1%}" if pd.notna(x) else None)
-    if "clv" in show.columns:
-        show["clv"] = show["clv"].map(lambda x: f"{x:+.1%}" if pd.notna(x) else None)
     if "action" in show.columns:
         show["action"] = show["action"].map(
             lambda x: (
@@ -541,7 +626,7 @@ def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
         )
     for drop_col in ("drop_1", "drop_x", "drop_2"):
         if drop_col in show.columns:
-            show[drop_col] = show[drop_col].map(_pp)
+            show[drop_col] = pd.to_numeric(show[drop_col], errors="coerce")
     show = show.rename(
         columns={
             "date": "Data",
@@ -553,8 +638,15 @@ def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
             "pick": "Gioca",
             "pick_name": "Mercato",
             "action": "Azione",
-            "score": "Voto",
+            "play_rank": "Indice gioca",
+            "priority_100": "Priorità",
+            "score_100": "Score 0–100",
+            "score_band": "Banda",
+            "confidence_100": "Confidence",
+            "risk_100": "Risk",
+            "bet_rec_label": "Mercato consigliato",
             "score_unified": "Voto unificato",
+            "score": "Voto mercato",
             "meta_label": "Qualità mix",
             "meta_note": "Dettaglio mix",
             "kelly_quarter": "Kelly ¼",
@@ -600,7 +692,15 @@ def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
     return show
 
 
-def _run_cli(*flags: str) -> subprocess.CompletedProcess:
+def _run_cli(*flags: str, with_progress: bool = True) -> subprocess.CompletedProcess:
+    if with_progress:
+        try:
+            from modules.progress_report import StreamlitProgress, run_cli_with_progress
+
+            prog = StreamlitProgress(" ".join(flags))
+            return run_cli_with_progress(*flags, progress=prog, python_exe=sys.executable, main_path=str(ROOT / "main.py"))
+        except Exception:
+            pass
     return subprocess.run(
         [sys.executable, str(ROOT / "main.py"), *flags],
         capture_output=True,
@@ -608,6 +708,13 @@ def _run_cli(*flags: str) -> subprocess.CompletedProcess:
         encoding="utf-8",
         errors="replace",
     )
+
+
+def _batch(title: str):
+    """Context manager-like: crea barra progresso Streamlit."""
+    from modules.progress_report import StreamlitProgress
+
+    return StreamlitProgress(title)
 
 
 def _table(markets: list[dict]) -> None:
@@ -663,6 +770,7 @@ def render_advice(
         league=league or pred.get("league"),
     )
     play = advice["play"]
+    render_vote_copy(advice, key="singola_predizione")
     left, right = st.columns([1.15, 1])
     with left:
         st.markdown(f"**{advice['match']}**")
@@ -685,6 +793,45 @@ def render_advice(
         st.markdown("**— / 10**" if score_disp is None else f"**{score_disp} / 10**")
         if play.get("score_unified") is not None:
             st.caption(f"Voto unificato (value + Kelly + Asian + workflow + storico): **{play['score_unified']}/10**")
+        ms = play.get("match_scores") or advice.get("match_scores") or {}
+        if play.get("score_100") is not None or advice.get("score_100") is not None:
+            s100 = play.get("score_100") if play.get("score_100") is not None else advice.get("score_100")
+            band = play.get("score_band") or advice.get("score_band") or "—"
+            with st.container(horizontal=True):
+                st.metric("Score", f"{s100:.0f}", band, border=True)
+                c100 = play.get("confidence_100") if play.get("confidence_100") is not None else advice.get("confidence_100")
+                st.metric("Confidence", "—" if c100 is None else f"{c100:.0f}", border=True)
+                r100 = play.get("risk_100") if play.get("risk_100") is not None else advice.get("risk_100")
+                st.metric("Risk", "—" if r100 is None else f"{r100:.0f}", border=True)
+                p100 = play.get("priority_100") if play.get("priority_100") is not None else advice.get("priority_100")
+                prio = (ms.get("priority") or {})
+                prio_lbl = prio.get("rank_hint") or ""
+                st.metric(
+                    "Priorità",
+                    "—" if p100 is None else f"{p100:.0f}",
+                    prio_lbl or None,
+                    border=True,
+                )
+            br = play.get("bet_rec") or advice.get("bet_rec") or ms.get("bet_rec") or {}
+            prim = (br or {}).get("primary") or {}
+            if prim.get("code"):
+                st.caption(
+                    f"Mercato consigliato: **{prim.get('label')} {prim.get('code')}** "
+                    f"({prim.get('name') or ''})"
+                    + (f" · {br.get('note')}" if br.get("note") else "")
+                )
+            ov = ms.get("overrides") or {}
+            if ov.get("notes"):
+                st.caption("Override: " + " · ".join(ov["notes"][:3]))
+            prio = ms.get("priority") or {}
+            if prio.get("notes") or prio.get("formula"):
+                bits = list(prio.get("notes") or [])[:4]
+                st.caption(
+                    "Priorità = urgenza ranking (non è il voto): "
+                    + (prio.get("formula") or "EV × S_quota × C_modelli × T_match × L_mercato")
+                    + ((" · " + " · ".join(bits)) if bits else "")
+                )
+            st.caption("Bande Score: 0–30 no bet · 30–60 lean · 60–75 playable · 75–90 strong · 90–100 premium")
         if play.get("action") == "no_bet":
             st.warning("No bet — " + "; ".join(play.get("no_bet_reasons") or ["filtro edge/mercato"]))
         elif play.get("action") == "invalido":
@@ -796,6 +943,21 @@ def render_advice(
             m2.metric("Var linea", f"{line:g}" if line else "0")
             m3.metric("Direzione 1X2", move.get("steam_1x2_label") or move.get("steam_1x2") or "stabile")
             m4.metric("Direzione O/U", move.get("steam_ou") or "stabile")
+            play_ctx = play if isinstance(play, dict) else {}
+            playab = spread_playability(
+                {
+                    "pick": play_ctx.get("code") or play_ctx.get("pick"),
+                    "action": play_ctx.get("action"),
+                    "market_align": align.get("label") if isinstance(align, dict) else align,
+                },
+                move,
+            )
+            st.metric(
+                "Giocabilità spread",
+                f"{playab['score']}/10",
+                playab["verdict"],
+            )
+            st.caption(playab.get("reason") or playab.get("verdict_long") or "")
             comment = move.get("movement_comment") or move.get("movement_summary") or move.get("note")
             if comment:
                 st.info(comment)
@@ -897,16 +1059,27 @@ def render_advice(
                 rows.append(
                     {
                         "Fonte": s.get("fonte"),
+                        "Peso": s.get("peso"),
                         "Idea": s.get("idea"),
                         "Lean": s.get("pick"),
                         "1": f"{s['p_1']:.0%}" if s.get("p_1") is not None else "—",
                         "X": f"{s['p_x']:.0%}" if s.get("p_x") is not None else "—",
                         "2": f"{s['p_2']:.0%}" if s.get("p_2") is not None else "—",
+                        "Motivazione": s.get("peso_note") or "—",
                         "Nota": s.get("nota") or "—",
                     }
                 )
             st.dataframe(rows, width="stretch", hide_index=True)
-            st.caption("EV e Kelly restano su modello + quota reale. Questo quadro non entra nel conto.")
+            st.caption(
+                "Pesi sul consenso: MC 0.35 · ML 0.25 · Book 0.20 · xG/dati ~0.10 · "
+                "tattica/meteo/tipster bassi. EV/Kelly restano su modello+quota."
+            )
+            wt = (advice.get("match_scores") or play.get("match_scores") or {}).get("weights_table") or []
+            if wt:
+                with st.expander("Matrice pesi fonti"):
+                    st.dataframe(wt, width="stretch", hide_index=True)
+            if quadro.get("fallback"):
+                st.info("Fallback attivo: sintesi Elo+forma+book (dati incompleti / lega minore).")
             gaps = quadro.get("gaps") or []
             if gaps:
                 with st.expander("Cosa non è incluso"):
@@ -1006,38 +1179,77 @@ Non ricalcolano EV/Kelly e **non creano pick**. Se ci sono, pesano al massimo un
 
 ---
 
-**Bottoni a sinistra**
+**Bottoni a sinistra — come usarli al meglio**
 
-- **Aggiorna dati + modello** — uso quotidiano / dopo una pausa. Scarica storico+quote football-data.co.uk, riallena il modello, ricostruisce il calendario e lo storico locale. Minuti, non secondi.
-- **Solo quote e calendario** — stesso giorno, più partite o quote cambiate. Aggiorna fixtures/quote (e prova Asian/coppe/ClubElo) **senza** riallenare. Più veloce.
-- **Scarica coppe** — solo se vuoi Champions/Europa/Conference/ecc. Serve il token gratis di football-data.org. Senza token quelle coppe non compaiono.
-- **Scarica quote AsianBetSoccer** — movimento apertura→attuale (Bet365). Utile prima di fidarti del voto unificato; non cambia EV. Dopo il ricalcolo calendario, i spread **Raro (≥1)** partono sullo stesso bot Telegram delle offerte.
-- **Scarica pronostici tipster** — Forebet / PredictZ / Vitibet nel quadro. Opzionale, rumore sulle leghe minori.
-- **Calibra probabilità (backtest)** — raro: dopo tante partite chiuse o un riallenamento grosso. Taratura T e soglia EV. Non è un refresh quotidiano.
-- **FBref / Understat / StatsBomb / Sofascore** — contesto Big 5 (stile, xG, classifica). Solo quadro/voto. 1–2 volte a settimana basta.
-- **WhoScored assenze (lento)** — Selenium, max ~18 preview Big 5. Usalo quando ti servono gli XI confermati, non a ogni refresh.
+*Ogni giorno (o dopo una pausa)*
+- **Scarica modello da GitHub** — prende l’ultimo train da Actions (no riallenamento locale). Poi **Solo quote**. Serve `gh auth login`.
+- **Aggiorna dati + modello** — train completo in locale (~1h+). Solo se non usi GitHub o vuoi rifare tutto sul PC.
+- **Solo quote e calendario** — stesso giorno, quote mosse o nuove partite. **Senza** riallenare. Più veloce; usa questo tra un train e l’altro.
+
+*Quando ti servono le quote “giuste” per il voto*
+- **Scarica quote AsianBetSoccer** — steam Bet365. Aggiorna value/voto sul calendario **senza** rifare ML/MC. Per nuove partite: Solo quote.
+- **Scarica quote Pinnacle / Betfair** — sharp/exchange; poi solo ricalcolo EV/Kelly (leggero).
+- **Scarica pronostici tipster** — quadro + value leggero.
+
+*Coppe e calendario extra*
+- **Scarica coppe** — Champions/Europa/… con token football-data.org. Senza token quelle coppe non compaiono. Le squadre fuori storico restano N/D.
+
+*Contesto Big 5 (1–2×/settimana, solo quadro/voto)*
+- **FBref** — stile/stats stagione.
+- **FD cards/corners** — tassi ammonizioni/calci d’angolo da football-data (veloce; base per extras MC).
+- **FBref match logs (lento)** — log partita per partita; più preciso su cards/corners, da fare di rado.
+- **Understat xG** — xG squadra + player (marcatore/lineup).
+- **StatsBomb / Sofascore / FotMob** — open data / classifica / match+lineup. FotMob anche XI on-demand.
+- **Geocode stadi** — una tantum / quando mancano città per il meteo.
+- **WhoScored assenze (lento)** — Selenium, ~18 preview. Solo quando ti servono gli XI confermati.
+
+*Raro / manutenzione*
+- **Calibra probabilità** — dopo tanti settle o un train grosso. Taratura T e soglie; non è refresh quotidiano.
+- Tab **Valutazione**: *Apprendi da partite chiuse*, *Ottimizza pesi Analisi dati*, *Aggiorna report paper* — solo con abbastanza storico settled (vedi TECH_ROADMAP).
+
+**In tabella Calendario:** subito dopo le squadre: **Indice gioca · Azione · EV · Voto unificato · Gioca**. Scorri a destra per il resto.
         """
     )
 
 with st.sidebar:
     st.header("Uso quotidiano")
-    st.caption("Basta il bottone in alto: Aggiorna dati + modello. Gli altri sono opzionali.")
+    st.caption(
+        "Giorno per giorno: Solo quote. "
+        "Modello: scaricalo da GitHub (veloce) oppure Aggiorna dati + modello (train locale ~1h+)."
+    )
+    if st.button("Scarica modello da GitHub", width="stretch"):
+        with st.spinner("Scarico ultimo artefatto da Actions (serve gh auth login)…"):
+            proc = _run_cli("--pull-model", with_progress=False)
+        if proc.returncode != 0:
+            st.error(proc.stderr[-1500:] or proc.stdout[-1500:] or "Download modello fallito")
+        else:
+            st.success(
+                "Modello installato. Premi «Solo quote e calendario» per usarlo "
+                "(ricalcola EV/calendario; se il modello è più nuovo fa Monte Carlo pieno)."
+            )
+            out = (proc.stdout or "")[-1200:]
+            if out.strip():
+                st.code(out, language=None)
+            st.rerun()
     if st.button("Aggiorna dati + modello", type="primary", width="stretch"):
-        with st.spinner("Download, training e calendario: può richiedere alcuni minuti…"):
-            proc = _run_cli("--update")
+        proc = _run_cli("--update")
         if proc.returncode != 0:
             st.error(proc.stderr[-1500:] or proc.stdout[-1500:] or "Errore aggiornamento")
         else:
             st.success("Dati aggiornati")
             st.rerun()
     if st.button("Solo quote e calendario", width="stretch"):
-        with st.spinner("Scarico fixtures e ricalcolo pronostici…"):
-            proc = _run_cli("--odds-update")
-        if proc.returncode != 0:
-            st.error(proc.stderr[-1500:] or proc.stdout[-1500:] or "Errore quote")
-        else:
-            st.success("Quote aggiornate")
+        prog = _batch("Solo quote e calendario")
+        try:
+            from main import refresh_odds_pipeline
+
+            info = refresh_odds_pipeline(on_progress=prog)
+            n = int(info.get("n_upcoming") or 0)
+            prog.done(f"OK · {n} partite")
+            st.success(f"Quote e calendario aggiornati · {n} partite")
             st.rerun()
+        except Exception as exc:
+            st.error(f"Errore quote: {exc}")
     try:
         from modules.data_update.history import history_summary
 
@@ -1045,7 +1257,8 @@ with st.sidebar:
         w = int(round(float(hs.get("weight") or 0.12) * 100))
         if hs.get("ready"):
             st.caption(
-                f"Storico locale: {hs['n_history']} partite, {hs['n_settled']} chiuse. "
+                f"Storico locale: {hs['n_history']} partite, {hs['n_settled']} chiuse "
+                f"(riche {hs.get('n_rich', '—')}/{hs.get('n_rich_target', 80)}). "
                 f"Nel voto unificato al {w}%."
             )
         else:
@@ -1055,6 +1268,30 @@ with st.sidebar:
             )
     except Exception:
         st.caption("Storico locale: si crea al primo aggiornamento calendario.")
+    try:
+        metrics_path = ROOT / "data" / "models" / "metrics.json"
+        if metrics_path.is_file():
+            meta = json.loads(metrics_path.read_text(encoding="utf-8"))
+            n_cl = meta.get("n_clusters")
+            if n_cl is None and isinstance(meta.get("cluster_metrics"), dict):
+                n_cl = len(meta["cluster_metrics"])
+            has_global = (ROOT / "data" / "models" / "best_model.joblib").is_file()
+            if n_cl is not None:
+                st.caption(
+                    f"Modelli cluster attivi: {int(n_cl)}. "
+                    f"Fallback globale: {'sì' if has_global else 'no'}."
+                )
+            mkt = ROOT / "data" / "models" / "market_models.joblib"
+            mm = meta.get("market_models") or {}
+            if mkt.is_file():
+                ou_ll = mm.get("ou25_oof_ll")
+                ah_ll = mm.get("ah0_oof_ll")
+                extra = ""
+                if ou_ll is not None and ah_ll is not None:
+                    extra = f" (O/U ll={float(ou_ll):.3f}, AH ll={float(ah_ll):.3f})"
+                st.caption(f"Modelli mercato O/U 2.5 + AH 0: attivi{extra}.")
+    except Exception:
+        pass
     try:
         from modules.notify.telegram import telegram_status
 
@@ -1085,20 +1322,30 @@ with st.sidebar:
             if not org_token_configured():
                 st.error("Incolla prima il token.")
             else:
-                with st.spinner("GET /v4/matches e ricalcolo calendario…"):
-                    from modules.data_update.upcoming import build_upcoming
+                prog = _batch("Coppe")
+                from modules.data_update.upcoming import build_upcoming
 
-                    info = download_org_cups()
-                    upcoming_n = len(build_upcoming())
+                prog(0.1, "GET /v4/matches…")
+                info = download_org_cups()
                 if not info.get("token"):
                     st.error("Token assente o non letto.")
                 elif info.get("error"):
                     st.error(str(info["error"]))
                 else:
+                    prog(0.35, "Calendario: riuso predizioni, MC solo sulle nuove…")
+                    upcoming_n = len(build_upcoming(reuse_predictions=True))
                     n = info.get("n_cup_fixtures") or 0
                     comps = ", ".join(info.get("competitions") or []) or "nessuna coppa in finestra"
-                    st.success(f"Coppe: {n} match · {comps} · calendario {upcoming_n} partite")
+                    prog.done("OK")
+                    st.success(
+                        f"Coppe: {n} match · {comps} · calendario {upcoming_n} "
+                        f"(riuso predizioni dove possibile)"
+                    )
                     st.rerun()
+        st.caption(
+            "Dopo il download non rifà Monte Carlo su tutto: riusa le predizioni già in calendario "
+            "e calcola solo le partite nuove."
+        )
 
     with st.expander("Quote Pinnacle (The Odds API)"):
         st.caption("Chiave gratis su the-odds-api.com · 500 chiamate/mese · 1 fetch/giorno basta.")
@@ -1119,26 +1366,31 @@ with st.sidebar:
             if not bool(_pinn_key()):
                 st.error("Incolla prima la chiave API.")
             else:
-                with st.spinner("Scarico quote Pinnacle…"):
-                    from modules.data_update.odds_api import fetch_pinnacle_odds
-                    from modules.data_update.upcoming import build_upcoming
-                    pinn = fetch_pinnacle_odds(force=True)
-                    upcoming_n = len(build_upcoming())
+                prog = _batch("Pinnacle")
+                from modules.data_update.odds_api import fetch_pinnacle_odds
+                from modules.data_update.upcoming import refresh_upcoming_odds
+
+                prog(0.1, "Fetch The Odds API…")
+                pinn = fetch_pinnacle_odds(force=True)
                 if not pinn.get("ok"):
                     st.error(pinn.get("error") or "Errore fetch Pinnacle")
                 else:
+                    prog(0.4, "Ricalcolo EV/Kelly (senza ML/MC)…")
+                    refresh = refresh_upcoming_odds(on_progress=prog)
                     rem = pinn.get("remaining")
+                    prog.done("OK")
                     st.success(
                         f"Pinnacle: {pinn.get('n_events', 0)} partite · "
                         f"chiamate rimanenti {rem if rem is not None else 'n/d'} · "
-                        f"calendario {upcoming_n} partite"
+                        f"value {refresh.get('n_refreshed', 0)}/{refresh.get('n_upcoming', 0)} (leggero)"
                     )
                     st.rerun()
 
     with st.expander("Quote Betfair Exchange"):
         st.caption(
             "Delayed App Key già salvata. Serve anche username e password Betfair.it "
-            "(login API, non vanno in git). Dati ritardati, gratis."
+            "(login API, non vanno in git). Dati ritardati, gratis. "
+            "Dopo il download aggiorna solo EV/Kelly sulle predizioni già calcolate."
         )
         from modules.data_update.betfair import (
             app_key_configured,
@@ -1163,27 +1415,36 @@ with st.sidebar:
             if not login_configured():
                 st.error("Inserisci username e password Betfair, poi riprova.")
             else:
-                with st.spinner("Login e download quote Exchange…"):
-                    from modules.data_update.upcoming import build_upcoming
-                    bf = fetch_betfair_odds(force=True)
-                    upcoming_n = len(build_upcoming())
+                prog = _batch("Betfair")
+                from modules.data_update.upcoming import refresh_upcoming_odds
+
+                prog(0.1, "Login e download Exchange…")
+                bf = fetch_betfair_odds(force=True)
                 if not bf.get("ok"):
                     st.error(bf.get("error") or "Errore fetch Betfair")
                 else:
+                    prog(0.35, "Ricalcolo EV/Kelly (senza ML/MC)…")
+                    refresh = refresh_upcoming_odds(on_progress=prog)
+                    prog.done("OK")
                     st.success(
-                        f"Betfair: {bf.get('n_events', 0)} partite · calendario {upcoming_n} partite"
+                        f"Betfair: {bf.get('n_events', 0)} partite · "
+                        f"value {refresh.get('n_refreshed', 0)}/{refresh.get('n_upcoming', 0)} (leggero)"
                     )
                     st.rerun()
 
     with st.expander("Quote Asian e tipster"):
-        st.caption("Opzionali. Asian = movimento quote Bet365. Tipster = consenso siti, non EV.")
+        st.caption(
+            "Asian = movimento Bet365. Tipster = consenso siti. "
+            "Entrambi aggiornano il value sul calendario esistente senza rifare Monte Carlo "
+            "(per nuove partite usa Solo quote / Aggiorna dati)."
+        )
         if st.button("Scarica quote AsianBetSoccer", width="stretch"):
-            with st.spinner("Scarico quote Bet365 da AsianBetSoccer…"):
+            with st.spinner("Scarico Asian + ricalcolo value (leggero)…"):
                 proc = _run_cli("--asian-odds")
             if proc.returncode != 0:
                 st.error(proc.stderr[-1500:] or proc.stdout[-1500:] or "Errore quote Asian")
             else:
-                st.success("Quote AsianBetSoccer aggiornate")
+                st.success("Quote AsianBetSoccer aggiornate (value leggero)")
                 st.rerun()
         if st.button("Test notifica Telegram", width="stretch"):
             from modules.notify import ping_bot
@@ -1195,12 +1456,12 @@ with st.sidebar:
             else:
                 st.error(telegram_status())
         if st.button("Scarica pronostici tipster", width="stretch"):
-            with st.spinner("Scarico Forebet, PredictZ e Vitibet…"):
+            with st.spinner("Scarico tipster + ricalcolo value (leggero)…"):
                 proc = _run_cli("--tipsters")
             if proc.returncode != 0:
                 st.error(proc.stderr[-1500:] or proc.stdout[-1500:] or "Errore tipster")
             else:
-                st.success("Tipster aggiornati")
+                st.success("Tipster aggiornati (value leggero)")
                 st.rerun()
         if st.button("Calibra probabilità (backtest)", width="stretch"):
             with st.spinner("Temperature scaling + backtest EV su storico…"):
@@ -1219,78 +1480,131 @@ with st.sidebar:
             )
 
     with st.expander("Contesto extra (non entra in EV)"):
-        st.caption("Quadro e voto. Understat xG entra anche nelle λ Poisson (Big 5). Meteo Open-Meteo se c'è la città dello stadio.")
+        st.caption(
+            "Quadro e voto. Barra % + log live: se avanza, sta lavorando; se resta fermo a lungo su un passo, "
+            "probabilmente è bloccato dalla rete/scraping."
+        )
         if st.button("FBref", width="stretch"):
-            with st.spinner("Scarico statistiche squadra FBref e aggiorno calendario…"):
-                from modules.data_update.upcoming import build_upcoming
+            prog = _batch("FBref")
+            from modules.data_update.upcoming import build_upcoming
 
-                info = download_fbref_context()
-                upcoming_n = len(build_upcoming())
-            if info.get("error"):
+            info = download_fbref_context(on_progress=prog)
+            if info.get("error") and not info.get("n_teams"):
                 st.error(f"FBref: {info['error']}")
             else:
+                prog.done(f"{info.get('n_teams', 0)} squadre")
+                upcoming_n = len(build_upcoming())
                 st.success(f"FBref: {info.get('n_teams', 0)} squadre · calendario {upcoming_n}")
                 st.rerun()
-        if st.button("Understat xG", width="stretch"):
-            with st.spinner("Scarico xG Understat e aggiorno calendario…"):
-                from modules.data_update.upcoming import build_upcoming
+        if st.button("FD cards/corners", width="stretch"):
+            prog = _batch("FD cards/corners")
+            from modules.data_update.side_rates import build_fd_side_rates
+            from modules.data_update.upcoming import build_upcoming
 
-                info = download_understat_context()
+            info = build_fd_side_rates(on_progress=prog)
+            if not info.get("ok"):
+                st.error(f"FD rates: {info.get('error')}")
+            else:
+                prog.done(f"{info.get('n_teams', 0)} squadre")
                 upcoming_n = len(build_upcoming())
-            if info.get("error"):
+                st.success(f"FD rates: {info.get('n_teams', 0)} squadre · calendario {upcoming_n}")
+                st.rerun()
+        if st.button("FBref match logs (lento)", width="stretch"):
+            prog = _batch("FBref match logs")
+            from modules.data_update.fbref_context import download_fbref_match_logs
+            from modules.data_update.upcoming import build_upcoming
+
+            info = download_fbref_match_logs(on_progress=prog)
+            if not info.get("ok"):
+                st.error(f"Match logs: {info.get('error')}")
+            else:
+                prog.done(f"{info.get('n_teams', 0)} squadre")
+                upcoming_n = len(build_upcoming())
+                st.success(
+                    f"Match logs: {info.get('n_teams', 0)} squadre "
+                    f"(cards={info.get('has_cards')} corners={info.get('has_corners')}) · cal {upcoming_n}"
+                )
+                st.rerun()
+        if st.button("Understat xG", width="stretch"):
+            prog = _batch("Understat")
+            from modules.data_update.upcoming import build_upcoming
+
+            info = download_understat_context(on_progress=prog)
+            if info.get("error") and not info.get("n_teams"):
                 st.error(f"Understat: {info['error']}")
             else:
-                st.success(f"Understat: {info.get('n_teams', 0)} squadre · calendario {upcoming_n}")
+                pl = (info.get("players") or {}).get("n_players", 0)
+                prog.done(f"{info.get('n_teams', 0)} squadre")
+                upcoming_n = len(build_upcoming())
+                st.success(f"Understat: {info.get('n_teams', 0)} squadre, {pl} player · calendario {upcoming_n}")
                 st.rerun()
         if st.button("StatsBomb open data", width="stretch"):
-            with st.spinner("Scarico partite StatsBomb open data e aggiorno calendario…"):
-                from modules.data_update.upcoming import build_upcoming
+            prog = _batch("StatsBomb")
+            from modules.data_update.upcoming import build_upcoming
 
-                info = download_statsbomb_context()
-                upcoming_n = len(build_upcoming())
+            info = download_statsbomb_context(on_progress=prog)
             if info.get("error") and not info.get("n_teams"):
                 st.error(f"StatsBomb: {info['error']}")
             else:
+                prog.done(f"{info.get('n_teams', 0)} squadre")
+                upcoming_n = len(build_upcoming())
                 st.success(
                     f"StatsBomb: {info.get('n_teams', 0)} squadre · calendario {upcoming_n}"
                 )
                 st.rerun()
         if st.button("Sofascore classifica", width="stretch"):
-            with st.spinner("Scarico classifiche Sofascore…"):
-                from modules.data_update.upcoming import build_upcoming
+            prog = _batch("Sofascore")
+            from modules.data_update.upcoming import build_upcoming
 
-                info = download_sofascore_context()
-                upcoming_n = len(build_upcoming())
+            prog(0.2, "Download classifiche…")
+            info = download_sofascore_context()
+            prog(0.85, "Calendario…")
+            upcoming_n = len(build_upcoming())
             if info.get("error") and not info.get("n_teams"):
                 st.error(f"Sofascore: {info['error']}")
             else:
+                prog.done(f"{info.get('n_teams', 0)} squadre")
                 st.success(f"Sofascore: {info.get('n_teams', 0)} squadre · calendario {upcoming_n}")
                 st.rerun()
         if st.button("FotMob (classifica + match)", width="stretch"):
-            with st.spinner("Scarico classifiche e calendario FotMob…"):
-                from modules.data_update.upcoming import build_upcoming
+            prog = _batch("FotMob")
+            from modules.data_update.upcoming import build_upcoming
 
-                info = download_fotmob_context(days=7)
-                upcoming_n = len(build_upcoming())
+            info = download_fotmob_context(days=7, on_progress=prog)
             errs = info.get("errors") or ([] if not info.get("error") else [info["error"]])
             if errs and not info.get("n_teams") and not info.get("n_matches"):
                 st.error(f"FotMob: {errs[0]}")
             else:
+                prog(0.92, "Calendario…")
+                upcoming_n = len(build_upcoming())
+                xg = info.get("xg") or {}
+                prog.done("OK")
                 st.success(
                     f"FotMob: {info.get('n_teams', 0)} squadre · "
-                    f"{info.get('n_matches', 0)} partite · calendario {upcoming_n}"
+                    f"{info.get('n_matches', 0)} partite · "
+                    f"xG rolling {info.get('n_xg_teams') or xg.get('n_teams') or 0} · "
+                    f"calendario {upcoming_n}"
                 )
                 st.rerun()
-        if st.button("WhoScored assenze (lento)", width="stretch"):
-            with st.spinner("Preview WhoScored: assenze confermate, max 18 partite Big 5…"):
-                from modules.data_update.upcoming import build_upcoming
-                from modules.data_update.whoscored_context import download_whoscored_context
+        if st.button("Geocode stadi (batch)", width="stretch"):
+            prog = _batch("Geocode")
+            from modules.data_update.weather import geocode_batch_venues
 
-                info = download_whoscored_context()
-                upcoming_n = len(build_upcoming())
+            info = geocode_batch_venues(max_n=80, on_progress=prog)
+            st.write(info)
+        if st.button("WhoScored assenze (lento)", width="stretch"):
+            prog = _batch("WhoScored")
+            from modules.data_update.upcoming import build_upcoming
+            from modules.data_update.whoscored_context import download_whoscored_context
+
+            prog(0.1, "Selenium preview (lento)…")
+            info = download_whoscored_context()
+            prog(0.85, "Calendario…")
+            upcoming_n = len(build_upcoming())
             if info.get("error") and not info.get("n_missing"):
                 st.error(f"WhoScored: {info['error']}")
             else:
+                prog.done(f"{info.get('n_missing', 0)} assenze")
                 st.success(
                     f"WhoScored: {info.get('n_missing', 0)} assenze · "
                     f"{info.get('n_games', 0)} preview · calendario {upcoming_n}"
@@ -1314,15 +1628,21 @@ with tab_cal:
         with st.expander("Dettaglio colonne (opzionale)", expanded=False):
             st.markdown(
                 """
-                - **Voto** (non unificato): voto interno del consiglio (1–10) sul mercato scelto.
-                - **Kelly ¼**: frazione di bankroll suggerita; zero se No bet.
-                - **CLV**: quota accorciata dopo l'apertura = mercato andato a favore del pick.
+                - **Indice gioca** (prima colonna decisione): 0–100, ordina il calendario.
+                - **Azione · EV cons. · Voto unificato · Gioca**: cosa guardare per scommettere.
+                - **Voto mercato**: voto interno solo sul mercato consigliato (spesso vuoto su no-bet/N/D).
+                - **Kelly ¼**: frazione di bankroll; zero se No bet.
+                - **CLV**: quota accorciata dopo l'apertura = mercato a favore del pick.
                 - **Edge pp / EV cons.**: value vs book (solo partite coperte dal modello).
-                - **Movimento / Δ 1 X 2**: steam Asian (apertura→attuale). Non è EV.
-                - **Quadro / Tipster**: quante fonti esterne concordano col pick. Non è EV.
+                - **Movimento / Δ 1 X 2**: steam Asian. Non è EV.
+                - **Quadro / Tipster**: fonti esterne vs pick. Non è EV.
+                Scorri la tabella in orizzontale: ci sono molte colonne.
                 """
             )
         df = pd.DataFrame(upcoming)
+        from modules.advisor.play_rank import ensure_play_rank_df
+
+        df = ensure_play_rank_df(df)
         df = _filter_by_date(df)
         n_steam = int(df["movement_level"].notna().sum()) if "movement_level" in df.columns else 0
         st.caption(
@@ -1340,7 +1660,7 @@ with tab_cal:
             group_opts = list(GROUP_LABEL.keys())
             sel_groups = st.multiselect("Tipo consiglio", group_opts, default=group_opts, format_func=lambda g: GROUP_LABEL[g])
         with f4:
-            min_score = st.slider("Voto minimo", 1, 10, 1)
+            min_score = st.slider("Voto unificato minimo", 1, 10, 1)
 
         q1, q2, q3, q4 = st.columns(4)
         with q1:
@@ -1357,7 +1677,19 @@ with tab_cal:
         with s1:
             sort_mode = st.selectbox(
                 "Ordina per",
-                ["Voto unificato", "Data (più vicine)", "EV cons. %", "Movimento mercato (maggiore)", "Value (edge vs mercato)", "Consiglio (voto)"],
+                [
+                    "Indice gioca",
+                    "Consigliato",
+                    "Priorità",
+                    "EV cons. %",
+                    "Voto unificato",
+                    "Value (edge vs mercato)",
+                    "Data (più vicine)",
+                    "Movimento mercato (maggiore)",
+                    "Consiglio (voto)",
+                ],
+                index=0,
+                help="Indice gioca: Azione + EV + voto unificato + Kelly in un unico punteggio 0–100 (default).",
             )
         with s2:
             only_asian = st.checkbox("Solo partite con quote Asian", value=False)
@@ -1367,10 +1699,14 @@ with tab_cal:
         view = df[df["country"].isin(sel_country) & df["league"].isin(sel_league)].copy()
         if "pick_group" in view.columns:
             view = view[view["pick_group"].fillna("1x2").isin(sel_groups)]
-        view = view[view["score"].isna() | (view["score"] >= min_score)]
+        # Filtro sul voto unificato (quello in tabella); fallback al voto mercato
+        if "score_unified" in view.columns:
+            view = view[view["score_unified"].isna() | (view["score_unified"] >= min_score)]
+        else:
+            view = view[view["score"].isna() | (view["score"] >= min_score)]
         view["quota_pick"] = view.apply(_quota_consiglio, axis=1)
         view = view[view["quota_pick"].isna() | ((view["quota_pick"] >= odd_min) & (view["quota_pick"] <= odd_max))]
-        ev_col = view["ev_cons"] if "ev_cons" in view.columns else view["ev"]
+        ev_col = _frac_series(view["ev_cons"] if "ev_cons" in view.columns else view["ev"])
         if only_value:
             view = view[ev_col.fillna(-1) > 0]
         else:
@@ -1398,6 +1734,10 @@ with tab_cal:
         view = _sort_calendario(view, sort_mode)
 
         st.write(f"{len(view)} partite dopo i filtri (su {len(df)})")
+        st.caption(
+            "Colonne chiave dopo le squadre: **Indice gioca · Azione · EV cons. · Voto unificato · Gioca · Mercato · Kelly**. "
+            "L'**Indice gioca** (0–100) unifica tutto per l'ordinamento."
+        )
         if hide_nbet and n_nbet:
             st.caption(
                 f"Nascoste **{n_nbet} no-bet** ({n_nbet_uni} con voto unificato già calcolato). "
@@ -1417,7 +1757,87 @@ with tab_cal:
                 f"Di cui {n_inv} pick **invalidi** (quote assenti): senza book non si calcolano "
                 "edge, EV, Kelly, quota equa, CLV."
             )
-        st.dataframe(_prepare_calendario_show(view), width="stretch", hide_index=True)
+        st.dataframe(
+            _prepare_calendario_show(view),
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "EV cons.": st.column_config.NumberColumn("EV cons.", format="percent"),
+                "Edge pp": st.column_config.NumberColumn("Edge pp", format="percent"),
+                "EV sharp": st.column_config.NumberColumn("EV sharp", format="percent"),
+                "Kelly ¼": st.column_config.NumberColumn("Kelly ¼", format="percent"),
+                "CLV vs apertura": st.column_config.NumberColumn("CLV vs apertura", format="percent"),
+                "Prob.": st.column_config.NumberColumn("Prob.", format="percent"),
+                "Voto unificato": st.column_config.NumberColumn("Voto unificato", format="%d"),
+                "Indice gioca": st.column_config.NumberColumn("Indice gioca", format="%.1f"),
+                "Score 0–100": st.column_config.NumberColumn("Score 0–100", format="%.0f"),
+                "Risk": st.column_config.NumberColumn("Risk", format="%.0f"),
+                "Confidence": st.column_config.NumberColumn("Confidence", format="%.0f"),
+                "Priorità": st.column_config.NumberColumn("Priorità", format="%.0f"),
+            },
+        )
+        # CSV: percentuali leggibili (ordinamento numerico resta sul selettore UI)
+        csv_show = _prepare_calendario_show(view).copy()
+        for col in ("EV cons.", "Edge pp", "EV sharp", "Kelly ¼", "CLV vs apertura", "Prob."):
+            if col in csv_show.columns:
+                csv_show[col] = csv_show[col].map(lambda x: _pct(x) if pd.notna(x) else None)
+        csv_bytes = csv_show.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "Esporta CSV (vista filtrata)",
+            data=csv_bytes,
+            file_name="calendario_filtrato.csv",
+            mime="text/csv",
+            key="cal_csv_export",
+        )
+        # Export JSON completo (analisi esterna)
+        json_rows = []
+        for _, r in view.iterrows():
+            raw = None
+            for u in upcoming:
+                if (
+                    str(u.get("date")) == str(r.get("date"))
+                    and str(u.get("home")) == str(r.get("home"))
+                    and str(u.get("away")) == str(r.get("away"))
+                ):
+                    raw = u
+                    break
+            if not raw:
+                continue
+            pred = raw.get("prediction") if isinstance(raw.get("prediction"), dict) else {}
+            json_rows.append(
+                {
+                    "date": raw.get("date"),
+                    "home": raw.get("home"),
+                    "away": raw.get("away"),
+                    "league": raw.get("league"),
+                    "pick": raw.get("pick"),
+                    "action": raw.get("action"),
+                    "score_unified": raw.get("score_unified"),
+                    "ev_cons": raw.get("ev_cons"),
+                    "probability": raw.get("probability"),
+                    "quota_pick": raw.get("quota_pick"),
+                    "agree_share": (raw.get("source_agreement") or {}).get("agree_share"),
+                    "no_bet_reasons": raw.get("no_bet_reasons"),
+                    "model_probabilities": pred.get("model_probabilities"),
+                    "conformal_intervals": raw.get("conformal_intervals") or pred.get("conformal_intervals"),
+                    "prob_intervals": raw.get("prob_intervals"),
+                    "residual_ev": raw.get("residual_ev"),
+                    "data_signal": raw.get("data_signal") or pred.get("data_signal"),
+                    "quadro": raw.get("quadro"),
+                    "montecarlo": pred.get("montecarlo"),
+                }
+            )
+        if json_rows:
+            import json as _json
+
+            st.download_button(
+                "Esporta JSON completo (analisi)",
+                data=_json.dumps(json_rows, ensure_ascii=False, indent=2).encode("utf-8"),
+                file_name="calendario_completo.json",
+                mime="application/json",
+                key="cal_json_export",
+            )
+
 
         with st.expander("Tutte le partite scaricate (anche senza pronostico)", expanded=False):
             try:
@@ -1460,7 +1880,11 @@ with tab_cal:
 
         with st.expander("Dettagli voto (+)", expanded=False):
             max_rows = st.slider("Massimo righe dettaglio", 5, 60, 20, 5, key="cal_plus_max")
-            for _, row in view.head(max_rows).iterrows():
+            by_fx = {
+                (str(u.get("date")), str(u.get("home")), str(u.get("away"))): u
+                for u in upcoming
+            }
+            for i, (_, row) in enumerate(view.head(max_rows).iterrows()):
                 base = row.get("score")
                 uni = row.get("score_unified")
                 hdr = f"+ {row.get('date')} {row.get('home')} vs {row.get('away')}"
@@ -1473,6 +1897,16 @@ with tab_cal:
                 elif row.get("action") == "invalido":
                     hdr += " · invalido"
                 with st.expander(hdr, expanded=False):
+                    raw = by_fx.get((str(row.get("date")), str(row.get("home")), str(row.get("away"))))
+                    if isinstance(raw, dict):
+                        if st.button(
+                            "Copia / esporta questo dettaglio",
+                            key=f"cal_voto_prep_{i}",
+                            icon=":material/content_copy:",
+                        ):
+                            st.session_state["vote_copy_open"] = i
+                        if st.session_state.get("vote_copy_open") == i:
+                            render_vote_copy(raw, key=f"cal_voto_{i}")
                     st.write(f"**Giocata:** {row.get('pick')} — {row.get('pick_name')}")
                     if row.get("action") == "no_bet":
                         st.warning("No bet")
@@ -1633,6 +2067,26 @@ with tab_mkt:
             width="stretch",
             hide_index=True,
         )
+        if not filt.empty:
+            partite = sorted((filt["Data"].astype(str) + " · " + filt["Partita"]).drop_duplicates().tolist())
+            scelta = st.selectbox(
+                "Copia dettaglio voto di una partita",
+                ["—"] + partite,
+                key="mkt_copy_match",
+            )
+            if scelta != "—":
+                data_s, _, partita = scelta.partition(" · ")
+                raw_m = next(
+                    (
+                        u
+                        for u in upcoming
+                        if str(u.get("date")) == str(data_s)
+                        and f"{u.get('home')} vs {u.get('away')}" == partita
+                    ),
+                    None,
+                )
+                if raw_m:
+                    render_vote_copy(raw_m, key="mkt_voto_copy")
 
 with tab_one:
     teams = list_known_teams() if (ROOT / "data" / "processed" / "features.csv").exists() else []
@@ -1725,7 +2179,7 @@ with tab_eval:
     summary = cal.get("backtest_summary") or {}
 
     with st.expander("Disaccordi modello (debug)", expanded=False):
-        st.caption("Confronta lean ML/MC/dati/mercato sulle partite del calendario caricato.")
+        st.caption("Confronta lean ML / mercato / xG / FotMob / MC sulle partite del calendario.")
         if upcoming:
             disc_rows = []
             for u in upcoming:
@@ -1734,6 +2188,9 @@ with tab_eval:
                 mc = pred.get("montecarlo") or {}
                 ds = pred.get("data_signal") or u.get("data_signal") or {}
                 sa = u.get("source_agreement") or {}
+                feat = pred.get("features") or {}
+                fm_xg = pred.get("fotmob_xg") or {}
+                us = pred.get("understat_context") or {}
 
                 def _lean(p1, px, p2):
                     vals = [("1", p1), ("X", px), ("2", p2)]
@@ -1742,20 +2199,45 @@ with tab_eval:
                         return None
                     return max(vals, key=lambda t: t[1])[0]
 
+                def _xg_lean(h_diff, a_diff):
+                    try:
+                        d = float(h_diff) - float(a_diff)
+                    except (TypeError, ValueError):
+                        return None
+                    if d > 0.25:
+                        return "1"
+                    if d < -0.25:
+                        return "2"
+                    return "X"
+
                 ml_l = _lean(ml.get("home_win"), ml.get("draw"), ml.get("away_win"))
                 mc_l = _lean(mc.get("home_win"), mc.get("draw"), mc.get("away_win"))
+                mkt_l = _lean(feat.get("mkt_p_home"), feat.get("mkt_p_draw"), feat.get("mkt_p_away"))
                 ds_l = ds.get("lean") if isinstance(ds, dict) else None
+                us_l = _xg_lean((us.get("home") or {}).get("xg_diff"), (us.get("away") or {}).get("xg_diff"))
+                fm_l = _xg_lean((fm_xg.get("home") or {}).get("xg_diff"), (fm_xg.get("away") or {}).get("xg_diff"))
                 pick = u.get("pick")
                 flags = []
                 if ml_l and mc_l and ml_l != mc_l:
                     flags.append("ML≠MC")
+                if ml_l and mkt_l and ml_l != mkt_l:
+                    flags.append("ML≠mkt")
                 if ml_l and ds_l and ml_l != ds_l:
                     flags.append("ML≠dati")
+                if ml_l and us_l and ml_l != us_l:
+                    flags.append("ML≠xG")
+                if ml_l and fm_l and ml_l != fm_l:
+                    flags.append("ML≠FotMob")
                 if pick in {"1", "X", "2"} and ml_l and pick != ml_l:
                     flags.append("pick≠ML")
                 if sa.get("status") in {"spezzato", "debole"}:
                     flags.append(f"accordo:{sa.get('status')}")
-                iv = u.get("prob_intervals") or (mc.get("prob_intervals") if isinstance(mc, dict) else {}) or {}
+                iv = (
+                    u.get("conformal_intervals")
+                    or u.get("prob_intervals")
+                    or (mc.get("prob_intervals") if isinstance(mc, dict) else {})
+                    or {}
+                )
                 if iv.get("fragile"):
                     flags.append("IC fragile")
                 if flags:
@@ -1764,8 +2246,12 @@ with tab_eval:
                             "Partita": f"{u.get('home')} vs {u.get('away')}",
                             "Pick": pick,
                             "ML": ml_l,
+                            "Mkt": mkt_l,
                             "MC": mc_l,
                             "Dati": ds_l,
+                            "xG": us_l,
+                            "FotMob": fm_l,
+                            "Cluster": pred.get("model_cluster"),
                             "Accordo": sa.get("agree_share"),
                             "Flag": ", ".join(flags),
                             "Voto": u.get("score_unified") or u.get("score"),
@@ -1775,23 +2261,261 @@ with tab_eval:
                 st.dataframe(pd.DataFrame(disc_rows), width="stretch", hide_index=True)
             else:
                 st.caption("Nessun disaccordo evidente sul calendario filtrato.")
+
+            # Timeline disaccordi da storico settled
+            st.markdown("**Timeline disaccordi (storico)**")
+            try:
+                from modules.data_update.history import load_history
+
+                hist = [h for h in load_history() if h.get("hit") is not None]
+                tl = []
+                for h in hist[-120:]:
+                    tl.append(
+                        {
+                            "Data": h.get("date"),
+                            "Partita": f"{h.get('home')} vs {h.get('away')}",
+                            "Pick": h.get("pick"),
+                            "Hit": h.get("hit"),
+                            "EV": h.get("ev_cons"),
+                            "Accordo": h.get("agree_share"),
+                            "Residual": h.get("residual"),
+                            "Quota": h.get("quota_pick"),
+                            "Cluster": h.get("model_cluster"),
+                        }
+                    )
+                if tl:
+                    st.dataframe(pd.DataFrame(tl), width="stretch", hide_index=True)
+                else:
+                    st.caption("Nessuna riga settled con metadati.")
+            except Exception as exc:
+                st.caption(f"Timeline non disponibile: {exc}")
         else:
             st.caption("Calendario vuoto.")
+
+    with st.expander("Storico esiti analisi", expanded=True):
+        from modules.advisor.analysis_outcomes import load_analysis_outcomes, refresh_analysis_outcomes
+
+        ao_view = st.radio(
+            "Campione",
+            ["Tutti settled", "Solo live", "Solo trainable"],
+            horizontal=True,
+            key="ao_view",
+        )
+        if st.button("Aggiorna storico esiti", key="ao_refresh"):
+            refresh_analysis_outcomes()
+            st.rerun()
+        try:
+            from modules.data_update.history import (
+                MONTHLY_SUCCESS_CSV,
+                PLAYS_CSV,
+                export_plays_csv,
+            )
+
+            csv_info = export_plays_csv()
+            monthly = csv_info.get("monthly_success") or {}
+            st.markdown("**Successo mensile voti 7–10** (`storico_successo_mensile.csv`)")
+            if monthly.get("hit_rate") is not None:
+                st.caption(
+                    "Solo giocate consigliate (Gioca) con voto unificato 7/8/9/10. "
+                    f"Chiuse {monthly.get('n_closed', 0)} · hit {monthly['hit_rate']:.0%}."
+                )
+            else:
+                st.caption(
+                    "Solo giocate consigliate (Gioca) con voto unificato 7/8/9/10. "
+                    "Ancora poche partite chiuse: la % si riempie mese per mese."
+                )
+            if MONTHLY_SUCCESS_CSV.is_file():
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.download_button(
+                        "Scarica successo mensile (per voto)",
+                        data=MONTHLY_SUCCESS_CSV.read_bytes(),
+                        file_name="storico_successo_mensile.csv",
+                        mime="text/csv",
+                        key="ao_csv_monthly",
+                    )
+                wide = MONTHLY_SUCCESS_CSV.with_name("storico_successo_mensile_largo.csv")
+                with c2:
+                    if wide.is_file():
+                        st.download_button(
+                            "Scarica vista larga (1 riga = 1 mese)",
+                            data=wide.read_bytes(),
+                            file_name="storico_successo_mensile_largo.csv",
+                            mime="text/csv",
+                            key="ao_csv_monthly_wide",
+                        )
+                try:
+                    show_m = pd.read_csv(MONTHLY_SUCCESS_CSV, sep=";")
+                    st.dataframe(show_m, width="stretch", hide_index=True)
+                except Exception:
+                    pass
+            st.caption(
+                f"Dettaglio singole giocate: `{PLAYS_CSV.name}` "
+                f"({csv_info.get('n', 0)} righe). Separatore `;` in Excel."
+            )
+            if PLAYS_CSV.is_file():
+                st.download_button(
+                    "Scarica dettaglio giocate",
+                    data=PLAYS_CSV.read_bytes(),
+                    file_name="storico_giocate.csv",
+                    mime="text/csv",
+                    key="ao_csv_dl",
+                )
+        except Exception as exc:
+            st.caption(f"CSV storico non disponibile: {exc}")
+        ao = load_analysis_outcomes()
+        if ao is None:
+            ao = refresh_analysis_outcomes()
+        if ao_view == "Solo live":
+            data = ao.get("live_summary") or ao.get("live_summary") or ao
+        elif ao_view == "Solo trainable":
+            data = ao.get("trainable_summary") or ao.get("trainable_summary") or ao
+        else:
+            data = ao
+        st.caption(
+            f"Ultimo aggiornamento: {data.get('updated_at', '—')[:19]} · "
+            f"{data.get('n_in_pool', 0)} analisi chiuse con esito · "
+            f"{data.get('n_with_score_unified', 0)} con voto unificato"
+        )
+        if data.get("highlights"):
+            for line in data["highlights"][:8]:
+                st.markdown(f"- {line}")
+
+        gioca = data.get("gioca") or {}
+        if gioca.get("n"):
+            st.markdown("**Giocate consigliate (action = gioca)**")
+            g1, g2, g3, g4 = st.columns(4)
+            rate = gioca.get("hit_rate")
+            g1.metric("Hit rate", "—" if rate is None else f"{rate:.0%}", delta=gioca.get("trend"))
+            g2.metric("Esiti", gioca.get("label") or "0/0")
+            last10 = gioca.get("last_10") or {}
+            g3.metric(
+                "Ultime 10",
+                last10.get("label") or "—",
+                delta=None if last10.get("hit_rate") is None else f"{last10['hit_rate']:.0%}",
+            )
+            hv = gioca.get("high_vote") or {}
+            g4.metric("Voto ≥8", hv.get("label") or "—")
+            if gioca.get("by_week"):
+                st.caption("Andamento settimanale (hit rate cumula le giocate consigliate chiuse)")
+                week_df = pd.DataFrame(gioca["by_week"]).rename(
+                    columns={
+                        "key": "Settimana",
+                        "n": "N",
+                        "hits": "Prese",
+                        "misses": "Sbagliate",
+                        "hit_rate": "Hit rate",
+                        "label": "Riepilogo",
+                    }
+                )
+                if "Hit rate" in week_df.columns:
+                    week_df["Hit rate"] = week_df["Hit rate"].map(
+                        lambda x: f"{x:.0%}" if pd.notna(x) else "—"
+                    )
+                st.dataframe(week_df, width="stretch", hide_index=True)
+            if gioca.get("cumulative") and len(gioca["cumulative"]) >= 5:
+                cum = pd.DataFrame(gioca["cumulative"])
+                st.line_chart(cum.set_index("n")[["hit_rate"]], height=180)
+
+        uni = data.get("by_score_unified") or []
+        if uni:
+            st.markdown("**Per voto unificato (1–10)**")
+            show_uni = pd.DataFrame(uni).rename(
+                columns={
+                    "key": "Voto unificato",
+                    "n": "Analisi",
+                    "hits": "Prese",
+                    "misses": "Sbagliate",
+                    "hit_rate": "Hit rate",
+                    "label": "Riepilogo",
+                }
+            )
+            if "hit_rate" in show_uni.columns:
+                show_uni["Hit rate"] = show_uni["Hit rate"].map(lambda x: f"{x:.0%}" if pd.notna(x) else "—")
+            st.dataframe(show_uni, width="stretch", hide_index=True)
+        else:
+            st.info(
+                "Nessun esito con voto unificato ancora. "
+                "Serve archiviare pre-match (Solo quote) con score_unified, poi settle."
+            )
+        c_a1, c_a2 = st.columns(2)
+        with c_a1:
+            if data.get("by_action"):
+                st.markdown("**Per azione (gioca / no_bet)**")
+                st.dataframe(pd.DataFrame(data["by_action"]), width="stretch", hide_index=True)
+        with c_a2:
+            if data.get("by_market"):
+                st.markdown("**Per mercato**")
+                st.dataframe(pd.DataFrame(data["by_market"]), width="stretch", hide_index=True)
+        if data.get("by_quadro_consensus"):
+            st.markdown("**Per accordo quadro (fonti allineate, es. 10/10)**")
+            st.caption(
+                "Non è il voto unificato 1–10: è quante fonti tattiche/ML/book concordavano sul pick."
+            )
+            st.dataframe(pd.DataFrame(data["by_quadro_consensus"]), width="stretch", hide_index=True)
+        if data.get("recent"):
+            st.markdown("**Ultime analisi chiuse**")
+            st.dataframe(pd.DataFrame(data["recent"]), width="stretch", hide_index=True)
 
     with st.expander("Paper trading (SQLite)", expanded=False):
         from modules.advisor.paper_stats import paper_trading_report
         from modules.advisor.residual_ev import fit_residual_ev
+        from modules.advisor.data_signal_weights import optimize_weights
 
-        if st.button("Aggiorna report paper + residual EV"):
-            fit_info = fit_residual_ev()
-            st.write(fit_info)
+        st.caption(
+            "Report su righe **trainable** (151+). Kelly con **drawdown guard**. "
+            "CLV da quota archiviata vs close Asian/fd."
+        )
+        cbtn1, cbtn2, cbtn3 = st.columns(3)
+        with cbtn1:
+            if st.button("Aggiorna report paper + residual EV"):
+                fit_info = fit_residual_ev(aggressive=True)
+                st.write(fit_info)
+        with cbtn2:
+            if st.button("Ottimizza pesi Analisi dati"):
+                st.write(optimize_weights(aggressive=True))
+        with cbtn3:
+            if st.button("Apprendi da partite chiuse"):
+                from modules.advisor.online_learn import learn_from_settled
+
+                st.write(learn_from_settled(force=True, aggressive=True))
         rep = paper_trading_report()
         if not rep.get("ok"):
             st.warning(rep.get("error") or "report non disponibile")
         elif not rep.get("n"):
             st.caption(rep.get("note") or "nessun esito")
         else:
-            st.metric("Settled", rep["n"], delta=f"hit {rep.get('hit_rate', 0):.0%}")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Trainable", rep["n"], delta=f"tot {rep.get('n_settled_total', rep['n'])}")
+            m2.metric("Flat ROI", f"{rep.get('flat_roi', 0):.1%}")
+            m3.metric(
+                "ROI @ quote",
+                "n/d" if rep.get("odds_roi") is None else f"{rep.get('odds_roi'):.1%}",
+                delta=f"live n={rep.get('n_live_odds', rep.get('odds_n', 0))}",
+            )
+            m4.metric(
+                "CLV medio",
+                "n/d" if rep.get("mean_clv") is None else f"{rep.get('mean_clv'):+.2%}",
+            )
+            ke = rep.get("kelly") or {}
+            oe = rep.get("odds_equity") or {}
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Kelly bank end", ke.get("bankroll_end", "n/d"))
+            k2.metric("Kelly risk scale", ke.get("risk_scale", "n/d"))
+            k3.metric("Max DD (odds)", oe.get("max_drawdown", "n/d"))
+            k4.metric("Sharpe (odds)", oe.get("sharpe", "n/d"))
+            if rep.get("walk_forward_odds_roi"):
+                st.markdown("**Walk-forward ROI @ quote**")
+                st.dataframe(pd.DataFrame(rep["walk_forward_odds_roi"]), width="stretch", hide_index=True)
+            if rep.get("by_market"):
+                st.markdown("**Per mercato (pick_group)**")
+                st.dataframe(pd.DataFrame(rep.get("by_market") or []), width="stretch", hide_index=True)
+            if rep.get("by_odds_band"):
+                st.markdown("**Per fascia quota**")
+                st.dataframe(pd.DataFrame(rep.get("by_odds_band") or []), width="stretch", hide_index=True)
+            if rep.get("by_cluster"):
+                st.markdown("**Per cluster**")
+                st.dataframe(pd.DataFrame(rep.get("by_cluster") or []), width="stretch", hide_index=True)
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("**Per voto**")
@@ -1894,7 +2618,15 @@ with tab_eval:
                 width="stretch",
                 hide_index=True,
             )
+            online_rel = cal.get("reliability_1x2_online") or []
+            if online_rel and any(int(b.get("n") or 0) < int(cal.get("min_bin_samples") or 30) for b in online_rel):
+                st.caption(
+                    "I bin sopra sono OOF (train). I bin online da settled hanno n troppo piccolo "
+                    "e non entrano in EV/Kelly finché ogni bin non ha ≥30 esiti."
+                )
         st.caption(
             "CLV storico: quota di apertura (venerdì / AvgH) contro la close (AvgCH / B365CH). "
-            "Positivo = hai battuto la linea di chiusura. I tipster non entrano in queste metriche."
+            "Positivo = hai battuto la linea di chiusura. I tipster non entrano in queste metriche. "
+            "No-bet rigido: EV/sharp sotto soglia, steam contrario, pick fuori set conformal, accordo spezzato. "
+            "IC largo o set 1X2 a 3 esiti → voto/Kelly ridotti, non veto."
         )

@@ -1,0 +1,54 @@
+# Ritreno settimanale modello (+ market O/U-AH).
+# Il train giornaliero cloud resta in cloud-train.yml; questo è il job “pesante” domenicale.
+name: Ritreno settimanale
+
+on:
+  schedule:
+    - cron: "0 4 * * 0"  # domenica 04:00 UTC
+  workflow_dispatch:
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: requirements-cloud.txt
+
+      - name: Dipendenze cloud
+        run: pip install -r requirements-cloud.txt
+
+      - name: Scarica storico e allena (1X2 + O/U + AH)
+        env:
+          PYTHONUTF8: "1"
+        run: python scripts/cloud_bootstrap.py
+
+      - name: Upload artefatti modello
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-model-${{ github.run_id }}
+          path: |
+            data/models/best_model.joblib
+            data/models/market_models.joblib
+            data/models/market_metrics.json
+            data/models/metrics.json
+            data/models/calibration.json
+            data/models/conformal.json
+            data/models/oof_predictions.joblib
+            data/models/oof_market.joblib
+            data/processed/features.csv
+          if-no-files-found: warn
+          retention-days: 30
+
+      - uses: actions/cache/save@v4
+        with:
+          path: |
+            data/models/best_model.joblib
+            data/models/market_models.joblib
+            data/processed/features.csv
+          key: cloud-model-${{ github.run_id }}

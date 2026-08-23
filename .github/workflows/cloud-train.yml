@@ -27,6 +27,21 @@ jobs:
           PYTHONUTF8: "1"
         run: python scripts/cloud_bootstrap.py
 
+      - name: Upload modello (artefatto)
+        uses: actions/upload-artifact@v4
+        with:
+          name: best-model-${{ github.run_id }}
+          path: |
+            data/models/best_model.joblib
+            data/models/market_models.joblib
+            data/models/metrics.json
+            data/models/market_metrics.json
+            data/models/calibration.json
+            data/models/conformal.json
+            data/processed/features.csv
+          if-no-files-found: warn
+          retention-days: 14
+
       - uses: actions/cache/save@v4
         with:
           path: |
@@ -53,6 +68,7 @@ jobs:
             odds-cache-
 
       - name: Asian + Pinnacle + Betfair + Telegram
+        # Betfair soft-fail gestito in scripts/notify_cloud.py (log betfair_soft_fail).
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

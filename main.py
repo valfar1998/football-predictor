@@ -584,6 +584,16 @@ def main() -> None:
     )
     parser.add_argument("--backfill-max", type=int, default=120, help="max righe synthetic con --backfill-history")
     parser.add_argument("--calibrate", action="store_true", help="calibra probabilità e taratura EV su storico")
+    parser.add_argument(
+        "--pull-model",
+        action="store_true",
+        help="scarica l'ultimo modello da GitHub Actions (senza riallenare in locale)",
+    )
+    parser.add_argument(
+        "--rebuild-calendar",
+        action="store_true",
+        help="con --pull-model: ricostruisce il calendario dopo il download (lento)",
+    )
     parser.add_argument("--asian-odds", action="store_true", help="scarica quote AsianBetSoccer e ricalcola calendario")
     parser.add_argument("--tipsters", action="store_true", help="scarica pronostici Forebet/PredictZ/Vitibet e ricalcola calendario")
     parser.add_argument("--predict", nargs=2, metavar=("HOME", "AWAY"), help="es. --predict Inter Milan")
@@ -651,6 +661,19 @@ def main() -> None:
         from modules.data_update.history_backfill import backfill_from_matches
 
         info = backfill_from_matches(max_rows=max(1, int(args.backfill_max)))
+        print(json.dumps(info, indent=2, default=str))
+        return
+
+    if args.pull_model:
+        import importlib.util
+
+        path = ROOT / "scripts" / "pull_cloud_model.py"
+        spec = importlib.util.spec_from_file_location("pull_cloud_model", path)
+        if spec is None or spec.loader is None:
+            raise SystemExit(f"impossibile caricare {path}")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        info = mod.pull_cloud_model(rebuild_calendar=bool(args.rebuild_calendar))
         print(json.dumps(info, indent=2, default=str))
         return
 
