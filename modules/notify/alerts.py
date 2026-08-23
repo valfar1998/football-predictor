@@ -1,4 +1,4 @@
-"""Avvisi: voto unificato >= 9 e spread AsianBetSoccer Raro (linea AH/totale >= 1)."""
+"""Avvisi Telegram: GIOCA (voto ≥9 + action gioca), da guardare (voto ≥9 + no bet), spread Raro."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from modules.data_update.asian_odds import load_asian_odds
+from modules.data_update.asian_odds import load_asian_odds, spread_playability
 from modules.notify.telegram import load_credentials, send_message, telegram_status
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -109,8 +109,93 @@ def _header(row: dict) -> str:
     return f"{line}\n{title}" if line else title
 
 
-def _score_alerts(rows: list[dict]) -> list[dict]:
-    out: list[dict] = []
+def _reasons_text(row: dict) -> str | None:
+    raw = row.get("no_bet_reasons")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return raw.strip()[:180] or None
+    if isinstance(raw, list) and raw:
+        return str(raw[0]).strip()[:180]
+    return None
+
+
+def _pick_line(row: dict) -> str:
+    pick = str(row.get("pick") or "—")
+    name = str(row.get("pick_name") or "")
+    if pick == name or not name:
+        return pick
+    return f"{pick} · {name}"
+
+
+
+def _quota_of(row: dict) -> float | None:
+    """Quota book del pick consigliato (ignora bool odds_real)."""
+    try:
+        from modules.data_update.history import _quota_from_row
+
+        return _quota_from_row(row, pick=row.get("pick"))
+    except Exception:
+        pass
+    for key in ("quota_pick", "odds", "fair_odds"):
+        val = row.get(key)
+        if isinstance(val, bool) or val is None:
+            continue
+        try:
+            num = float(val)
+            if 1.01 <= num <= 100:
+                return num
+        except (TypeError, ValueError):
+            continue
+    pick = str(row.get("pick") or "").strip().upper()
+    flat = {
+        "1": "odd_1",
+        "X": "odd_x",
+        "2": "odd_2",
+        "O2.5": "odd_over_25",
+        "U2.5": "odd_under_25",
+    }
+    if pick in flat:
+        try:
+            num = float(row.get(flat[pick]))
+            if 1.01 <= num <= 100:
+                return num
+        except (TypeError, ValueError):
+            pass
+    markets = row.get("markets")
+    if isinstance(markets, list):
+        for m in markets:
+            if isinstance(m, dict) and str(m.get("code") or "").upper() == pick:
+                try:
+                    num = float(m.get("odds"))
+                    if 1.01 <= num <= 100:
+                        return num
+                except (TypeError, ValueError):
+                    pass
+    return None
+
+
+def _fmt_quota(val: float | None) -> str | None:
+    if val is None:
+        return None
+    return f"{val:.2f}".rstrip("0").rstrip(".")
+
+
+def _hist_phrase(score: int) -> str | None:
+    try:
+        from modules.advisor.analysis_outcomes import outcome_phrase
+
+        return outcome_phrase(score_unified=score, live_only=True) or outcome_phrase(
+            score_unified=score, live_only=False
+        )
+    except Exception:
+        return None
+
+
+def _score_alerts(rows: list[dict]) -> dict[str, list[dict]]:
+    gioca: list[dict] = []
+    watch: list[dict] = []
     for row in rows:
         try:
             score = int(row.get("score_unified"))
@@ -118,21 +203,53 @@ def _score_alerts(rows: list[dict]) -> list[dict]:
             continue
         if score < MIN_UNIFIED:
             continue
-        key = f"voto|{_match_key(row)}|{score}"
-        pick = str(row.get("pick") or "—")
-        name = str(row.get("pick_name") or "")
-        action = str(row.get("action") or "")
+        action = str(row.get("action") or "").strip().lower()
         ev = _pct(row.get("ev_cons") if row.get("ev_cons") is not None else row.get("ev"))
-        body = [_header(row), f"Voto unificato {score}/10"]
-        play = pick if pick == name or not name else f"{pick} · {name}"
-        body.append(f"Pick: {play}" + (f" · {action}" if action else ""))
+        play = _pick_line(row)
+        note = str(row.get("score_reason_1") or row.get("meta_note") or "").strip()
+
+        if action == "gioca":
+            key = f"gioca|{_match_key(row)}|{score}"
+            body = [_header(row), f"🎯 GIOCA · voto {score}/10"]
+            body.append(f"Pick: {play}")
+            quota = _fmt_quota(_quota_of(row))
+            if quota:
+                body.append(f"Quota {quota}")
+            if ev:
+                body.append(f"EV {ev}")
+            kq = row.get("kelly_quarter")
+            if kq is not None:
+                try:
+                    body.append(f"Kelly ¼ {float(kq):.1%}")
+                except (TypeError, ValueError):
+                    pass
+            if note:
+                body.append(note[:220])
+            hist = _hist_phrase(score)
+            if hist:
+                body.append(f"Storico voto {score}: {hist}")
+            gioca.append({"id": key, "kind": "gioca", "text": "\n".join(body), "sort": -score})
+            continue
+
+        if action not in {"no_bet", "invalido", "n/d"}:
+            continue
+        key = f"watch|{_match_key(row)}|{score}"
+        body = [_header(row), f"👀 Da guardare · voto {score}/10 · NO BET"]
+        body.append(f"Pick: {play} — non giocare")
+        quota = _fmt_quota(_quota_of(row))
+        if quota:
+            body.append(f"Quota rif. {quota}")
         if ev:
             body.append(f"EV {ev}")
-        note = str(row.get("score_reason_1") or row.get("meta_note") or "").strip()
+        reason = _reasons_text(row)
+        if reason:
+            body.append(f"Motivo: {reason}")
+        elif action != "no_bet":
+            body.append(f"Stato: {action}")
         if note:
             body.append(note[:220])
-        out.append({"id": key, "kind": "voto", "text": "\n".join(body), "sort": -score})
-    return out
+        watch.append({"id": key, "kind": "watch", "text": "\n".join(body), "sort": -score})
+    return {"gioca": gioca, "watch": watch}
 
 
 def _rare_from_move(row: dict, move: dict | None) -> dict | None:
@@ -148,7 +265,14 @@ def _rare_from_move(row: dict, move: dict | None) -> dict | None:
     ah_curr = move.get("ah_curr", row.get("ah_curr"))
     tot_open = move.get("total_open", row.get("total_open"))
     tot_curr = move.get("total_curr", row.get("total_line") or row.get("total_curr"))
-    body = [_header(row), f"Spread Raro · linea AH/totale Δ {line:g} (≥1)"]
+    playab = spread_playability(row, move)
+    score = int(playab["score"])
+    verdict = str(playab.get("verdict") or "")
+    body = [
+        _header(row),
+        f"⭐ Giocabilità {score}/10 · {verdict}",
+        f"Spread Raro · linea AH/totale Δ {line:g} (≥1)",
+    ]
     if ah_open is not None or ah_curr is not None:
         body.append(f"AH {_fmt_line(ah_open)} → {_fmt_line(ah_curr)}")
     if tot_open is not None or tot_curr is not None:
@@ -164,11 +288,21 @@ def _rare_from_move(row: dict, move: dict | None) -> dict | None:
     )
     if steam:
         body.append(f"Steam: {steam}")
+    reason = str(playab.get("reason") or "").strip()
+    if reason:
+        body.append(reason[:220])
     summary = str(move.get("movement_summary") or row.get("movement_summary") or "").strip()
     if summary:
         body.append(summary[:220])
     key = f"spread|{_face_key(row)}"
-    return {"id": key, "kind": "spread", "text": "\n".join(body), "sort": -line}
+    return {
+        "id": key,
+        "kind": "spread",
+        "text": "\n".join(body),
+        "sort": -score * 100 - line,
+        "score": score,
+        "verdict": verdict,
+    }
 
 
 def _face_key(row: dict) -> str:
@@ -204,6 +338,14 @@ def _pack(title: str, items: list[dict]) -> list[tuple[str, list[str]]]:
     for i in range(0, len(items), CHUNK):
         chunk = items[i : i + CHUNK]
         head = title if i == 0 else f"{title} (cont.)"
+        if len(chunk) == 1 and chunk[0].get("score") is not None:
+            sc = int(chunk[0]["score"])
+            ver = str(chunk[0].get("verdict") or "").strip()
+            extra = f" · giocabilità {sc}/10"
+            if ver:
+                extra += f" · {ver}"
+            if "giocabilità" not in head.lower():
+                head = f"{head}{extra}"
         body = "\n\n".join(item["text"] for item in chunk)
         messages.append((f"{head}\n\n{body}", [item["id"] for item in chunk]))
     return messages
@@ -217,10 +359,16 @@ def collect_alerts(upcoming: list[dict] | None = None) -> dict:
         asian = []
     scores = _score_alerts(rows)
     rares = _spread_alerts(rows, asian)
+    gioca = scores["gioca"]
+    watch = scores["watch"]
     return {
-        "voto": scores,
+        "gioca": gioca,
+        "watch": watch,
+        "voto": gioca + watch,
         "spread": rares,
-        "n_voto": len(scores),
+        "n_gioca": len(gioca),
+        "n_watch": len(watch),
+        "n_voto": len(gioca) + len(watch),
         "n_spread": len(rares),
     }
 
@@ -228,10 +376,12 @@ def collect_alerts(upcoming: list[dict] | None = None) -> dict:
 def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False) -> dict:
     found = collect_alerts(upcoming)
     sent_ids = _load_sent()
-    fresh_voto = [a for a in found["voto"] if a["id"] not in sent_ids]
+    fresh_gioca = [a for a in found["gioca"] if a["id"] not in sent_ids]
+    fresh_watch = [a for a in found["watch"] if a["id"] not in sent_ids]
     fresh_spread = [a for a in found["spread"] if a["id"] not in sent_ids]
-    messages = _pack(f"⚽ Voto unificato ≥{MIN_UNIFIED}", fresh_voto)
-    messages += _pack("📈 AsianBetSoccer · spread Raro (≥1)", fresh_spread)
+    messages = _pack(f"🎯 GIOCA · voto ≥{MIN_UNIFIED}", fresh_gioca)
+    messages += _pack(f"👀 Da guardare · voto ≥{MIN_UNIFIED} · NO BET", fresh_watch)
+    messages += _pack("📈 AsianBetSoccer · spread Raro (giocabilità 1–10)", fresh_spread)
 
     sent_n = 0
     if dry_run:
@@ -254,9 +404,13 @@ def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False
                 _save_sent(sent_ids)
 
     info = {
+        "n_gioca": found["n_gioca"],
+        "n_watch": found["n_watch"],
         "n_voto": found["n_voto"],
         "n_spread": found["n_spread"],
-        "n_new_voto": len(fresh_voto),
+        "n_new_gioca": len(fresh_gioca),
+        "n_new_watch": len(fresh_watch),
+        "n_new_voto": len(fresh_gioca) + len(fresh_watch),
         "n_new_spread": len(fresh_spread),
         "n_messages": len(messages),
         "n_sent": sent_n,
@@ -264,15 +418,56 @@ def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False
         "status": telegram_status(),
     }
     print(
-        f"telegram avvisi: voto {info['n_new_voto']}/{info['n_voto']} nuovi, "
+        f"telegram avvisi: gioca {info['n_new_gioca']}/{info['n_gioca']} nuovi, "
+        f"watch {info['n_new_watch']}/{info['n_watch']} nuovi, "
         f"spread {info['n_new_spread']}/{info['n_spread']} nuovi, "
         f"inviati {sent_n}"
     )
     return info
 
 
+def resend_spread_match(home: str, away: str) -> dict:
+    """Reinvia lo spread Raro di una partita (ignora la cache già-inviato)."""
+    found = collect_alerts()
+    h = home.strip().lower()
+    a = away.strip().lower()
+    match = None
+    for item in found["spread"]:
+        blob = f"{item.get('id') or ''} {item.get('text') or ''}".lower()
+        if h in blob and a in blob:
+            match = item
+            break
+    if not match:
+        return {
+            "ok": False,
+            "error": f"nessun spread Raro per {home} vs {away}",
+            "n_spread": found["n_spread"],
+        }
+    score = match.get("score")
+    verdict = str(match.get("verdict") or "").strip()
+    title = "📈 AsianBetSoccer · spread Raro (giocabilità 1–10)"
+    if score is not None:
+        title = f"📈 AsianBetSoccer · spread Raro · giocabilità {int(score)}/10"
+        if verdict:
+            title += f" · {verdict}"
+    text = f"{title}\n\n{match['text']}"
+    if not load_credentials():
+        print("telegram skip: credenziali assenti")
+        return {"ok": False, "error": "credenziali assenti", "text": text}
+    ok = send_message(text)
+    return {
+        "ok": ok,
+        "id": match["id"],
+        "score": score,
+        "verdict": verdict,
+        "text": text,
+    }
+
+
 def ping_bot() -> bool:
     return send_message(
         "Football Predictor collegato allo stesso bot delle offerte.\n"
-        f"Avvisi: voto unificato ≥{MIN_UNIFIED} e spread AsianBetSoccer Raro (≥1)."
+        f"Avvisi: 🎯 GIOCA (voto ≥{MIN_UNIFIED} + action gioca), "
+        f"👀 da guardare (voto ≥{MIN_UNIFIED} + no bet), "
+        "spread Raro con giocabilità 1–10."
     )

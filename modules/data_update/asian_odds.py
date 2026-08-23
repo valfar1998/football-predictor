@@ -10,6 +10,8 @@ import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+from modules.progress_report import emit
+
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / "data" / "raw" / "asian_odds.json"
 
@@ -285,15 +287,18 @@ def parse_payload(js: str, *, day_offset: int, book: str) -> list[dict]:
     return out
 
 
-def fetch_asian_odds(*, days: int = 14, book: str = "bet365") -> list[dict]:
+def fetch_asian_odds(*, days: int = 14, book: str = "bet365", on_progress=None) -> list[dict]:
     rows: list[dict] = []
+    emit(on_progress, 0.02, "AsianBetSoccer: hash book…")
     try:
         refresh_book_ids()
         refreshed = True
     except Exception as exc:
-        print(f"asian hash skip: {exc}")
+        print(f"asian hash skip: {exc}", flush=True)
         refreshed = False
+    n_days = max(1, days)
     for offset in range(max(0, days)):
+        emit(on_progress, (offset + 0.3) / n_days, f"Asian giorno {offset + 1}/{days}…")
         try:
             js = _fetch_js(offset, book=book)
         except urllib.error.HTTPError as exc:
@@ -303,17 +308,18 @@ def fetch_asian_odds(*, days: int = 14, book: str = "bet365") -> list[dict]:
                     refreshed = True
                     js = _fetch_js(offset, book=book)
                 except Exception as retry_exc:
-                    print(f"asian skip day{offset}: HTTP {exc.code} ({retry_exc})")
+                    print(f"asian skip day{offset}: HTTP {exc.code} ({retry_exc})", flush=True)
                     continue
             else:
-                print(f"asian skip day{offset}: HTTP {exc.code}")
+                print(f"asian skip day{offset}: HTTP {exc.code}", flush=True)
                 continue
         except urllib.error.URLError as exc:
-            print(f"asian skip day{offset}: {exc}")
+            print(f"asian skip day{offset}: {exc}", flush=True)
             continue
         parsed = parse_payload(js, day_offset=offset, book=book)
-        print(f"asian day{offset}: {len(parsed)} partite ({book})")
+        print(f"asian day{offset}: {len(parsed)} partite ({book})", flush=True)
         rows.extend(parsed)
+    emit(on_progress, 1.0, f"Asian OK · {len(rows)} partite")
     return rows
 
 
@@ -791,6 +797,164 @@ def _movement_comment(
         sentences.append("O/U: " + "; ".join(ou_odds) + ".")
 
     return " ".join(sentences)
+
+
+def _pick_one(src: dict, *keys: str) -> object:
+    for key in keys:
+        if src.get(key) is not None and src.get(key) != "":
+            return src[key]
+    return None
+
+
+def spread_playability(row: dict | None, move: dict | None = None) -> dict:
+    """1–10: conviene seguire lo steam raro? 8+ gioca, 6–7 valuta, sotto 6 no."""
+    row = row or {}
+    merged: dict = {}
+    nested = row.get("market_move")
+    if isinstance(nested, dict):
+        merged.update(nested)
+    if isinstance(move, dict):
+        merged.update(move)
+    merged.update({k: v for k, v in row.items() if k != "market_move" and v is not None})
+
+    def g(*keys: str) -> object:
+        return _pick_one(merged, *keys)
+
+    line = abs(_num(g("line_move", "line_move")) or 0.0)
+    s1 = str(g("steam_1x2", "steam_1x2") or "").strip()
+    sah = str(g("steam_ah", "steam_ah") or "").strip().lower()
+    sou = str(g("steam_ou", "steam_ou") or "").strip().lower()
+    d1, d2 = _num(g("drop_1")), _num(g("drop_2"))
+    dx = _num(g("drop_x"))
+    do, du = _num(g("drop_over")), _num(g("drop_under"))
+    pick = str(g("pick", "code") or "").strip()
+    action = str(g("action") or "").strip().lower()
+    align_raw = g("market_align", "market_align")
+    if isinstance(align_raw, dict):
+        align_lbl = str(align_raw.get("label") or "").strip().lower()
+    else:
+        align_lbl = str(align_raw or "").strip().lower()
+
+    steam_home = sah == "home" or s1 == "1"
+    steam_away = sah == "away" or s1 == "2"
+    aligned_1x2_ah = (sah == "home" and s1 == "1") or (sah == "away" and s1 == "2")
+    conflict_1x2_ah = (sah == "home" and s1 == "2") or (sah == "away" and s1 == "1")
+
+    steam_drop = d2 if s1 == "2" else d1 if s1 == "1" else None
+    drop_abs = abs(steam_drop) if steam_drop is not None else None
+    if drop_abs is None:
+        drops = [abs(v) for v in (d1, d2, dx, do, du) if v is not None]
+        drop_abs = max(drops) if drops else 0.0
+    # drop è in punti percentuali; se arriva 0.20 (=20 pp) normalizza
+    if drop_abs <= 1.5:
+        drop_abs *= 100.0
+
+    score = 4.0
+    if line >= 2.0:
+        score += 2.5
+    elif line >= 1.5:
+        score += 2.0
+    elif line >= 1.25:
+        score += 1.5
+    elif line >= 1.0:
+        score += 1.0
+
+    if aligned_1x2_ah:
+        score += 2.5
+    elif conflict_1x2_ah:
+        score -= 2.0
+    elif sah or s1:
+        score += 1.0
+
+    if drop_abs >= 15:
+        score += 2.5
+    elif drop_abs >= 8:
+        score += 1.8
+    elif drop_abs >= 4:
+        score += 1.0
+    else:
+        score += 0.3
+
+    pick_home = pick in {"1", "1X", "1 DNB"}
+    pick_away = pick in {"2", "X2", "2 DNB"}
+    model_agrees = (pick_home and steam_home) or (pick_away and steam_away)
+    model_disagrees = (pick_home and steam_away) or (pick_away and steam_home)
+    if align_lbl == "allineato" or model_agrees:
+        score += 1.5
+        if action == "gioca":
+            score += 0.5
+    elif align_lbl == "contrario" or model_disagrees:
+        score -= 2.0
+        if action == "gioca":
+            score -= 1.0
+        score = min(score, 6.0)
+
+    if action in {"no_bet", "invalido", "n/d"} and not model_agrees:
+        score = min(score, 6.5)
+    has_model = bool(pick) and action not in {"", "n/d", "invalido"}
+    if not has_model:
+        score = min(score, 7.0)
+
+    score_i = int(max(1, min(10, round(score))))
+
+    follow_parts: list[str] = []
+    if aligned_1x2_ah:
+        follow_parts.append("2 e AH trasferta" if steam_away else "1 e AH casa")
+    elif s1 == "2":
+        follow_parts.append("2")
+    elif s1 == "1":
+        follow_parts.append("1")
+    elif sah == "away":
+        follow_parts.append("AH trasferta")
+    elif sah == "home":
+        follow_parts.append("AH casa")
+    if sou == "over":
+        follow_parts.append("Over")
+    elif sou == "under":
+        follow_parts.append("Under")
+    follow = " e ".join(follow_parts) if follow_parts else "nessun lato chiaro"
+
+    why: list[str] = []
+    if aligned_1x2_ah:
+        why.append("1X2 e handicap allineati")
+    elif conflict_1x2_ah:
+        why.append("steam misto (AH vs 1X2)")
+    if drop_abs >= 8:
+        why.append(f"quota steam accorciata di {drop_abs:.0f} pp")
+    if model_agrees:
+        why.append("modello d'accordo")
+    elif model_disagrees:
+        why.append("modello contrario")
+    if action == "gioca" and model_agrees:
+        why.append("azione GIOCA")
+    elif action in {"no_bet", "invalido"}:
+        why.append("modello no-bet")
+    if not has_model:
+        why.append("senza copertura modello")
+
+    if score_i >= 8:
+        verdict = "GIOCA"
+        verdict_long = "GIOCA — segui lo steam"
+    elif score_i >= 6:
+        verdict = "Valuta"
+        verdict_long = "Valuta — segnale ok, non automatico"
+    elif score_i >= 4:
+        verdict = "Meglio no"
+        verdict_long = "Meglio no — raro ma sporco o tardi"
+    else:
+        verdict = "Non giocare"
+        verdict_long = "Non giocare — steam misto o contrario al modello"
+
+    reason = f"Segui: {follow}"
+    if why:
+        reason += f" ({'; '.join(why)})"
+    return {
+        "score": score_i,
+        "verdict": verdict,
+        "verdict_long": verdict_long,
+        "follow": follow,
+        "reason": reason,
+    }
 
 
 def _spread_score(
