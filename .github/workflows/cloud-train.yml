@@ -164,3 +164,41 @@ jobs:
             data/raw/odds-api-remaining.txt
             data/raw/betfair_odds.json
           key: odds-cache-${{ github.run_id }}
+
+      - name: Notifica esito run
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_STATUS: ${{ job.status }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.parse, urllib.request
+          token = "".join(os.environ.get("TELEGRAM_BOT_TOKEN", "").split())
+          chat = "".join(os.environ.get("TELEGRAM_CHAT_ID", "").split())
+          if not token or not chat:
+              raise SystemExit("manca TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID")
+          status = (os.environ.get("RUN_STATUS") or "unknown").strip().lower()
+          icon = "✅" if status == "success" else "❌"
+          run_id = os.environ.get("RUN_ID", "").strip()
+          repo = os.environ.get("REPO", "").strip()
+          run_url = f"https://github.com/{repo}/actions/runs/{run_id}" if repo and run_id else ""
+          text = (
+              f"{icon} Football Predictor — Aggiorna dati e modello\n\n"
+              f"Esito: {status}\n"
+              f"Run: {run_url}"
+          )
+          data = urllib.parse.urlencode(
+              {"chat_id": chat, "text": text, "disable_web_page_preview": "true"}
+          ).encode()
+          req = urllib.request.Request(
+              f"https://api.telegram.org/bot{token}/sendMessage", data=data
+          )
+          with urllib.request.urlopen(req, timeout=20) as resp:
+              body = json.loads(resp.read().decode("utf-8"))
+          if not body.get("ok"):
+              raise SystemExit(body)
+          print("notifica esito inviata")
+          PY
