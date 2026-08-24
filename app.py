@@ -592,11 +592,12 @@ def _display_text(v) -> str:
 
 
 def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
-    # Dopo partita: Indice gioca → Azione → EV → voto → pick → value/Kelly → resto
+    # Dopo partita: pick (Gioca) → Indice/Azione → EV → voto → value/Kelly → resto
     wanted = [
         "date", "time", "country", "league", "home", "away",
+        "pick",
         "play_rank", "action", "ev_cons", "score_unified",
-        "pick", "pick_name", "kelly_quarter", "edge_pp",
+        "pick_name", "kelly_quarter", "edge_pp",
         "quota_pick", "fair_odds", "probability", "ev_sharp", "clv",
         "score_100", "score_band", "confidence_100", "risk_100", "priority_100",
         "bet_rec_label", "score", "meta_label", "meta_note",
@@ -1182,7 +1183,7 @@ Non ricalcolano EV/Kelly e **non creano pick**. Se ci sono, pesano al massimo un
 **Bottoni a sinistra — come usarli al meglio**
 
 *Ogni giorno (o dopo una pausa)*
-- **Scarica modello da GitHub** — prende l’ultimo train da Actions (no riallenamento locale). Poi **Solo quote**. Serve `gh auth login`.
+- **Scarica aggiornamento + apprendimento** — modello e learn (calibrazione/residual/pesi) da Actions. Poi **Solo quote**. Serve `gh auth login`.
 - **Aggiorna dati + modello** — train completo in locale (~1h+). Solo se non usi GitHub o vuoi rifare tutto sul PC.
 - **Solo quote e calendario** — stesso giorno, quote mosse o nuove partite. **Senza** riallenare. Più veloce; usa questo tra un train e l’altro.
 
@@ -1207,7 +1208,7 @@ Non ricalcolano EV/Kelly e **non creano pick**. Se ci sono, pesano al massimo un
 - **Calibra probabilità** — dopo tanti settle o un train grosso. Taratura T e soglie; non è refresh quotidiano.
 - Tab **Valutazione**: *Apprendi da partite chiuse*, *Ottimizza pesi Analisi dati*, *Aggiorna report paper* — solo con abbastanza storico settled (vedi TECH_ROADMAP).
 
-**In tabella Calendario:** subito dopo le squadre: **Indice gioca · Azione · EV · Voto unificato · Gioca**. Scorri a destra per il resto.
+**In tabella Calendario:** subito dopo le squadre: **Gioca · Indice gioca · Azione · EV · Voto unificato**. Scorri a destra per il resto.
         """
     )
 
@@ -1215,19 +1216,33 @@ with st.sidebar:
     st.header("Uso quotidiano")
     st.caption(
         "Giorno per giorno: Solo quote. "
-        "Modello: scaricalo da GitHub (veloce) oppure Aggiorna dati + modello (train locale ~1h+)."
+        "Da GitHub: Scarica aggiornamento + apprendimento (veloce). "
+        "Oppure Aggiorna dati + modello (train locale ~1h+)."
     )
-    if st.button("Scarica modello da GitHub", width="stretch"):
-        with st.spinner("Scarico ultimo artefatto da Actions (serve gh auth login)…"):
+    if st.button("Scarica aggiornamento + apprendimento", width="stretch"):
+        with st.spinner(
+            "Scarico modello + apprendimento da Actions (serve gh auth login)…"
+        ):
             proc = _run_cli("--pull-model", with_progress=False)
         if proc.returncode != 0:
-            st.error(proc.stderr[-1500:] or proc.stdout[-1500:] or "Download modello fallito")
-        else:
-            st.success(
-                "Modello installato. Premi «Solo quote e calendario» per usarlo "
-                "(ricalcola EV/calendario; se il modello è più nuovo fa Monte Carlo pieno)."
+            st.error(
+                proc.stderr[-1500:]
+                or proc.stdout[-1500:]
+                or "Download modello/apprendimento fallito"
             )
-            out = (proc.stdout or "")[-1200:]
+        else:
+            out = (proc.stdout or "")[-1500:]
+            has_learn = "ok learn" in out.lower() or "apprendimento cloud" in out.lower()
+            if has_learn:
+                st.success(
+                    "Modello + apprendimento installati. "
+                    "Premi «Solo quote e calendario» per usarli sul calendario."
+                )
+            else:
+                st.success(
+                    "Modello installato (apprendimento cloud non trovato su Actions — "
+                    "userai i pesi locali). Poi «Solo quote e calendario»."
+                )
             if out.strip():
                 st.code(out, language=None)
             st.rerun()
@@ -1735,7 +1750,7 @@ with tab_cal:
 
         st.write(f"{len(view)} partite dopo i filtri (su {len(df)})")
         st.caption(
-            "Colonne chiave dopo le squadre: **Indice gioca · Azione · EV cons. · Voto unificato · Gioca · Mercato · Kelly**. "
+            "Colonne chiave dopo le squadre: **Gioca · Indice gioca · Azione · EV cons. · Voto unificato · Mercato · Kelly**. "
             "L'**Indice gioca** (0–100) unifica tutto per l'ordinamento."
         )
         if hide_nbet and n_nbet:
