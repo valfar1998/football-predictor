@@ -39,6 +39,7 @@ jobs:
             data/models/residual_ev.json
             data/models/data_signal_weights.json
             data/models/online_learn_report.json
+            data/models/learn_digest_meta.json
           key: cloud-learn-${{ github.run_id }}
           restore-keys: |
             cloud-learn-
@@ -120,6 +121,9 @@ jobs:
             data/models/residual_ev.json
             data/models/data_signal_weights.json
             data/models/online_learn_report.json
+            data/models/learn_digest.md
+            data/models/learn_digest_meta.json
+            docs/APPRENDIMENTO.md
           if-no-files-found: ignore
           retention-days: 14
 
@@ -146,6 +150,8 @@ jobs:
             data/models/residual_ev.json
             data/models/data_signal_weights.json
             data/models/online_learn_report.json
+            data/models/learn_digest.md
+            data/models/learn_digest_meta.json
             data/models/conformal.json
           key: cloud-learn-${{ github.run_id }}
 

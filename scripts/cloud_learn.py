@@ -92,6 +92,50 @@ def _full_build(*, n_sims: int = 400) -> dict:
     return {"mode": "full", "n_upcoming": len(rows), "ok": True}
 
 
+def _run_settle_and_learn() -> dict:
+    """Chiude esiti e aggiorna calibrazione/residual/pesi (apprendimento online)."""
+    out: dict = {}
+    try:
+        from modules.data_update.history import settle_pending
+
+        settled = settle_pending()
+        out["settle"] = {
+            k: settled.get(k)
+            for k in ("settled", "n_history", "n_settled", "n_rich", "online_learn", "online_learn_error")
+            if k in settled
+        }
+        if settled.get("online_learn"):
+            out["online_learn"] = settled["online_learn"]
+        if settled.get("online_learn_error"):
+            out["online_learn_error"] = settled["online_learn_error"]
+    except Exception as exc:
+        out["settle_error"] = str(exc)
+        print(f"settle errore: {exc}", flush=True)
+
+    # Se history non ha ancora l'hook online_learn, eseguilo qui.
+    if "online_learn" not in out:
+        try:
+            from modules.advisor.online_learn import learn_from_settled
+
+            learn = learn_from_settled()
+            out["online_learn"] = {
+                k: learn.get(k) for k in ("ok", "n_settled", "n_trainable", "error", "fitted_at") if k in learn
+            }
+            out["online_learn_steps"] = learn.get("steps")
+        except Exception as exc:
+            out["online_learn_error"] = str(exc)
+            print(f"online_learn errore: {exc}", flush=True)
+
+    try:
+        from scripts.learn_digest import write_learn_digest
+
+        out["learn_digest"] = write_learn_digest()
+    except Exception as exc:
+        out["learn_digest_error"] = str(exc)
+        print(f"learn_digest errore: {exc}", flush=True)
+    return out
+
+
 def cloud_learn(*, mode: str = "auto") -> dict:
     """Archive (se possibile) + settle + learn_from_settled."""
     PROCESSED.mkdir(parents=True, exist_ok=True)
@@ -137,6 +181,31 @@ def cloud_learn(*, mode: str = "auto") -> dict:
             info["settle_fallback"] = settled
         except Exception as exc2:
             info["settle_fallback_error"] = str(exc2)
+
+    # Sempre: settle esiti + apprendimento online + digest leggibile
+    # (anche dopo full/light: build_upcoming archivia, qui chiudiamo e impariamo)
+    if m != "settle":
+        info.update(_run_settle_and_learn())
+    else:
+        # settle_only ha già chiuso; assicurati report + digest
+        if "online_learn" not in info:
+            try:
+                from modules.advisor.online_learn import learn_from_settled
+
+                learn = learn_from_settled()
+                info["online_learn"] = {
+                    k: learn.get(k)
+                    for k in ("ok", "n_settled", "n_trainable", "error", "fitted_at")
+                    if k in learn
+                }
+            except Exception as exc:
+                info["online_learn_error"] = str(exc)
+        try:
+            from scripts.learn_digest import write_learn_digest
+
+            info["learn_digest"] = write_learn_digest()
+        except Exception as exc:
+            info["learn_digest_error"] = str(exc)
 
     try:
         from modules.data_update.history import history_summary

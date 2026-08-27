@@ -425,6 +425,19 @@ def settle_pending() -> dict[str, Any]:
         print(f"skip world results settle: {exc}")
     summary = history_summary()
     summary["settled"] = settled
+    # Apprendimento continuo da esiti chiusi (bins, residual, pesi, soglie)
+    try:
+        from modules.advisor.online_learn import learn_from_settled
+
+        learn = learn_from_settled()
+        summary["online_learn"] = {
+            k: learn.get(k)
+            for k in ("ok", "n_settled", "n_trainable", "error", "fitted_at")
+            if k in learn
+        }
+        summary["online_learn_steps"] = learn.get("steps")
+    except Exception as exc:
+        summary["online_learn_error"] = str(exc)
     return summary
 
 
