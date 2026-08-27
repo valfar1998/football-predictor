@@ -8,6 +8,8 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from typing import Any
+
 from modules.dataset_loader.loader import normalize_team
 from modules.feature_engineering import FeatureEngineer
 
@@ -20,8 +22,12 @@ def _norm(name: str) -> str:
     return normalize_team(name)
 
 
-def context_xg(us_row: dict | None, fb_row: dict | None) -> tuple[float, float] | None:
-    """xG Understat (for, against); FBref gls/90 solo fallback attacco (ga_p90 è G+A, non xGA)."""
+def context_xg(
+    us_row: dict | None,
+    fb_row: dict | None,
+    fm_row: dict | None = None,
+) -> tuple[float, float] | None:
+    """Priorità: Understat > FotMob rolling > FBref gls/90."""
 
     def _pos(val) -> float | None:
         try:
@@ -36,6 +42,10 @@ def context_xg(us_row: dict | None, fb_row: dict | None) -> tuple[float, float] 
         xf = _pos(us_row.get("xg_for"))
         if xf:
             return xf, _pos(us_row.get("xg_against")) or 0.0
+    if fm_row and float(fm_row.get("n") or 0) >= 3:
+        xf = _pos(fm_row.get("xg_for"))
+        if xf:
+            return xf, _pos(fm_row.get("xg_against")) or 0.0
     if fb_row:
         gls = _pos(fb_row.get("gls_p90"))
         if gls:
@@ -64,19 +74,37 @@ class MatchPredictor:
         self.features_path = Path(features_path) if features_path else PROCESSED / "features.csv"
         bundle = joblib.load(self.model_path)
         self.model = bundle["model"]
+        self.cluster_models: dict[str, Any] = dict(bundle.get("models") or {})
         self.encoder = bundle["encoder"]
         self.feature_cols = bundle["feature_cols"]
         self.features = pd.read_csv(self.features_path, parse_dates=["date"])
         self._index_last_seen()
+        try:
+            from modules.model_training.market_models import load_market_models
+
+            self.market_bundle = load_market_models()
+        except Exception:
+            self.market_bundle = None
+
+    def _model_for(self, league: str | None):
+        from modules.model_training.league_clusters import cluster_for
+
+        cid = cluster_for(league)
+        return self.cluster_models.get(cid) or self.model, cid
 
     def _temperature_for(self, league: str | None) -> float:
         try:
             from modules.calibration.config import load_calibration
+            from modules.model_training.league_clusters import cluster_for
 
             cal = load_calibration()
-            by = cal.get("temperature_by_league") or {}
-            if league and str(league) in by:
-                return float(by[str(league)])
+            by_lg = cal.get("temperature_by_league") or {}
+            if league and str(league) in by_lg:
+                return float(by_lg[str(league)])
+            by_cl = cal.get("temperature_by_cluster") or {}
+            cid = cluster_for(league)
+            if cid in by_cl:
+                return float(by_cl[cid])
             return float(cal.get("temperature", 1.0))
         except Exception:
             return 1.0
@@ -175,6 +203,9 @@ class MatchPredictor:
                 "home_matches_7d": m7_h,
                 "away_matches_7d": m7_a,
                 "congestion_diff": m7_h - m7_a,
+                "days_into_season": float(
+                    FeatureEngineer._days_into_season(ko, None)
+                ),
                 "mkt_p_home": 0.34,
                 "mkt_p_draw": 0.28,
                 "mkt_p_away": 0.38,
@@ -202,6 +233,7 @@ class MatchPredictor:
     ) -> dict:
         from modules.data_update.team_names import known_team_index, resolve_known_team
         from modules.predictor.poisson import blend_1x2, dixon_coles_1x2
+        from modules.predictor.lambda_utils import lambdas_from_features
 
         idx = known_team_index(self.last_idx.keys())
         home_team = resolve_known_team(home_team, idx) or _norm(home_team)
@@ -220,18 +252,26 @@ class MatchPredictor:
             if c not in x.columns:
                 x[c] = 0
         x = x[self.feature_cols]
-        proba = self.model.predict_proba(x)[0]
-        mapping = {cls: float(p) for cls, p in zip(self.encoder.classes_, proba)}
-        p_h = mapping.get("H", 0.0)
-        p_d = mapping.get("D", 0.0)
-        p_a = mapping.get("A", 0.0)
+        model, cluster_id = self._model_for(league)
+        proba = model.predict_proba(x)[0]
+        # allinea a encoder globale se classi differiscono
+        mapping = {cls: float(p) for cls, p in zip(getattr(model, "classes_", self.encoder.classes_), proba)}
+        # se model.classes_ sono indici 0,1,2
+        if set(mapping.keys()) <= {0, 1, 2}:
+            inv = {i: lab for i, lab in enumerate(self.encoder.classes_)}
+            mapping = {inv.get(int(k), k): v for k, v in mapping.items()}
+        p_h = float(mapping.get("H", mapping.get(0, 0.0)))
+        p_d = float(mapping.get("D", mapping.get(1, 0.0)))
+        p_a = float(mapping.get("A", mapping.get(2, 0.0)))
+        s = p_h + p_d + p_a
+        if s > 0:
+            p_h, p_d, p_a = p_h / s, p_d / s, p_a / s
 
-        lam_h = float(max(0.35, row["home_xg_avg"] * 0.7 + (1.35 - row["away_xga_avg"]) * 0.15 + 0.25))
-        lam_a = float(max(0.25, row["away_xg_avg"] * 0.7 + (1.15 - row["home_xga_avg"]) * 0.15))
-        if ext_xg_home and ext_xg_home[0]:
-            lam_h = 0.62 * lam_h + 0.38 * float(ext_xg_home[0])
-        if ext_xg_away and ext_xg_away[0]:
-            lam_a = 0.62 * lam_a + 0.38 * float(ext_xg_away[0])
+        lam_h, lam_a = lambdas_from_features(
+            row,
+            ext_xg_home=ext_xg_home,
+            ext_xg_away=ext_xg_away,
+        )
         wx_adj = 1.0
         if weather and weather.get("lambda_adj"):
             try:
@@ -250,6 +290,20 @@ class MatchPredictor:
         for key in ("mkt_p_home", "mkt_p_draw", "mkt_p_away", "mkt_overround", "mkt_has"):
             if key in row.index:
                 features[key] = _json_num(row[key])
+        conf_iv = {"ready": False}
+        try:
+            from modules.calibration.conformal import predict_interval
+
+            conf_iv = predict_interval(p_h, p_d, p_a, league=league)
+        except Exception:
+            pass
+        market_ml: dict[str, float | None] = {"p_over_25": None, "p_ah0_home": None}
+        try:
+            from modules.model_training.market_models import predict_markets
+
+            market_ml = predict_markets(self.market_bundle, x)
+        except Exception:
+            pass
         return {
             "home_team": _norm(home_team),
             "away_team": _norm(away_team),
@@ -260,6 +314,11 @@ class MatchPredictor:
             "lambda_away": round(lam_a, 3),
             "features": features,
             "ensemble": "xgb+dixon-coles",
+            "model_cluster": cluster_id,
+            "conformal_intervals": conf_iv,
+            "market_ml": market_ml,
+            "p_over_25": market_ml.get("p_over_25"),
+            "p_ah0_home": market_ml.get("p_ah0_home"),
         }
 
 

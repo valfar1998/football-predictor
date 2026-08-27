@@ -109,11 +109,16 @@ def _kelly_fraction(prob: float, odds: float) -> float:
 
 def _capped_kelly(prob: float, odds: float, cal: dict | None = None) -> float:
     cal = cal or load_calibration()
+    from modules.advisor.staking import kelly_risk_scale_from_history, quarter_kelly
+
     return quarter_kelly(
         prob,
         odds,
         fraction=float(cal.get("kelly_fraction", 0.25)),
         cap=float(cal.get("kelly_cap", KELLY_CAP)),
+        risk_scale=kelly_risk_scale_from_history(
+            kelly_frac=float(cal.get("kelly_fraction", 0.25)),
+        ),
     )
 
 
@@ -452,8 +457,47 @@ def advise_uncovered(
         validation=validation,
         history_weight=(prediction.get("history_context") or {}).get("weight"),
     )
+    from modules.advisor.pro_scores import annotate_source_weights, build_fallback_source, build_match_scores
+
+    quadro["sources"] = annotate_source_weights(list(quadro.get("sources") or []))
+    fb = build_fallback_source(pred, quadro["sources"])
+    if fb:
+        quadro["sources"] = list(quadro["sources"]) + [fb]
+        quadro["fallback"] = True
+    pro = build_match_scores(
+        play=play,
+        prediction=pred,
+        quadro=quadro,
+        agreement=None,
+        validation=validation,
+        intervals=None,
+        residual=None,
+        meta=meta,
+        grouped=grouped,
+        league=prediction.get("league"),
+    )
+    quadro = pro.get("quadro") or quadro
     play["score_unified"] = meta["score"]
     play["meta_analysis"] = meta
+    play["score_100"] = pro.get("score_100")
+    play["confidence_100"] = pro.get("confidence_100")
+    play["risk_100"] = pro.get("risk_100")
+    play["priority_100"] = pro.get("priority_100")
+    play["score_band"] = (pro.get("band") or {}).get("label")
+    play["match_scores"] = {
+        "unified": pro.get("unified"),
+        "confidence": pro.get("confidence"),
+        "risk": pro.get("risk"),
+        "priority": pro.get("priority"),
+        "overrides": pro.get("overrides"),
+        "coverage": pro.get("coverage"),
+        "bet_rec": pro.get("bet_rec"),
+        "weights_table": pro.get("weights_table"),
+    }
+    play["bet_rec"] = pro.get("bet_rec")
+    from modules.advisor.play_rank import attach_play_rank
+
+    attach_play_rank(play)
 
     reason1 = (
         "Pick invalido: senza quote non si calcolano edge, EV, Kelly, quota equa, CLV."
@@ -462,6 +506,8 @@ def advise_uncovered(
     )
     reason2 = quadro.get("summary") or "Nessuna fonte di validazione."
     reason2 = f"{reason2} · Voto unificato {meta['score']}/10 ({meta['note']})"
+    if play.get("score_100") is not None:
+        reason2 += f" · Score {play['score_100']:.0f}/100 ({play.get('score_band')})"
 
     return {
         "match": prediction.get("match") or f"{home} vs {away}",
@@ -477,6 +523,13 @@ def advise_uncovered(
         "score_reason_2": reason2,
         "grouped": grouped,
         "all_markets": [],
+        "match_scores": play.get("match_scores"),
+        "score_100": play.get("score_100"),
+        "confidence_100": play.get("confidence_100"),
+        "risk_100": play.get("risk_100"),
+        "priority_100": play.get("priority_100"),
+        "score_band": play.get("score_band"),
+        "bet_rec": play.get("bet_rec"),
     }
 
 
@@ -877,8 +930,12 @@ def _actionable(m: dict[str, Any]) -> bool:
         return 0.12 <= p <= 0.55
     if m.get("group") in {"dc", "dnb"}:
         return 0.52 <= p <= 0.88
-    if m.get("group") in {"ou", "btts", "team"}:
+    if m.get("group") in {"ou", "btts", "team", "cards", "corners"}:
         return 0.42 <= p <= 0.80
+    if m.get("group") in {"multigol", "parity"}:
+        return 0.22 <= p <= 0.72
+    if m.get("group") == "exact":
+        return 0.06 <= p <= 0.28
     return 0.28 <= p <= 0.85
 
 
@@ -891,7 +948,7 @@ def advise(
     tipster: dict | None = None,
     league: str | None = None,
 ) -> dict[str, Any]:
-    """Mercati 1X2, doppia chance, DNB, O/U 0.5-4.5, BTTS, gol squadra, combo."""
+    """Mercati 1X2, DC, DNB, O/U, BTTS, multigol, exact, corner/card proxy, combo."""
     odds = odds or {}
     home, away = _split_match(prediction.get("match", "Casa vs Trasferta"))
     league = league or prediction.get("league")
@@ -925,7 +982,7 @@ def advise(
     def derived(code, name, group, prob, complement, model_p, baseline, book_odd=None, source="stimata"):
         odd = book_odd if book_odd and book_odd > 1 else None
         if odd is None:
-            margin = rr_1x2 if group in {"dc", "dnb", "1x2"} else rr_ou
+            margin = rr_1x2 if group in {"dc", "dnb", "1x2", "ah"} else rr_ou
             odd = _apply_margin(prob, margin)
             src = source
         else:
@@ -953,16 +1010,64 @@ def advise(
         "under_4.5": _get_odd(odds, "under_4.5"),
     }
     markets_ou = []
+    ml_mkt = prediction.get("market_ml") or {}
+    p_ml_o25 = ml_mkt.get("p_over_25")
+    if p_ml_o25 is None:
+        p_ml_o25 = prediction.get("p_over_25")
+    p_ml_ah = ml_mkt.get("p_ah0_home")
+    if p_ml_ah is None:
+        p_ml_ah = prediction.get("p_ah0_home")
+    ml_w = 0.55
     for line in (0.5, 1.5, 2.5, 3.5, 4.5):
         ok, uk = f"over_{line}", f"under_{line}"
         if ok not in mc:
             continue
         po, pu = float(mc.get(ok, 0)), float(mc.get(uk, 1 - mc.get(ok, 0)))
+        model_o, model_u = po, pu
+        if line == 2.5 and p_ml_o25 is not None:
+            po = ml_w * float(p_ml_o25) + (1.0 - ml_w) * po
+            pu = 1.0 - po
+            model_o, model_u = float(p_ml_o25), 1.0 - float(p_ml_o25)
         src = book_src if ou_book.get(ok) else "stimata da O/U 2.5"
-        markets_ou.append(derived(f"O{line}", f"Over {line}", "ou", po, pu, po, 0.5, ou_book.get(ok), src))
+        markets_ou.append(derived(f"O{line}", f"Over {line}", "ou", po, pu, model_o, 0.5, ou_book.get(ok), src))
         src_u = book_src if ou_book.get(uk) else "stimata da O/U 2.5"
-        markets_ou.append(derived(f"U{line}", f"Under {line}", "ou", pu, po, pu, 0.5, ou_book.get(uk), src_u))
+        markets_ou.append(derived(f"U{line}", f"Under {line}", "ou", pu, po, model_u, 0.5, ou_book.get(uk), src_u))
 
+    # Asian Handicap 0 (casa copre = vittoria casa; push = pareggio non nel binary)
+    markets_ah = []
+    p_ah_h = float(mc.get("ah_home_0", p1))
+    if p_ml_ah is not None:
+        p_ah_h = ml_w * float(p_ml_ah) + (1.0 - ml_w) * p_ah_h
+        model_ah = float(p_ml_ah)
+    else:
+        model_ah = p_ah_h
+    p_ah_a = max(0.02, min(0.98, 1.0 - p_ah_h))
+    markets_ah.extend(
+        [
+            derived(
+                "AH0 1",
+                f"{home} AH 0",
+                "ah",
+                p_ah_h,
+                p_ah_a,
+                model_ah,
+                0.45,
+                _get_odd(odds, "ah_home_0", "ah0_1", "ah_0_1"),
+                "xgb+mc" if p_ml_ah is not None else "stimata AH",
+            ),
+            derived(
+                "AH0 2",
+                f"{away} AH 0",
+                "ah",
+                p_ah_a,
+                p_ah_h,
+                1.0 - model_ah,
+                0.45,
+                _get_odd(odds, "ah_away_0", "ah0_2", "ah_0_2"),
+                "xgb+mc" if p_ml_ah is not None else "stimata AH",
+            ),
+        ]
+    )
     btts = float(mc.get("btts", 0))
     markets_btts = [
         derived("GOL", "Gol (BTTS sì)", "btts", btts, 1 - btts, btts, 0.5, _get_odd(odds, "btts_yes", "gol")),
@@ -1021,10 +1126,168 @@ def advise(
         combo("X2+U2.5", "X2 e Under 2.5", "combo_x2_u25", float(mc.get("combo_x2_o25", 0))),
         combo("12+O2.5", "12 e Over 2.5", "combo_12_o25", float(mc.get("combo_12_u25", 0))),
         combo("12+U2.5", "12 e Under 2.5", "combo_12_u25", float(mc.get("combo_12_o25", 0))),
+        combo("GOL+O2.5", "Gol e Over 2.5", "combo_gol_o25", float(mc.get("combo_nogol_u25", 0))),
+        combo("NOGOL+U2.5", "No gol e Under 2.5", "combo_nogol_u25", float(mc.get("combo_gol_o25", 0))),
     ]
 
+    # Multigol (fasce gol totali)
+    mg_specs = [
+        ("MG0-1", "Multigol 0-1", "mg_0_1"),
+        ("MG1-2", "Multigol 1-2", "mg_1_2"),
+        ("MG2-3", "Multigol 2-3", "mg_2_3"),
+        ("MG3-4", "Multigol 3-4", "mg_3_4"),
+        ("MG1-3", "Multigol 1-3", "mg_1_3"),
+        ("MG2-4", "Multigol 2-4", "mg_2_4"),
+        ("MG0-2", "Multigol 0-2", "mg_0_2"),
+        ("MG3+", "Multigol 3+", "mg_3_plus"),
+        ("MG4+", "Multigol 4+", "mg_4_plus"),
+    ]
+    markets_multigol = []
+    for code, name, key in mg_specs:
+        if key not in mc:
+            continue
+        p = float(mc.get(key, 0))
+        markets_multigol.append(
+            derived(code, name, "multigol", p, 1 - p, p, 0.25, _get_odd(odds, key, code.lower()), "stimata multigol")
+        )
+
+    markets_parity = [
+        derived(
+            "DISPARI",
+            "Gol totali dispari",
+            "parity",
+            float(mc.get("goals_odd", 0.5)),
+            float(mc.get("goals_even", 0.5)),
+            float(mc.get("goals_odd", 0.5)),
+            0.5,
+            _get_odd(odds, "goals_odd", "odd"),
+            "stimata parity",
+        ),
+        derived(
+            "PARI",
+            "Gol totali pari",
+            "parity",
+            float(mc.get("goals_even", 0.5)),
+            float(mc.get("goals_odd", 0.5)),
+            float(mc.get("goals_even", 0.5)),
+            0.5,
+            _get_odd(odds, "goals_even", "even"),
+            "stimata parity",
+        ),
+    ]
+
+    markets_exact = []
+    for row in (mc.get("most_likely_scores") or [])[:6]:
+        score = str(row.get("score") or "")
+        p = float(row.get("prob") or 0)
+        if not score or p < 0.04:
+            continue
+        markets_exact.append(
+            derived(
+                score,
+                f"Risultato esatto {score}",
+                "exact",
+                p,
+                1 - p,
+                p,
+                0.08,
+                _get_odd(odds, f"cs_{score}", score.replace("-", "_")),
+                "stimata exact",
+            )
+        )
+
+    markets_cards = []
+    card_src = str(mc.get("cards_source") or "proxy")
+    for line in (2.5, 3.5, 4.5, 5.5):
+        ok, uk = f"cards_over_{line}", f"cards_under_{line}"
+        if ok not in mc:
+            continue
+        po, pu = float(mc[ok]), float(mc.get(uk, 1 - mc[ok]))
+        markets_cards.append(
+            derived(f"CARDO{line}", f"Cartellini Over {line}", "cards", po, pu, po, 0.5, _get_odd(odds, ok), f"λ {card_src}")
+        )
+        markets_cards.append(
+            derived(f"CARDU{line}", f"Cartellini Under {line}", "cards", pu, po, pu, 0.5, _get_odd(odds, uk), f"λ {card_src}")
+        )
+
+    markets_corners = []
+    corner_src = str(mc.get("corners_source") or "proxy")
+    for line in (8.5, 9.5, 10.5, 11.5):
+        ok, uk = f"corners_over_{line}", f"corners_under_{line}"
+        if ok not in mc:
+            continue
+        po, pu = float(mc[ok]), float(mc.get(uk, 1 - mc[ok]))
+        markets_corners.append(
+            derived(f"CORNO{line}", f"Corner Over {line}", "corners", po, pu, po, 0.5, _get_odd(odds, ok), f"λ {corner_src}")
+        )
+        markets_corners.append(
+            derived(f"CORNU{line}", f"Corner Under {line}", "corners", pu, po, pu, 0.5, _get_odd(odds, uk), f"λ {corner_src}")
+        )
+
+    markets_scorer: list[dict[str, Any]] = []
+    try:
+        from modules.advisor.scorers import anytime_probs
+
+        fm_det = (
+            ((prediction.get("fotmob_context") or {}).get("details"))
+            or prediction.get("fotmob_details")
+            or {}
+        )
+        for row in anytime_probs(
+            home,
+            away,
+            lambda_home=float((prediction.get("expected_goals") or {}).get("home") or mc.get("lambda_home") or 1.2),
+            lambda_away=float((prediction.get("expected_goals") or {}).get("away") or mc.get("lambda_away") or 1.0),
+            top_n=4,
+            lineup_home=fm_det.get("lineup_home") if isinstance(fm_det, dict) else None,
+            lineup_away=fm_det.get("lineup_away") if isinstance(fm_det, dict) else None,
+        ):
+            p_any = float(row["p_anytime"])
+            p_first = float(row["p_first"])
+            src = str(row.get("source") or "xG share")
+            if row.get("in_lineup") is True:
+                src = f"{src}+XI"
+            elif row.get("in_lineup") is False:
+                src = f"{src}+bench"
+            markets_scorer.append(
+                derived(
+                    f"AS {row['player'][:18]}",
+                    f"{row['player']} anytime",
+                    "scorer",
+                    p_any,
+                    1 - p_any,
+                    p_any,
+                    0.25,
+                    _get_odd(odds, f"anytime_{row['player']}", "anytime"),
+                    src,
+                )
+            )
+            if p_first >= 0.06:
+                markets_scorer.append(
+                    derived(
+                        f"FS {row['player'][:18]}",
+                        f"{row['player']} first scorer",
+                        "scorer",
+                        p_first,
+                        1 - p_first,
+                        p_first,
+                        0.12,
+                        _get_odd(odds, f"first_{row['player']}", "first"),
+                        src,
+                    )
+                )
+    except Exception:
+        markets_scorer = []
+
     def _finish(m: dict[str, Any], overround: float) -> dict[str, Any]:
-        rr = rr_1x2 if m.get("group") in {"1x2", "dc", "dnb"} else rr_ou if m.get("group") in {"ou", "btts", "team"} else rr_combo
+        g = m.get("group")
+        rr = (
+            rr_1x2
+            if g in {"1x2", "dc", "dnb", "ah"}
+            else rr_ou
+            if g in {"ou", "btts", "team", "cards", "corners", "multigol", "parity", "scorer"}
+            else rr_combo
+        )
         return _with_composite(
             enrich_value(
                 m,
@@ -1040,9 +1303,16 @@ def advise(
     grouped = {
         "1x2": [_finish(m, rr_1x2) for m in markets_1x2],
         "dc": [_finish(m, rr_1x2) for m in markets_dc],
+        "ah": [_finish(m, rr_1x2) for m in markets_ah],
         "ou": [_finish(m, rr_ou) for m in markets_ou],
         "btts": [_finish(m, rr_ou) for m in markets_btts],
+        "multigol": [_finish(m, rr_ou) for m in markets_multigol],
+        "parity": [_finish(m, rr_ou) for m in markets_parity],
+        "exact": [_finish(m, rr_combo) for m in markets_exact],
         "team": [_finish(m, rr_ou) for m in markets_team],
+        "cards": [_finish(m, rr_ou) for m in markets_cards],
+        "corners": [_finish(m, rr_ou) for m in markets_corners],
+        "scorer": [_finish(m, rr_ou) for m in markets_scorer],
         "combo": [_finish(m, rr_combo) for m in markets_combo],
     }
     all_markets = [m for g in grouped.values() for m in g]
@@ -1206,14 +1476,38 @@ def advise(
         validation=validation,
     )
 
+    # Pesi fonti + fallback leghe minori prima dell'accordo pesato
+    from modules.advisor.pro_scores import annotate_source_weights, build_fallback_source
+
+    _ou = str(play.get("group") or "").lower() in {"ou", "btts", "goal"}
+    quadro = dict(quadro)
+    quadro["sources"] = annotate_source_weights(list(quadro.get("sources") or []), ou=_ou)
+    _fb = build_fallback_source(pred, quadro["sources"])
+    if _fb:
+        quadro["sources"] = list(quadro["sources"]) + [_fb]
+        quadro["fallback"] = True
+
     # Accordo fonti + intervalli MC + residual EV (dopo quadro)
     from modules.advisor.agreement import source_agreement
     from modules.advisor.residual_ev import predict_residual
 
-    agree = source_agreement(quadro, play_code=play.get("code"), play_group=play.get("group"))
+    agree = source_agreement(
+        quadro,
+        play_code=play.get("code"),
+        play_group=play.get("group"),
+        league=league or prediction.get("league"),
+        interval_width=(
+            ((pred.get("conformal_intervals") or {}).get("top_width"))
+            or ((pred.get("montecarlo") or {}).get("prob_intervals") or {}).get("top_width")
+        ),
+    )
     play["source_agreement"] = agree
-    intervals = (pred.get("montecarlo") or {}).get("prob_intervals") or {}
+    # preferisci conformal se pronto, altrimenti bootstrap MC
+    intervals = pred.get("conformal_intervals") or {}
+    if not intervals.get("ready"):
+        intervals = (pred.get("montecarlo") or {}).get("prob_intervals") or {}
     play["prob_intervals"] = intervals
+    play["conformal_intervals"] = pred.get("conformal_intervals") or {}
     move_rank = None
     try:
         from modules.data_update.asian_odds import MOVE_RANK
@@ -1221,13 +1515,27 @@ def advise(
         move_rank = MOVE_RANK.get((market_move or {}).get("movement_level") or "Stabile", 0)
     except Exception:
         move_rank = 0
+    # soft-cap Kelly se residual in produzione negativo
     residual = predict_residual(
         play,
         agree_share=agree.get("agree_share"),
         data_edge=(pred.get("data_signal") or {}).get("edge"),
         move_rank=move_rank,
+        league=league or prediction.get("league"),
     )
     play["residual_ev"] = residual
+    # allega conformal mercati dal MC se presenti
+    mc = pred.get("montecarlo") or {}
+    if mc.get("conformal_ou25"):
+        play["conformal_ou25"] = mc["conformal_ou25"]
+    if mc.get("conformal_ah0"):
+        play["conformal_ah0"] = mc["conformal_ah0"]
+    if residual.get("production") and residual.get("residual") is not None and play.get("kelly_quarter"):
+        try:
+            factor = max(0.45, min(1.20, 1.0 + 2.5 * float(residual["residual"])))
+            play["kelly_quarter"] = round(float(play["kelly_quarter"]) * factor, 5)
+        except (TypeError, ValueError):
+            pass
 
     validation = dict(validation or {})
     validation["agreement"] = agree
@@ -1239,9 +1547,8 @@ def advise(
             extra_delta -= 0.25
         elif intervals.get("stable"):
             extra_delta += 0.25
-    if residual.get("ready") and residual.get("residual") is not None:
-        # residual negativo = overconfidence → piccolo malus voto
-        extra_delta += max(-0.5, min(0.5, float(residual["residual"]) * 2.0))
+    if residual.get("ready"):
+        extra_delta += float(residual.get("delta_unified") or 0)
     validation["delta_unified"] = round(float(validation.get("delta_unified") or 0) + extra_delta, 3)
     bits = list(str(validation.get("summary") or "").split(" · ")) if validation.get("summary") else []
     bits.append(f"accordo {agree.get('status')}")
@@ -1270,6 +1577,12 @@ def advise(
         else:
             play["action"] = "gioca"
             play["no_bet_reasons"] = []
+            kq = play.get("kelly_quarter")
+            if kq and intervals.get("ready") and intervals.get("fragile"):
+                try:
+                    play["kelly_quarter"] = round(float(kq) * 0.70, 5)
+                except (TypeError, ValueError):
+                    pass
 
     meta = _meta_analysis(
         play,
@@ -1279,17 +1592,76 @@ def advise(
         validation=validation,
         history_weight=(pred.get("history_context") or {}).get("weight"),
     )
-    # ri-applica delta accordo/IC sul voto unificato
+    # ri-applica delta accordo/IC sul voto unificato 1–10
     if extra_delta:
         meta = dict(meta)
         meta["score"] = int(max(1, min(10, round(meta["score"] + extra_delta))))
+
+    from modules.advisor.pro_scores import build_match_scores
+
+    pro = build_match_scores(
+        play=play,
+        prediction=pred,
+        quadro=quadro,
+        agreement=agree,
+        validation=validation,
+        intervals=intervals,
+        residual=residual,
+        meta=meta,
+        grouped=grouped,
+        league=league or prediction.get("league"),
+        market_move=market_move,
+    )
+    quadro = pro.get("quadro") or quadro
+    ov = pro.get("overrides") or {}
+    if ov.get("delta_unified"):
+        meta = dict(meta)
+        meta["score"] = int(max(1, min(10, round(meta["score"] + float(ov["delta_unified"])))))
+        validation = dict(validation)
+        validation["delta_unified"] = round(
+            float(validation.get("delta_unified") or 0) + float(ov["delta_unified"]), 3
+        )
+        bits = list(str(validation.get("summary") or "").split(" · ")) if validation.get("summary") else []
+        bits.extend(ov.get("notes") or [])
+        validation["summary"] = " · ".join(b for b in bits if b)
+        validation["overrides"] = ov
+
     play["score_unified"] = meta["score"]
     play["meta_analysis"] = meta
     play["validation"] = validation
+    play["score_100"] = pro.get("score_100")
+    play["confidence_100"] = pro.get("confidence_100")
+    play["risk_100"] = pro.get("risk_100")
+    play["priority_100"] = pro.get("priority_100")
+    play["score_band"] = (pro.get("band") or {}).get("label")
+    play["match_scores"] = {
+        "unified": pro.get("unified"),
+        "confidence": pro.get("confidence"),
+        "risk": pro.get("risk"),
+        "priority": pro.get("priority"),
+        "overrides": ov,
+        "coverage": pro.get("coverage"),
+        "bet_rec": pro.get("bet_rec"),
+        "weights_table": pro.get("weights_table"),
+    }
+    play["bet_rec"] = pro.get("bet_rec")
+    from modules.advisor.play_rank import attach_play_rank
+
+    attach_play_rank(play)
+
     if play.get("action") not in {"invalido", "n/d"}:
         reason2 = (reason2 + " · " if reason2 else "") + f"Voto unificato {meta['score']}/10 ({meta['note']})"
         if agree.get("ready"):
             reason2 += f" · accordo {agree.get('agree_share')}"
+        if pro.get("score_100") is not None:
+            reason2 += f" · Score {pro['score_100']:.0f}/100 ({(pro.get('band') or {}).get('label')})"
+        if pro.get("priority_100") is not None:
+            reason2 += f" · Priorità {pro['priority_100']:.0f}"
+        br = pro.get("bet_rec") or {}
+        if br.get("ready") and (br.get("primary") or {}).get("code"):
+            prim = br["primary"]
+            if prim.get("code") != play.get("code"):
+                reason2 += f" · Rec mercato {prim.get('label')} {prim.get('code')}"
     else:
         reason1 = play["no_bet_reasons"][0] if play.get("no_bet_reasons") else reason1
 
@@ -1322,6 +1694,13 @@ def advise(
         "prob_intervals": intervals,
         "residual_ev": residual,
         "validation": validation,
+        "match_scores": play.get("match_scores"),
+        "score_100": play.get("score_100"),
+        "confidence_100": play.get("confidence_100"),
+        "risk_100": play.get("risk_100"),
+        "priority_100": play.get("priority_100"),
+        "score_band": play.get("score_band"),
+        "bet_rec": play.get("bet_rec"),
     }
 
 

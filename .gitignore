@@ -30,5 +30,8 @@ data/processed/notify_refresh.lock
 data/processed/our_history.jsonl
 data/processed/our_history.sqlite
 data/processed/our_history.sqlite-*
+storico_giocate.csv
+storico_successo_mensile.csv
+storico_successo_mensile_largo.csv
 !data/processed/.gitkeep
 !data/models/.gitkeep

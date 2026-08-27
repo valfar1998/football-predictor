@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from typing import Callable
 
 ROOT = Path(__file__).resolve().parents[2]
 RAW = ROOT / "data" / "raw"
@@ -40,44 +41,65 @@ def _norm_city(city: str) -> str:
     return " ".join(str(city or "").strip().lower().split())
 
 
-def geocode_city(city: str) -> dict | None:
+def geocode_city(city: str, *, venue: str | None = None) -> dict | None:
+    """Geocode città; se fallisce prova nome stadio (Open-Meteo)."""
     key = _norm_city(city)
-    if not key or len(key) < 2:
+    venue_key = _norm_city(venue or "")
+    cache_key = key or venue_key
+    if not cache_key or len(cache_key) < 2:
         return None
     cache = _load(GEO_CACHE)
-    if key in cache:
+    # prefer exact city hit
+    if key and key in cache:
         return cache[key]
-    try:
-        url = "https://geocoding-api.open-meteo.com/v1/search?" + urlencode(
-            {"name": city.strip(), "count": 1, "language": "it"}
-        )
-        data = _get_json(url)
-        results = data.get("results") or []
-        if not results:
-            cache[key] = None
-            _save(GEO_CACHE, cache)
+    if venue_key and f"venue:{venue_key}" in cache:
+        return cache[f"venue:{venue_key}"]
+
+    def _search(name: str) -> dict | None:
+        try:
+            url = "https://geocoding-api.open-meteo.com/v1/search?" + urlencode(
+                {"name": name.strip(), "count": 1, "language": "it"}
+            )
+            data = _get_json(url)
+            results = data.get("results") or []
+            if not results:
+                return None
+            hit = results[0]
+            return {
+                "lat": float(hit["latitude"]),
+                "lon": float(hit["longitude"]),
+                "name": hit.get("name") or name,
+                "country": hit.get("country") or "",
+            }
+        except (HTTPError, URLError, TimeoutError, KeyError, TypeError, ValueError):
             return None
-        hit = results[0]
-        row = {
-            "lat": float(hit["latitude"]),
-            "lon": float(hit["longitude"]),
-            "name": hit.get("name") or city,
-            "country": hit.get("country") or "",
-        }
+
+    row = _search(city) if city and len(key) >= 2 else None
+    if row:
         cache[key] = row
         _save(GEO_CACHE, cache)
         return row
-    except (HTTPError, URLError, TimeoutError, KeyError, TypeError, ValueError):
-        return None
+    if venue and len(venue_key) >= 3:
+        row = _search(venue)
+        if row:
+            cache[f"venue:{venue_key}"] = row
+            if key:
+                cache[key] = row
+            _save(GEO_CACHE, cache)
+            return row
+    if key:
+        cache[key] = None
+        _save(GEO_CACHE, cache)
+    return None
 
 
 def _wx_key(city: str, day: str) -> str:
     return f"{_norm_city(city)}|{day}"
 
 
-def forecast_day(city: str, day: str) -> dict | None:
+def forecast_day(city: str, day: str, *, venue: str | None = None) -> dict | None:
     """Precipitazioni, vento e temperatura per una data YYYY-MM-DD."""
-    key = _wx_key(city, day)
+    key = _wx_key(city or venue or "", day)
     cache = _load(WX_CACHE)
     hit = cache.get(key)
     if isinstance(hit, dict):
@@ -90,7 +112,7 @@ def forecast_day(city: str, day: str) -> dict | None:
                 return hit
         except ValueError:
             return hit
-    geo = geocode_city(city)
+    geo = geocode_city(city, venue=venue)
     if not geo:
         return None
     try:
@@ -111,7 +133,8 @@ def forecast_day(city: str, day: str) -> dict | None:
         wind = (daily.get("wind_speed_10m_max") or [None])[0]
         temp = (daily.get("temperature_2m_max") or [None])[0]
         row = {
-            "city": geo.get("name") or city,
+            "city": geo.get("name") or city or venue,
+            "venue": venue or "",
             "date": day,
             "precip_mm": None if precip is None else round(float(precip), 1),
             "precip_prob": None if pop is None else int(pop),
@@ -146,36 +169,113 @@ def _lambda_adj(row: dict) -> float:
         adj *= 0.96
     elif precip >= 5:
         adj *= 0.98
+    elif precip >= 3:
+        adj *= 0.99
     if wind >= 40:
-        adj *= 0.98
+        adj *= 0.97
+    elif wind >= 28:
+        adj *= 0.985
+    elif wind >= 25:
+        adj *= 0.992
     return round(adj, 3)
 
 
 def prefetch_weather(items: list[dict]) -> dict[str, dict]:
-    """items: {city, date}. Ritorna mappa city|date -> meteo."""
+    """items: {city, date, venue?}. Ritorna mappa city|date -> meteo."""
     out: dict[str, dict] = {}
     seen: set[str] = set()
     for it in items:
         city = str(it.get("city") or "").strip()
+        venue = str(it.get("venue") or "").strip() or None
         day = str(it.get("date") or "")[:10]
-        if not city or not day:
+        if (not city and not venue) or not day:
             continue
         try:
             date.fromisoformat(day)
         except ValueError:
             continue
-        key = _wx_key(city, day)
+        key = _wx_key(city or venue or "", day)
         if key in seen:
             continue
         seen.add(key)
-        row = forecast_day(city, day)
+        row = forecast_day(city, day, venue=venue)
         if row:
             out[key] = row
     return out
 
 
-def lookup_weather(city: str, day: str, index: dict[str, dict] | None = None) -> dict | None:
-    key = _wx_key(city, day)
+def lookup_weather(
+    city: str,
+    day: str,
+    index: dict[str, dict] | None = None,
+    *,
+    venue: str | None = None,
+) -> dict | None:
+    key = _wx_key(city or venue or "", day)
     if index and key in index:
         return index[key]
-    return forecast_day(city, day)
+    return forecast_day(city, day, venue=venue)
+
+
+def geocode_batch_venues(
+    *,
+    max_n: int = 120,
+    sleep_s: float = 0.35,
+    on_progress: Callable[[float, str], None] | None = None,
+) -> dict:
+    """Backfill lat/lon per stadi in home_venues.csv (Open-Meteo, rate-limited)."""
+    import time
+
+    from modules.data_update.venues import VENUE_CACHE, load_home_venues
+    from modules.progress_report import emit
+
+    idx = load_home_venues()
+    if not idx:
+        return {"ok": False, "n": 0, "error": "home_venues.csv vuoto"}
+    cache = _load(GEO_CACHE)
+    done = 0
+    hits = 0
+    skipped = 0
+    emit(on_progress, 0.02, "Geocode batch…")
+    items = list(idx.items())
+    for team, row in items[: max(1, int(max_n) * 2)]:
+        if done >= max_n:
+            break
+        venue = str(row.get("venue") or "").strip()
+        city = str(row.get("venue_city") or row.get("city") or "").strip()
+        if not venue and not city:
+            skipped += 1
+            continue
+        key_c = _norm_city(city) if city else ""
+        key_v = _norm_city(venue) if venue else ""
+        if (key_c and cache.get(key_c)) or (key_v and cache.get(f"venue:{key_v}")):
+            hits += 1
+            continue
+        emit(on_progress, min(0.95, 0.05 + 0.9 * (done / max(1, max_n))), f"{team}: {city or venue}")
+        geo = geocode_city(city or venue, venue=venue or None)
+        done += 1
+        if geo:
+            hits += 1
+        time.sleep(max(0.05, float(sleep_s)))
+    # coverage
+    covered = 0
+    total = 0
+    for row in idx.values():
+        total += 1
+        venue = str(row.get("venue") or "").strip()
+        city = str(row.get("venue_city") or row.get("city") or "").strip()
+        key_c = _norm_city(city) if city else ""
+        key_v = _norm_city(venue) if venue else ""
+        if (key_c and _load(GEO_CACHE).get(key_c)) or (key_v and _load(GEO_CACHE).get(f"venue:{key_v}")):
+            covered += 1
+    emit(on_progress, 1.0, f"Geocode OK · queried={done} coverage={covered}/{total}")
+    return {
+        "ok": True,
+        "queried": done,
+        "hits_cache_or_new": hits,
+        "skipped": skipped,
+        "coverage": round(covered / total, 3) if total else 0.0,
+        "n_venues": total,
+        "path": str(GEO_CACHE),
+        "venue_cache": str(VENUE_CACHE),
+    }

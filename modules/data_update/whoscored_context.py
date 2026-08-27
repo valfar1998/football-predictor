@@ -6,12 +6,13 @@ Limite: solo prossime partite Big 5 (lento). Non entra in EV/Kelly.
 
 from __future__ import annotations
 
-from datetime import date
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from lxml import html
+
+from modules.data_update.sd_compat import quiet_soccerdata, season_codes
 
 ROOT = Path(__file__).resolve().parents[2]
 PROCESSED = ROOT / "data" / "processed"
@@ -73,7 +74,7 @@ def _parse_preview_style(path: Path, home: str, away: str) -> list[dict[str, Any
 
 
 def download_whoscored_context(*, seasons: list[int] | None = None) -> dict[str, Any]:
-    seasons = seasons or [date.today().year - 1, date.today().year]
+    seasons = season_codes(seasons)
     try:
         import soccerdata as sd
         from soccerdata._config import DATA_DIR
@@ -81,8 +82,9 @@ def download_whoscored_context(*, seasons: list[int] | None = None) -> dict[str,
         return {"ok": False, "n_missing": 0, "error": f"soccerdata non disponibile: {exc}"}
 
     try:
-        ws = sd.WhoScored(leagues=WS_LEAGUES, seasons=seasons, headless=True)
-        sched = ws.read_schedule().reset_index()
+        with quiet_soccerdata():
+            ws = sd.WhoScored(leagues=WS_LEAGUES, seasons=seasons, headless=True)
+            sched = ws.read_schedule().reset_index()
     except Exception as exc:
         return {"ok": False, "n_missing": 0, "error": str(exc)}
 

@@ -53,8 +53,12 @@ def prob_bin_factor(cal: dict, prob: float, *, market: str = "1x2") -> tuple[flo
     """Fattore correttivo e dimensione campione del bin di calibrazione."""
     key = "reliability_1x2" if market == "1x2" else "reliability_ou25"
     bins = cal.get(key) or []
+    min_n = int(cal.get("min_bin_samples", 30))
     for b in bins:
         lo, hi = b["range"]
         if lo <= prob < hi:
-            return float(b.get("factor", 1.0)), int(b.get("n", 0))
+            n = int(b.get("n", 0))
+            if n < min_n:
+                return 1.0, min_n
+            return float(b.get("factor", 1.0)), n
     return 1.0, 0

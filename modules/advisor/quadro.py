@@ -578,6 +578,34 @@ def build_quadro(
             _src("FotMob", "classifica + calendario live", None, missing=True, note="contesto non disponibile")
         )
 
+    # FotMob matchDetails (top picks): xG live / momentum / shotmap — solo note quadro
+    fm_d = fotmob.get("details") or {}
+    if fm_d and (fm_d.get("xg_home") is not None or fm_d.get("has_momentum") or fm_d.get("has_shotmap")):
+        bits = []
+        if fm_d.get("xg_home") is not None and fm_d.get("xg_away") is not None:
+            bits.append(f"xG {fm_d['xg_home']}-{fm_d['xg_away']}")
+        if fm_d.get("poss_home") is not None:
+            bits.append(f"poss {fm_d.get('poss_home')}-{fm_d.get('poss_away')}")
+        if fm_d.get("momentum_avg") is not None:
+            bits.append(f"mom {fm_d['momentum_avg']}")
+        elif fm_d.get("has_momentum"):
+            bits.append("momentum ok")
+        if fm_d.get("shotmap_n"):
+            bits.append(f"shots map {fm_d['shotmap_n']}")
+        elif fm_d.get("has_shotmap"):
+            bits.append("shotmap")
+        if fm_d.get("has_lineup"):
+            bits.append("lineup")
+        sources.append(
+            _src(
+                "FotMob details",
+                "xG/momentum/shotmap (on-demand)",
+                None,
+                missing=False,
+                note=" · ".join(bits) or "dettagli disponibili",
+            )
+        )
+
     sim = prediction.get("sportly_sim") or {}
     if sim.get("ready"):
         tv = sim.get("tactical_validation") or {}

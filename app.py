@@ -1185,7 +1185,7 @@ Non ricalcolano EV/Kelly e **non creano pick**. Se ci sono, pesano al massimo un
 *Ogni giorno (o dopo una pausa)*
 - **Scarica aggiornamento + apprendimento** — modello e learn (calibrazione/residual/pesi) da Actions. Poi **Solo quote**. Serve `gh auth login`.
 - **Aggiorna dati + modello** — train completo in locale (~1h+). Solo se non usi GitHub o vuoi rifare tutto sul PC.
-- **Solo quote e calendario** — stesso giorno, quote mosse o nuove partite. **Senza** riallenare. Più veloce; usa questo tra un train e l’altro.
+- **Solo quote e calendario** — stesso giorno: fixtures football-data, quote Asian, Pinnacle/Betfair se la cache è scaduta. **Senza** riallenare, senza mondiale/coppe/tipster/FBref. Monte Carlo solo sulle partite **nuove**.
 
 *Quando ti servono le quote “giuste” per il voto*
 - **Scarica quote AsianBetSoccer** — steam Bet365. Aggiorna value/voto sul calendario **senza** rifare ML/MC. Per nuove partite: Solo quote.
@@ -1194,6 +1194,7 @@ Non ricalcolano EV/Kelly e **non creano pick**. Se ci sono, pesano al massimo un
 
 *Coppe e calendario extra*
 - **Scarica coppe** — Champions/Europa/… con token football-data.org. Senza token quelle coppe non compaiono. Le squadre fuori storico restano N/D.
+- **Scarica calendario mondiale** — TheSportsDB / API-Football / OpenLigaDB. Non parte da Solo quote.
 
 *Contesto Big 5 (1–2×/settimana, solo quadro/voto)*
 - **FBref** — stile/stats stagione.
@@ -1215,37 +1216,35 @@ Non ricalcolano EV/Kelly e **non creano pick**. Se ci sono, pesano al massimo un
 with st.sidebar:
     st.header("Uso quotidiano")
     st.caption(
-        "Giorno per giorno: Solo quote. "
+        "Giorno per giorno: Solo quote (fixtures + quote, ~1–3 min). "
+        "Coppe e calendario mondiale: expander sotto. "
         "Da GitHub: Scarica aggiornamento + apprendimento (veloce). "
         "Oppure Aggiorna dati + modello (train locale ~1h+)."
     )
     if st.button("Scarica aggiornamento + apprendimento", width="stretch"):
-        with st.spinner(
-            "Scarico modello + apprendimento da Actions (serve gh auth login)…"
-        ):
-            proc = _run_cli("--pull-model", with_progress=False)
-        if proc.returncode != 0:
-            st.error(
-                proc.stderr[-1500:]
-                or proc.stdout[-1500:]
-                or "Download modello/apprendimento fallito"
-            )
-        else:
-            out = (proc.stdout or "")[-1500:]
-            has_learn = "ok learn" in out.lower() or "apprendimento cloud" in out.lower()
-            if has_learn:
+        prog = _batch("Scarico aggiornamento + apprendimento")
+        try:
+            from main import pull_cloud_model_pipeline
+
+            info = pull_cloud_model_pipeline(on_progress=prog)
+            n_learn = len(info.get("learn_installed") or [])
+            if n_learn:
+                prog.done("OK · modello + apprendimento")
                 st.success(
                     "Modello + apprendimento installati. "
                     "Premi «Solo quote e calendario» per usarli sul calendario."
                 )
             else:
+                prog.done("OK · modello (learn locale)")
                 st.success(
                     "Modello installato (apprendimento cloud non trovato su Actions — "
                     "userai i pesi locali). Poi «Solo quote e calendario»."
                 )
-            if out.strip():
-                st.code(out, language=None)
             st.rerun()
+        except SystemExit as exc:
+            st.error(str(exc) or "Download modello/apprendimento fallito")
+        except Exception as exc:
+            st.error(f"Download modello/apprendimento fallito: {exc}")
     if st.button("Aggiorna dati + modello", type="primary", width="stretch"):
         proc = _run_cli("--update")
         if proc.returncode != 0:
@@ -1265,6 +1264,10 @@ with st.sidebar:
             st.rerun()
         except Exception as exc:
             st.error(f"Errore quote: {exc}")
+    st.caption(
+        "Leggero: fd + Asian + Pinnacle/Betfair se cache scaduta. "
+        "Coppe, mondiale e tipster: expander sotto."
+    )
     try:
         from modules.data_update.history import history_summary
 
@@ -1320,8 +1323,11 @@ with st.sidebar:
     except Exception:
         st.caption("Telegram: modulo avvisi non disponibile.")
 
-    with st.expander("Coppe (Champions, Europa, …)"):
-        st.caption("Token gratis su football-data.org. Serve solo per le coppe europee/mondiali.")
+    with st.expander("Coppe e calendario extra"):
+        st.caption(
+            "Non partono da Solo quote. Coppe UEFA: token football-data.org. "
+            "Calendario mondiale: tutte le partite dei prossimi 14 giorni."
+        )
         org_token = st.text_input(
             "Token football-data.org",
             type="password",
@@ -1361,6 +1367,30 @@ with st.sidebar:
             "Dopo il download non rifà Monte Carlo su tutto: riusa le predizioni già in calendario "
             "e calcola solo le partite nuove."
         )
+        if st.button("Scarica calendario mondiale", width="stretch"):
+            prog = _batch("Calendario mondiale")
+            try:
+                from modules.data_update.world_fixtures import download_world_fixtures
+                from modules.data_update.upcoming import build_upcoming
+
+                prog(0.1, "TheSportsDB / API-Football / OpenLigaDB…")
+                info = download_world_fixtures(days=14)
+                prog(0.55, "Calendario: riuso predizioni, MC solo sulle nuove…")
+
+                def _cal(frac, msg=""):
+                    prog(0.55 + 0.44 * max(0.0, min(1.0, float(frac))), msg)
+
+                upcoming_n = len(build_upcoming(reuse_predictions=True, on_progress=_cal))
+                n = int(info.get("n_world_fixtures") or 0)
+                errs = info.get("errors") or []
+                prog.done("OK")
+                msg = f"Mondiale: {n} partite · calendario {upcoming_n}"
+                if errs:
+                    msg += f" · avvisi: {len(errs)}"
+                st.success(msg)
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Errore calendario mondiale: {exc}")
 
     with st.expander("Quote Pinnacle (The Odds API)"):
         st.caption("Chiave gratis su the-odds-api.com · 500 chiamate/mese · 1 fetch/giorno basta.")
@@ -1451,7 +1481,7 @@ with st.sidebar:
         st.caption(
             "Asian = movimento Bet365. Tipster = consenso siti. "
             "Entrambi aggiornano il value sul calendario esistente senza rifare Monte Carlo "
-            "(per nuove partite usa Solo quote / Aggiorna dati)."
+            "(per partite fd nuove: Solo quote; per coppe/mondo: expander Coppe e calendario extra)."
         )
         if st.button("Scarica quote AsianBetSoccer", width="stretch"):
             with st.spinner("Scarico Asian + ricalcolo value (leggero)…"):

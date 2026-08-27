@@ -29,6 +29,7 @@ class MonteCarloSimulator:
         n_sims: int | None = None,
         model_probs: dict[str, float] | None = None,
         blend: float = 0.35,
+        extras: dict[str, float] | None = None,
     ) -> dict:
         rng = np.random.default_rng(self.seed)
         n = n_sims or self.n_sims
@@ -71,6 +72,24 @@ class MonteCarloSimulator:
         dc_x2_mask = draw | away_w
         dc_12_mask = home_w | away_w
 
+        # Multigol / fasce gol totali (mercati bookmaker IT tipici)
+        multigol = {
+            "mg_0_1": float(((tot >= 0) & (tot <= 1)).mean()),
+            "mg_1_2": float(((tot >= 1) & (tot <= 2)).mean()),
+            "mg_2_3": float(((tot >= 2) & (tot <= 3)).mean()),
+            "mg_3_4": float(((tot >= 3) & (tot <= 4)).mean()),
+            "mg_2_4": float(((tot >= 2) & (tot <= 4)).mean()),
+            "mg_1_3": float(((tot >= 1) & (tot <= 3)).mean()),
+            "mg_0_2": float(((tot >= 0) & (tot <= 2)).mean()),
+            "mg_3_plus": float((tot >= 3).mean()),
+            "mg_4_plus": float((tot >= 4).mean()),
+            "goals_odd": float((tot % 2 == 1).mean()),
+            "goals_even": float((tot % 2 == 0).mean()),
+        }
+        for g in range(0, 7):
+            multigol[f"exact_total_{g}"] = float((tot == g).mean())
+        multigol["exact_total_7plus"] = float((tot >= 7).mean())
+
         combos = {
             "combo_1_o25": float((home_w & o25).mean()),
             "combo_1_u25": float((home_w & u25).mean()),
@@ -94,11 +113,37 @@ class MonteCarloSimulator:
             "combo_x2_u25": float((dc_x2_mask & u25).mean()),
             "combo_12_o25": float((dc_12_mask & o25).mean()),
             "combo_12_u25": float((dc_12_mask & u25).mean()),
+            # Multigol combo leggere
+            "combo_1_mg12": float((home_w & (tot >= 1) & (tot <= 2)).mean()),
+            "combo_2_mg12": float((away_w & (tot >= 1) & (tot <= 2)).mean()),
+            "combo_gol_o25": float((btts_yes & o25).mean()),
+            "combo_nogol_u25": float((btts_no & u25).mean()),
         }
         dnb_den = max(p_h + p_a, 1e-9)
         pairs = list(zip(hg.tolist(), ag.tolist()))
         top = Counter(pairs).most_common(8)
         scorelines = [{"score": f"{h}-{a}", "prob": round(c / n, 4)} for (h, a), c in top]
+
+        # Cartellini / calci d'angolo: Poisson indipendente (λ da contesto o proxy)
+        extras_out: dict[str, float] = {}
+        meta_src: dict[str, Any] = {}
+        if extras:
+            lam_cards = float(extras.get("lambda_cards") or 0)
+            lam_corners = float(extras.get("lambda_corners") or 0)
+            if extras.get("cards_source"):
+                meta_src["cards_source"] = extras["cards_source"]
+            if extras.get("corners_source"):
+                meta_src["corners_source"] = extras["corners_source"]
+            if lam_cards > 0.5:
+                cards = rng.poisson(lam=lam_cards, size=n)
+                for line in (2.5, 3.5, 4.5, 5.5):
+                    extras_out[f"cards_over_{line}"] = float((cards > line).mean())
+                    extras_out[f"cards_under_{line}"] = float((cards < line).mean())
+            if lam_corners > 1.0:
+                corners = rng.poisson(lam=lam_corners, size=n)
+                for line in (7.5, 8.5, 9.5, 10.5, 11.5):
+                    extras_out[f"corners_over_{line}"] = float((corners > line).mean())
+                    extras_out[f"corners_under_{line}"] = float((corners < line).mean())
 
         return {
             "n_sims": n,
@@ -121,6 +166,8 @@ class MonteCarloSimulator:
             "avg_home_goals": round(float(hg.mean()), 3),
             "avg_away_goals": round(float(ag.mean()), 3),
             "avg_total_goals": round(float(tot.mean()), 3),
+            "ah_home_0": round(p_h, 4),
+            "ah_away_0": round(p_a, 4),
             "mc_raw": {
                 "home_win": round(p_h_raw, 4),
                 "draw": round(p_d_raw, 4),
@@ -131,13 +178,15 @@ class MonteCarloSimulator:
                 "draw": round(float(np.sqrt(p_d_raw * (1.0 - p_d_raw) / n)), 4),
                 "away_win": round(float(np.sqrt(p_a_raw * (1.0 - p_a_raw) / n)), 4),
             },
-            # Bande di incertezza empiriche (bootstrap su blocchi): proxy conformal pre-match.
             "prob_intervals": _mc_intervals(hg, ag, n_boot=40, seed=self.seed),
             **{k: round(v, 4) for k, v in over.items()},
             **{k: round(v, 4) for k, v in under.items()},
             **{k: round(v, 4) for k, v in home_ou.items()},
             **{k: round(v, 4) for k, v in away_ou.items()},
             **{k: round(v, 4) for k, v in combos.items()},
+            **{k: round(v, 4) for k, v in multigol.items()},
+            **{k: round(v, 4) for k, v in extras_out.items()},
+            **meta_src,
             "most_likely_scores": scorelines,
         }
 

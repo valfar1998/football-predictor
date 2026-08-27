@@ -132,6 +132,17 @@ def parse_main_results(path: Path) -> pd.DataFrame:
         country_s = country
         league_s = league
     odds = _odds_open_close_sharp(df)
+    extras: dict[str, pd.Series] = {}
+    for src, dst in (
+        ("HY", "home_yellow"),
+        ("AY", "away_yellow"),
+        ("HR", "home_red"),
+        ("AR", "away_red"),
+        ("HC", "home_corners"),
+        ("AC", "away_corners"),
+    ):
+        if src in df.columns:
+            extras[dst] = _num(df[src])
     out = pd.DataFrame(
         {
             "date": pd.to_datetime(df["Date"], dayfirst=True, errors="coerce"),
@@ -143,6 +154,7 @@ def parse_main_results(path: Path) -> pd.DataFrame:
             "league": league_s,
             "div": df["Div"] if "Div" in df.columns else league,
             **odds,
+            **extras,
             "source": f"fd:{path.stem}",
         }
     )

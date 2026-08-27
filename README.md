@@ -22,7 +22,7 @@ streamlit run app.py            # oppure: python main.py --ui
 | Bottone | Quando usarlo | Tempo tipico |
 |---------|---------------|--------------|
 | **Scarica modello da GitHub** | Preferito: ultimo train da Actions (no train locale) | ~1–2 min |
-| **Solo quote e calendario** | Quote mosse / nuove partite, **senza** riallenare | ~3–15 min |
+| **Solo quote e calendario** | Quote mosse / nuove partite fd, **senza** riallenare | ~1–3 min |
 | **Aggiorna dati + modello** | Train completo in locale (se non usi GitHub) | ~1h+ |
 | **Apprendi da partite chiuse** (tab Valutazione) | Dopo settle, ogni 1–2 giorni (spesso già auto) | pochi secondi |
 
@@ -89,7 +89,7 @@ Dettaglio gate e prossimi passi: [`TECH_ROADMAP.md`](TECH_ROADMAP.md).
 ```powershell
 python main.py --pull-model          # modello da GitHub Actions (no train locale)
 python main.py --update              # download + train + calendario (come bottone UI)
-python main.py --odds-update         # quote + calendario leggero
+python main.py --odds-update         # quote + calendario leggero (no mondiale/coppe/tipster)
 python main.py --train-markets       # solo modelli O/U 2.5 e AH 0
 python main.py --predict "Inter" "Milan"
 ```

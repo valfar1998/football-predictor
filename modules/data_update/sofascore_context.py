@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import difflib
-from datetime import date
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+from modules.data_update.sd_compat import quiet_soccerdata, season_codes
 
 ROOT = Path(__file__).resolve().parents[2]
 PROCESSED = ROOT / "data" / "processed"
@@ -37,15 +38,16 @@ def _reserve_mismatch(query: str, hit: str) -> bool:
 
 
 def download_sofascore_context(*, seasons: list[int] | None = None) -> dict[str, Any]:
-    seasons = seasons or [date.today().year - 1, date.today().year]
+    seasons = season_codes(seasons)
     try:
         import soccerdata as sd
     except Exception as exc:
         return {"ok": False, "n_teams": 0, "error": f"soccerdata non disponibile: {exc}"}
 
     try:
-        sofa = sd.Sofascore(leagues=SOFA_LEAGUES, seasons=seasons, headless=True)
-        table = sofa.read_league_table()
+        with quiet_soccerdata():
+            sofa = sd.Sofascore(leagues=SOFA_LEAGUES, seasons=seasons, headless=True)
+            table = sofa.read_league_table()
     except Exception as exc:
         return {"ok": False, "n_teams": 0, "error": str(exc)}
 

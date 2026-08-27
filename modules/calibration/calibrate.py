@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import log_loss
 
-from modules.calibration.metrics import brier_multiclass, expected_calibration_error, probability_metrics
+from modules.calibration.metrics import brier_multiclass, expected_calibration_error, probability_metrics, simplex_proba
 from modules.model_training import ModelTrainer, load_oof
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,7 +28,7 @@ def fit_temperature(proba: np.ndarray, y_true: np.ndarray) -> float:
     log_p = np.log(np.clip(proba, eps, 1.0))
     best_t, best_loss = 1.0, float("inf")
     for t in np.linspace(0.55, 2.5, 40):
-        cal = _softmax(log_p / t)
+        cal = simplex_proba(_softmax(log_p / t), 3)
         loss = log_loss(y_true, cal, labels=[0, 1, 2])
         if loss < best_loss:
             best_loss, best_t = loss, float(t)
@@ -36,11 +36,12 @@ def fit_temperature(proba: np.ndarray, y_true: np.ndarray) -> float:
 
 
 def apply_temperature(proba: np.ndarray, temperature: float) -> np.ndarray:
+    p0 = np.asarray(proba, dtype=float)
     if temperature <= 0 or abs(temperature - 1.0) < 1e-6:
-        return proba
+        return simplex_proba(p0, 3)
     eps = 1e-12
-    log_p = np.log(np.clip(proba, eps, 1.0))
-    return _softmax(log_p / temperature)
+    log_p = np.log(np.clip(p0, eps, 1.0))
+    return simplex_proba(_softmax(log_p / temperature), 3)
 
 
 def apply_temperature_dict(p_h: float, p_d: float, p_a: float, temperature: float) -> tuple[float, float, float]:
@@ -100,13 +101,24 @@ def calibrate_from_features(feat: pd.DataFrame | None = None) -> dict:
     cal_proba = apply_temperature(proba_test, temperature)
 
     temperature_by_league: dict[str, float] = {}
+    temperature_by_cluster: dict[str, float] = {}
     if oof is not None and "league" in oof:
+        from modules.model_training.league_clusters import cluster_for
+
         leagues = np.asarray(oof["league"])[valid]
         for lg in sorted({str(x) for x in leagues if str(x) and str(x) != "nan"}):
             mask = leagues.astype(str) == lg
             if int(mask.sum()) < 120:
                 continue
             temperature_by_league[lg] = round(fit_temperature(proba_test[mask], y_test[mask]), 4)
+
+        # Temperature OOF per cluster (più stabile della singola lega se n basso)
+        cluster_ids = np.array([cluster_for(str(lg)) for lg in leagues])
+        for cid in sorted({str(x) for x in cluster_ids}):
+            mask = cluster_ids == cid
+            if int(mask.sum()) < 200:
+                continue
+            temperature_by_cluster[cid] = round(fit_temperature(proba_test[mask], y_test[mask]), 4)
 
     fav_idx = proba_test.argmax(axis=1)
     fav_p_raw = proba_test[np.arange(len(proba_test)), fav_idx]
@@ -135,7 +147,9 @@ def calibrate_from_features(feat: pd.DataFrame | None = None) -> dict:
         "split": split_kind,
         "temperature": temperature,
         "temperature_by_league": temperature_by_league,
+        "temperature_by_cluster": temperature_by_cluster,
         "reliability_1x2": rel_1x2,
+        "reliability_1x2_oof": rel_1x2,
         "reliability_ou25": [],
         "brier_favorite_raw": round(brier_raw, 4),
         "brier_favorite_calibrated": round(brier_cal, 4),
@@ -155,3 +169,51 @@ def calibrate_from_features(feat: pd.DataFrame | None = None) -> dict:
         },
     }
     return payload
+
+
+def rebuild_oof_reliability_1x2(cal: dict | None = None) -> list[dict]:
+    """Ricostruisce i bin 1X2 dal OOF (dopo temperature), per non usare sample online minuscoli."""
+    oof = load_oof()
+    if oof is None:
+        return []
+    proba_raw = np.asarray(oof["proba"], dtype=float)
+    y_test = np.asarray(oof["y"], dtype=int)
+    valid = np.isfinite(proba_raw).all(axis=1)
+    proba_test = proba_raw[valid]
+    y_test = y_test[valid]
+    t = 1.0
+    if cal:
+        try:
+            t = float(cal.get("temperature") or 1.0)
+        except (TypeError, ValueError):
+            t = 1.0
+    cal_proba = apply_temperature(proba_test, t)
+    fav_idx = cal_proba.argmax(axis=1)
+    fav_p = cal_proba[np.arange(len(cal_proba)), fav_idx]
+    fav_hit = (fav_idx == y_test).astype(float)
+    return _reliability_bins(fav_p, fav_hit)
+
+
+def bins_too_small(bins: list | None, *, min_n: int = 30) -> bool:
+    if not bins:
+        return True
+    ns = [int(b.get("n") or 0) for b in bins]
+    if not ns:
+        return True
+    return min(ns) < min_n
+
+
+def ensure_oof_reliability_1x2(cal: dict) -> dict:
+    """Se i bin 1X2 sono avvelenati da online n piccolo, restaura l'OOF."""
+    current = cal.get("reliability_1x2") or []
+    oof_saved = cal.get("reliability_1x2_oof") or []
+    if not bins_too_small(current):
+        if not oof_saved:
+            cal["reliability_1x2_oof"] = current
+        return cal
+    restored = oof_saved if not bins_too_small(oof_saved) else rebuild_oof_reliability_1x2(cal)
+    if restored:
+        cal["reliability_1x2_online"] = current
+        cal["reliability_1x2"] = restored
+        cal["reliability_1x2_oof"] = restored
+    return cal

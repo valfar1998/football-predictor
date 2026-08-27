@@ -11,7 +11,7 @@ import json
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -59,20 +59,27 @@ def _reserve_mismatch(query: str, hit: str) -> bool:
     return flag(_norm(query)) != flag(_norm(hit))
 
 
-def _get_json(path: str, params: dict | None = None, timeout: int = 20) -> dict:
-    q = ("?" + urlencode({k: v for k, v in (params or {}).items() if v is not None})) if params else ""
-    url = f"{BASE}/{path.lstrip('/')}{q}"
-    req = Request(
-        url,
-        headers={
-            "User-Agent": UA,
-            "Accept": "application/json",
-            "Referer": "https://www.fotmob.com/",
-            "Origin": "https://www.fotmob.com",
-        },
-    )
-    with urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+def _get_json(path: str, params: dict | None = None, timeout: int = 20, retries: int = 3) -> dict:
+    from modules.data_update.http_client import fetch_json
+
+    qpath = path.lstrip("/")
+    last_exc: Exception | None = None
+    for attempt in range(max(1, retries)):
+        try:
+            return fetch_json(
+                f"{BASE}/{qpath}",
+                params=params,
+                headers={
+                    "Accept": "application/json",
+                    "Referer": "https://www.fotmob.com/",
+                    "Origin": "https://www.fotmob.com",
+                },
+                timeout=timeout,
+            )
+        except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
+            last_exc = exc
+            time.sleep(0.4 * (attempt + 1))
+    raise last_exc or RuntimeError(f"FotMob GET failed: {BASE}/{qpath}")
 
 
 def _table_rows(league_payload: dict) -> list[dict]:
@@ -90,13 +97,23 @@ def _table_rows(league_payload: dict) -> list[dict]:
     return rows if isinstance(rows, list) else []
 
 
-def download_fotmob_context(*, days: int = 7, league_ids: dict[str, int] | None = None) -> dict[str, Any]:
+def download_fotmob_context(
+    *,
+    days: int = 7,
+    league_ids: dict[str, int] | None = None,
+    on_progress: Callable[[float, str], None] | None = None,
+) -> dict[str, Any]:
     """Scarica classifiche + indice partite. Nessuna chiave API."""
+    from modules.progress_report import emit
+
     league_ids = league_ids or FOTMOB_LEAGUES
     errors: list[str] = []
     team_rows: list[dict[str, Any]] = []
+    emit(on_progress, 0.05, "FotMob classifiche…")
 
-    for name, lid in league_ids.items():
+    items = list(league_ids.items())
+    for i, (name, lid) in enumerate(items):
+        emit(on_progress, 0.08 + 0.35 * (i / max(1, len(items))), f"Lega {name}")
         try:
             payload = _get_json("leagues", {"id": lid})
             for row in _table_rows(payload):
@@ -131,12 +148,16 @@ def download_fotmob_context(*, days: int = 7, league_ids: dict[str, int] | None 
         team_df = team_df.drop_duplicates(subset=["team_norm"], keep="first")
         TEAM_CACHE.parent.mkdir(parents=True, exist_ok=True)
         team_df.to_csv(TEAM_CACHE, index=False)
+    elif TEAM_CACHE.exists():
+        errors.append("classifiche vuote: cache precedente mantenuta")
 
     matches: list[dict[str, Any]] = []
     today = date.today()
-    for i in range(max(1, int(days))):
+    n_days = max(1, int(days))
+    for i in range(n_days):
         day = today + timedelta(days=i)
         key = day.strftime("%Y%m%d")
+        emit(on_progress, 0.45 + 0.35 * (i / n_days), f"Match day {day.isoformat()}")
         try:
             payload = _get_json("matches", {"date": key})
             for league in payload.get("leagues") or []:
@@ -166,28 +187,39 @@ def download_fotmob_context(*, days: int = 7, league_ids: dict[str, int] | None 
         except (HTTPError, URLError, TimeoutError, KeyError, TypeError, ValueError) as exc:
             errors.append(f"matches {key}: {exc}")
 
-    MATCH_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    MATCH_CACHE.write_text(
-        json.dumps(
-            {
-                "fetched_at": datetime.now(timezone.utc).isoformat(),
-                "n": len(matches),
-                "matches": matches,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    if matches:
+        MATCH_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        MATCH_CACHE.write_text(
+            json.dumps(
+                {
+                    "fetched_at": datetime.now(timezone.utc).isoformat(),
+                    "n": len(matches),
+                    "matches": matches,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
+    xg_info: dict[str, Any] = {}
+    try:
+        emit(on_progress, 0.88, "xG rolling…")
+        xg_info = download_fotmob_xg_rolling(days_back=14, max_details=60)
+    except Exception as exc:
+        xg_info = {"ok": False, "error": str(exc), "n_teams": 0}
+
+    emit(on_progress, 1.0, f"OK · {len(team_rows)} squadre · {len(matches)} match")
     return {
         "ok": not errors or bool(team_rows) or bool(matches),
         "n_teams": int(len(team_df)) if not team_df.empty else 0,
         "n_matches": len(matches),
+        "n_xg_teams": int(xg_info.get("n_teams") or 0),
         "path": str(TEAM_CACHE),
         "matches_path": str(MATCH_CACHE),
         "errors": errors,
-        "note": "API non ufficiale /api/data — solo quadro",
+        "xg": xg_info,
+        "note": "API non ufficiale /api/data — solo quadro (+ xG rolling)",
     }
 
 
@@ -298,7 +330,36 @@ def fetch_match_details(match_id: int | str) -> dict[str, Any] | None:
                     pass
     lineup = content.get("lineup") or {}
     has_lineup = bool(lineup.get("homeTeam") and lineup.get("awayTeam"))
+    home_starters, away_starters = _extract_lineup_names(lineup)
     mom = content.get("momentum") or {}
+    # momentum summary (se presente)
+    mom_main = mom.get("main") if isinstance(mom, dict) else None
+    mom_pts = None
+    if isinstance(mom_main, list) and mom_main:
+        try:
+            vals = [float(x.get("value") if isinstance(x, dict) else x) for x in mom_main[-12:]]
+            mom_pts = round(sum(vals) / len(vals), 3) if vals else None
+        except (TypeError, ValueError):
+            mom_pts = None
+    shotmap = content.get("shotmap") or {}
+    shots_map_n = None
+    if isinstance(shotmap, dict):
+        sh = shotmap.get("shots") or shotmap.get("home") or []
+        if isinstance(sh, list):
+            shots_map_n = len(sh)
+    # corner/cards se presenti nelle stats match
+    cards_h = cards_a = corners_h = corners_a = None
+    for block in periods.get("stats") or []:
+        for row in block.get("stats") or []:
+            key = str(row.get("key") or "").lower()
+            stats = row.get("stats") or [None, None]
+            try:
+                if "corner" in key:
+                    corners_h, corners_a = float(stats[0]), float(stats[1])
+                if key in {"yellow_cards", "yellowcards"} or ("yellow" in key and "card" in key):
+                    cards_h, cards_a = float(stats[0]), float(stats[1])
+            except (TypeError, ValueError):
+                pass
     return {
         "match_id": match_id,
         "xg_home": xg_h,
@@ -308,11 +369,76 @@ def fetch_match_details(match_id: int | str) -> dict[str, Any] | None:
         "shots_home": shots_h,
         "shots_away": shots_a,
         "has_lineup": has_lineup,
+        "lineup_home": home_starters,
+        "lineup_away": away_starters,
+        "n_starters_home": len(home_starters),
+        "n_starters_away": len(away_starters),
         "has_momentum": bool(mom.get("main")),
-        "has_shotmap": bool(content.get("shotmap")),
+        "has_shotmap": bool(shotmap),
+        "momentum_avg": mom_pts,
+        "shotmap_n": shots_map_n,
+        "cards_home": cards_h,
+        "cards_away": cards_a,
+        "corners_home": corners_h,
+        "corners_away": corners_a,
     }
 
 
+def _extract_lineup_names(lineup: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Estrae nomi titolari da struttura FotMob (varianti API)."""
+
+    def side_names(side: Any) -> list[str]:
+        if not isinstance(side, dict):
+            return []
+        names: list[str] = []
+        # formati tipici
+        for key in ("starters", "startXI", "lineup", "players"):
+            block = side.get(key)
+            if isinstance(block, list):
+                for p in block:
+                    if not isinstance(p, dict):
+                        continue
+                    # skip panche se flag
+                    if p.get("substitute") is True or p.get("isSub") is True:
+                        continue
+                    if str(p.get("role") or "").lower() in {"sub", "substitute", "bench"}:
+                        continue
+                    nm = p.get("name") or p.get("playerName") or (p.get("player") or {}).get("name")
+                    if not nm and isinstance(p.get("player"), dict):
+                        nm = p["player"].get("name")
+                    if nm:
+                        names.append(str(nm).strip())
+                if names:
+                    break
+        # nested under "members"
+        if not names and isinstance(side.get("members"), list):
+            for p in side["members"]:
+                if not isinstance(p, dict):
+                    continue
+                if p.get("isStarter") is False:
+                    continue
+                nm = p.get("name") or (p.get("player") or {}).get("name")
+                if nm:
+                    names.append(str(nm).strip())
+        # dedupe preserve order, max 11
+        seen = set()
+        out: list[str] = []
+        for n in names:
+            k = n.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(n)
+            if len(out) >= 11:
+                break
+        return out
+
+    home = side_names(lineup.get("homeTeam") or lineup.get("home") or {})
+    away = side_names(lineup.get("awayTeam") or lineup.get("away") or {})
+    return home, away
+
+
+XG_CACHE = PROCESSED / "fotmob_xg_rolling.csv"
 DETAILS_CACHE = PROCESSED / "fotmob_details_cache.json"
 
 
@@ -394,3 +520,168 @@ def enrich_top_picks_fotmob(
     if enriched:
         _save_details_cache(cache)
     return {"ok": True, "n_enriched": enriched, "n_candidates": len(ranked), "errors": errors}
+
+
+def download_fotmob_xg_rolling(
+    *,
+    days_back: int = 21,
+    max_details: int = 80,
+    league_ids: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """xG rolling da matchDetails di partite finite (rate-limited)."""
+    league_ids = league_ids or {
+        k: v for k, v in FOTMOB_LEAGUES.items() if k in {
+            "Premier League", "La Liga", "Bundesliga", "Serie A", "Ligue 1", "Championship",
+        }
+    }
+    allow = set(league_ids.values())
+    cache = _load_details_cache()
+    now = datetime.now(timezone.utc)
+    finished: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    for i in range(1, max(2, int(days_back) + 1)):
+        day = date.today() - timedelta(days=i)
+        key = day.strftime("%Y%m%d")
+        try:
+            payload = _get_json("matches", {"date": key})
+            time.sleep(0.2)
+        except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+            errors.append(f"{key}: {exc}")
+            continue
+        for league in payload.get("leagues") or []:
+            if league.get("id") not in allow:
+                continue
+            for m in league.get("matches") or []:
+                st = m.get("status") or {}
+                if not st.get("finished"):
+                    continue
+                home = m.get("home") or {}
+                away = m.get("away") or {}
+                finished.append(
+                    {
+                        "match_id": m.get("id"),
+                        "home": home.get("name") or home.get("longName"),
+                        "away": away.get("name") or away.get("longName"),
+                        "date": str(st.get("utcTime") or day.isoformat())[:10],
+                    }
+                )
+        if len(finished) >= max_details * 2:
+            break
+
+    # dedupe + limit
+    seen: set[str] = set()
+    todo: list[dict] = []
+    for m in finished:
+        mid = str(m.get("match_id") or "")
+        if not mid or mid in seen:
+            continue
+        seen.add(mid)
+        todo.append(m)
+        if len(todo) >= max_details:
+            break
+
+    team_acc: dict[str, dict[str, float]] = {}
+    used = 0
+    for m in todo:
+        mid = str(m["match_id"])
+        entry = cache.get(mid) or {}
+        details = entry.get("details") if isinstance(entry, dict) else None
+        fresh = False
+        try:
+            ts = str(entry.get("fetched_at") or "")
+            if ts and details:
+                fetched = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                if fetched.tzinfo is None:
+                    fetched = fetched.replace(tzinfo=timezone.utc)
+                fresh = (now - fetched).total_seconds() < 24 * 3600
+        except ValueError:
+            fresh = bool(details)
+        if not fresh:
+            details = fetch_match_details(mid)
+            time.sleep(0.35)
+            if details:
+                cache[mid] = {"fetched_at": now.isoformat(), "details": details}
+        if not details or details.get("xg_home") is None or details.get("xg_away") is None:
+            continue
+        used += 1
+        for team, xf, xa in (
+            (m.get("home"), details["xg_home"], details["xg_away"]),
+            (m.get("away"), details["xg_away"], details["xg_home"]),
+        ):
+            if not team:
+                continue
+            k = _norm(str(team))
+            row = team_acc.setdefault(k, {"team": str(team), "xg_for": 0.0, "xg_against": 0.0, "n": 0.0})
+            row["xg_for"] += float(xf)
+            row["xg_against"] += float(xa)
+            row["n"] += 1.0
+
+    _save_details_cache(cache)
+    rows = []
+    for k, row in team_acc.items():
+        n = max(1.0, row["n"])
+        rows.append(
+            {
+                "team": row["team"],
+                "team_norm": k,
+                "n": int(row["n"]),
+                "xg_for": round(row["xg_for"] / n, 3),
+                "xg_against": round(row["xg_against"] / n, 3),
+                "xg_diff": round((row["xg_for"] - row["xg_against"]) / n, 3),
+                "fetched_at": now.isoformat(),
+            }
+        )
+    if rows:
+        df = pd.DataFrame(rows)
+        XG_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(XG_CACHE, index=False)
+    elif XG_CACHE.exists():
+        # keep previous
+        try:
+            old = pd.read_csv(XG_CACHE)
+            return {
+                "ok": True,
+                "n_teams": int(len(old)),
+                "n_details": used,
+                "from_cache": True,
+                "errors": errors,
+                "path": str(XG_CACHE),
+            }
+        except Exception:
+            pass
+    return {
+        "ok": bool(rows),
+        "n_teams": len(rows),
+        "n_details": used,
+        "n_candidates": len(todo),
+        "from_cache": False,
+        "errors": errors,
+        "path": str(XG_CACHE),
+    }
+
+
+def load_fotmob_xg_index() -> dict[str, dict[str, Any]]:
+    if not XG_CACHE.exists():
+        return {}
+    df = pd.read_csv(XG_CACHE)
+    out: dict[str, dict[str, Any]] = {}
+    for _, row in df.iterrows():
+        k = _norm(str(row.get("team") or row.get("team_norm") or ""))
+        if k:
+            out[k] = row.to_dict()
+    return out
+
+
+def lookup_fotmob_xg(name: str, idx: dict[str, dict[str, Any]] | None = None) -> dict[str, Any] | None:
+    k = _norm(name)
+    if not k:
+        return None
+    idx = idx or load_fotmob_xg_index()
+    if k in idx:
+        return idx[k]
+    hit = difflib.get_close_matches(k, list(idx.keys()), n=1, cutoff=0.86)
+    if hit and not _reserve_mismatch(name, hit[0]):
+        return idx[hit[0]]
+    return None
+

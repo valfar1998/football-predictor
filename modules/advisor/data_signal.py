@@ -44,7 +44,15 @@ def _two_way_to_1x2(p_home_2way: float, p_draw: float) -> tuple[float, float, fl
     return p1 / total, d / total, p2 / total
 
 
-def _factor(name: str, edge: float, weight: float, note: str) -> dict[str, Any]:
+def _factor(name: str, edge: float, weight: float, note: str, *, cluster: str | None = None) -> dict[str, Any]:
+    try:
+        from modules.advisor.data_signal_weights import load_weights
+
+        base = load_weights(cluster=cluster).get(name)
+        if base is not None:
+            weight = float(base)
+    except Exception:
+        pass
     return {
         "name": name,
         "edge": round(float(edge), 4),
@@ -55,6 +63,16 @@ def _factor(name: str, edge: float, weight: float, note: str) -> dict[str, Any]:
 
 def build_data_signal(prediction: dict[str, Any]) -> dict[str, Any]:
     """Restituisce lean, probabilità, confidenza e elenco fattori usati."""
+    try:
+        from modules.model_training.league_clusters import cluster_for
+
+        _cid = cluster_for(prediction.get("league"))
+    except Exception:
+        _cid = None
+
+    def _fc(name: str, edge: float, weight: float, note: str) -> dict[str, Any]:
+        return _factor(name, edge, weight, note, cluster=_cid)
+
     feat = prediction.get("features") or {}
     us = prediction.get("understat_context") or {}
     fb = prediction.get("fbref_context") or {}
@@ -67,6 +85,8 @@ def build_data_signal(prediction: dict[str, Any]) -> dict[str, Any]:
     sofa_h, sofa_a = sofa.get("home") or {}, sofa.get("away") or {}
     sb_h, sb_a = sb.get("home") or {}, sb.get("away") or {}
     fm_m = fm.get("match") or {}
+    fm_xg = prediction.get("fotmob_xg") or {}
+    fm_xg_h, fm_xg_a = fm_xg.get("home") or {}, fm_xg.get("away") or {}
 
     factors: list[dict[str, Any]] = []
 
@@ -75,7 +95,7 @@ def build_data_signal(prediction: dict[str, Any]) -> dict[str, Any]:
     a_pts = _f(feat.get("away_form_pts"))
     if h_pts is not None and a_pts is not None:
         edge = _clip((h_pts - a_pts) / 12.0, -0.35, 0.35)
-        factors.append(_factor("forma", edge, 0.18, f"pts {h_pts:.1f} vs {a_pts:.1f}"))
+        factors.append(_fc("forma", edge, 0.18, f"pts {h_pts:.1f} vs {a_pts:.1f}"))
 
     # 2) Casa / trasferta
     h_wr = _f(feat.get("home_home_wr"))
@@ -83,7 +103,7 @@ def build_data_signal(prediction: dict[str, Any]) -> dict[str, Any]:
     if h_wr is not None and a_wr is not None:
         # gap tipico casa≈0.45, trasferta≈0.30 → baseline ~0.15 a favore casa
         edge = _clip((h_wr - a_wr - 0.12) * 0.9, -0.30, 0.30)
-        factors.append(_factor("casa/trasferta", edge, 0.16, f"WR {h_wr:.0%} vs {a_wr:.0%}"))
+        factors.append(_fc("casa/trasferta", edge, 0.16, f"WR {h_wr:.0%} vs {a_wr:.0%}"))
 
     # 3) xG rolling dalle feature
     h_xg = _f(feat.get("home_xg_avg"))
@@ -97,7 +117,7 @@ def build_data_signal(prediction: dict[str, Any]) -> dict[str, Any]:
             deff = a_xga - h_xga  # casa concede meno → positivo
         edge = _clip((att + 0.55 * deff) / 2.2, -0.35, 0.35)
         factors.append(
-            _factor(
+            _fc(
                 "xG rolling",
                 edge,
                 0.14,
@@ -112,7 +132,7 @@ def build_data_signal(prediction: dict[str, Any]) -> dict[str, Any]:
     if h_diff is not None and a_diff is not None:
         edge = _clip((h_diff - a_diff) / 1.6, -0.40, 0.40)
         factors.append(
-            _factor(
+            _fc(
                 "Understat",
                 edge,
                 0.18,
@@ -128,7 +148,22 @@ def build_data_signal(prediction: dict[str, Any]) -> dict[str, Any]:
             if h_xa is not None and a_xa is not None:
                 deff = a_xa - h_xa
             edge = _clip((att + 0.5 * deff) / 2.0, -0.35, 0.35)
-            factors.append(_factor("Understat", edge, 0.14, f"xG {h_xf:.2f} vs {a_xf:.2f}"))
+            factors.append(_fc("Understat", edge, 0.14, f"xG {h_xf:.2f} vs {a_xf:.2f}"))
+
+    # FotMob rolling xG
+    if _f(fm_xg_h.get("n"), 0) >= 3 and _f(fm_xg_a.get("n"), 0) >= 3:
+        hd = _f(fm_xg_h.get("xg_diff"))
+        ad = _f(fm_xg_a.get("xg_diff"))
+        if hd is not None and ad is not None:
+            edge = _clip((hd - ad) / 1.5, -0.35, 0.35)
+            factors.append(
+                _fc(
+                    "FotMob xG",
+                    edge,
+                    0.12,
+                    f"diff {hd:+.2f} vs {ad:+.2f} · n {fm_xg_h.get('n')}/{fm_xg_a.get('n')}",
+                )
+            )
 
     # 5) Classifica attuale: FotMob se played≥1, altrimenti Sofascore
     table_edge = None
@@ -151,13 +186,13 @@ def build_data_signal(prediction: dict[str, Any]) -> dict[str, Any]:
         table_edge = _clip(ppg / 2.0 + gd * 0.04, -0.35, 0.35)
         table_note = f"Sofascore PPG {sofa_h.get('ppg')} vs {sofa_a.get('ppg')}"
     if table_edge is not None:
-        factors.append(_factor("classifica", table_edge, table_w, table_note))
+        factors.append(_fc("classifica", table_edge, table_w, table_note))
 
     # 6) FBref stile / GD
     if _f(fb_h.get("gd_pg")) is not None and _f(fb_a.get("gd_pg")) is not None:
         edge = _clip((_f(fb_h.get("gd_pg"), 0) - _f(fb_a.get("gd_pg"), 0)) * 0.22, -0.30, 0.30)
         factors.append(
-            _factor(
+            _fc(
                 "FBref",
                 edge,
                 0.10,
@@ -174,7 +209,7 @@ def build_data_signal(prediction: dict[str, Any]) -> dict[str, Any]:
     ):
         edge = _clip((_f(sb_h.get("gd_pg"), 0) - _f(sb_a.get("gd_pg"), 0)) * 0.18, -0.25, 0.25)
         factors.append(
-            _factor(
+            _fc(
                 "StatsBomb",
                 edge,
                 0.06,
@@ -187,7 +222,7 @@ def build_data_signal(prediction: dict[str, Any]) -> dict[str, Any]:
     rest_a = _f(feat.get("away_rest_days"))
     if rest_h is not None and rest_a is not None:
         edge = _clip((rest_h - rest_a) / 14.0, -0.12, 0.12)
-        factors.append(_factor("riposo", edge, 0.06, f"{rest_h:.0f}d vs {rest_a:.0f}d"))
+        factors.append(_fc("riposo", edge, 0.06, f"{rest_h:.0f}d vs {rest_a:.0f}d"))
 
     # 9) Elo (se in feature)
     elo_h = _f(feat.get("home_elo"))
@@ -196,7 +231,7 @@ def build_data_signal(prediction: dict[str, Any]) -> dict[str, Any]:
         # HFA ~65 Elo
         p_elo = 1.0 / (1.0 + 10 ** (-((elo_h + 65.0 - elo_a) / 400.0)))
         edge = _clip(p_elo - 0.5, -0.35, 0.35)
-        factors.append(_factor("Elo", edge, 0.08, f"{elo_h:.0f} vs {elo_a:.0f}"))
+        factors.append(_fc("Elo", edge, 0.08, f"{elo_h:.0f} vs {elo_a:.0f}"))
 
     if not factors:
         note = "nessun fattore dati disponibile"

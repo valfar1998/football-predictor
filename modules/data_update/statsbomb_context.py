@@ -1,4 +1,4 @@
-"""Contesto squadra da StatsBomb open data (statsbombpy). Solo quadro, non EV/Kelly."""
+"""StatsBomb open data: più stagioni + mapping nomi aggressivo. Solo quadro."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import difflib
 import re
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -14,11 +14,65 @@ ROOT = Path(__file__).resolve().parents[2]
 PROCESSED = ROOT / "data" / "processed"
 TEAM_CACHE = PROCESSED / "statsbomb_team_context.csv"
 
+# Alias → nome canonico StatsBomb / football-data
+SB_ALIASES: dict[str, str] = {
+    "man utd": "manchester united",
+    "manchester utd": "manchester united",
+    "man united": "manchester united",
+    "man city": "manchester city",
+    "spurs": "tottenham hotspur",
+    "tottenham": "tottenham hotspur",
+    "wolves": "wolverhampton wanderers",
+    "nottingham forest": "nottingham forest",
+    "inter": "inter milan",
+    "internazionale": "inter milan",
+    "ac milan": "milan",
+    "atletico madrid": "atlético madrid",
+    "atletico": "atlético madrid",
+    "athletic bilbao": "athletic club",
+    "athletic club bilbao": "athletic club",
+    "bayern": "bayern munich",
+    "bayern munchen": "bayern munich",
+    "psg": "paris saint germain",
+    "paris sg": "paris saint germain",
+    "paris saint-germain": "paris saint germain",
+    "sporting cp": "sporting lisbon",
+    "sporting lisboa": "sporting lisbon",
+}
+
 
 def _norm(name: str) -> str:
     from modules.data_update.cups import _norm_key
 
     return _norm_key(name or "")
+
+
+def _alias_keys(name: str) -> list[str]:
+    k = _norm(name)
+    if not k:
+        return []
+    out = [k]
+    # strip common tokens
+    stripped = k
+    for tok in (" fc", " cf", " afc", " sc", " united", " city", " club"):
+        if stripped.endswith(tok) and len(stripped) > len(tok) + 2:
+            stripped = stripped[: -len(tok)].strip()
+            if stripped:
+                out.append(stripped)
+    if k in SB_ALIASES:
+        out.append(_norm(SB_ALIASES[k]))
+    for alias, canon in SB_ALIASES.items():
+        if _norm(canon) == k or alias == k:
+            out.append(_norm(alias))
+            out.append(_norm(canon))
+    # dedupe
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for x in out:
+        if x and x not in seen:
+            seen.add(x)
+            uniq.append(x)
+    return uniq
 
 
 def _reserve_mismatch(query: str, hit: str) -> bool:
@@ -42,8 +96,16 @@ def _team_name(val: object) -> str:
     return str(val).strip()
 
 
-def download_statsbomb_context(*, min_season: int = 2018) -> dict[str, Any]:
-    """Aggrega gol/punti dalle partite open data più recenti per competizione."""
+def download_statsbomb_context(
+    *,
+    min_season: int = 2015,
+    seasons_per_comp: int = 3,
+    on_progress: Callable[[float, str], None] | None = None,
+) -> dict[str, Any]:
+    """Aggrega gol/punti dalle ultime N stagioni open data per competizione."""
+    from modules.progress_report import emit
+
+    emit(on_progress, 0.05, "StatsBomb: competizioni…")
     try:
         from statsbombpy import sb
     except Exception as exc:
@@ -67,14 +129,25 @@ def download_statsbomb_context(*, min_season: int = 2018) -> dict[str, Any]:
     if comps.empty:
         return {"ok": True, "n_teams": 0, "error": "nessuna competizione club recente"}
 
-    latest = comps.sort_values("_year").groupby("competition_name", as_index=False).tail(1)
+    selected = (
+        comps.sort_values("_year")
+        .groupby("competition_name", as_index=False)
+        .tail(max(1, int(seasons_per_comp)))
+    )
     parts: list[pd.DataFrame] = []
     errors: list[str] = []
-    for _, row in latest.iterrows():
+    rows_sel = list(selected.iterrows())
+    n_sel = max(1, len(rows_sel))
+    for i, (_, row) in enumerate(rows_sel):
+        emit(
+            on_progress,
+            0.15 + 0.7 * (i / n_sel),
+            f"{row.get('competition_name')} {row.get('season_name')}",
+        )
         try:
             matches = sb.matches(competition_id=int(row["competition_id"]), season_id=int(row["season_id"]))
         except Exception as exc:
-            errors.append(f"{row.get('competition_name')}: {exc}")
+            errors.append(f"{row.get('competition_name')} {row.get('season_name')}: {exc}")
             continue
         if matches is None or matches.empty:
             continue
@@ -89,13 +162,28 @@ def download_statsbomb_context(*, min_season: int = 2018) -> dict[str, Any]:
         parts.append(m[["home_team", "away_team", "home_score", "away_score", "competition", "season"]])
 
     if not parts:
+        # fallback: keep previous cache if download fails
+        if TEAM_CACHE.exists():
+            try:
+                old = pd.read_csv(TEAM_CACHE)
+                return {
+                    "ok": True,
+                    "n_teams": int(len(old)),
+                    "n_matches": 0,
+                    "n_competitions": 0,
+                    "path": str(TEAM_CACHE),
+                    "errors": errors or ["download fallito, cache precedente"],
+                    "from_cache": True,
+                }
+            except Exception:
+                pass
         return {"ok": False, "n_teams": 0, "error": "; ".join(errors) or "nessun match StatsBomb"}
 
     games = pd.concat(parts, ignore_index=True)
     rows: list[dict[str, Any]] = []
-    for side, opp, gf, ga in (
-        ("home_team", "away_team", "home_score", "away_score"),
-        ("away_team", "home_team", "away_score", "home_score"),
+    for side, gf, ga in (
+        ("home_team", "home_score", "away_score"),
+        ("away_team", "away_score", "home_score"),
     ):
         chunk = games[[side, gf, ga, "competition", "season"]].rename(
             columns={side: "team", gf: "g_for", ga: "g_against"}
@@ -128,13 +216,16 @@ def download_statsbomb_context(*, min_season: int = 2018) -> dict[str, Any]:
     agg["fetched_at"] = pd.Timestamp.utcnow().isoformat()
     TEAM_CACHE.parent.mkdir(parents=True, exist_ok=True)
     agg.to_csv(TEAM_CACHE, index=False)
+    emit(on_progress, 1.0, f"OK · {len(agg)} squadre")
     return {
         "ok": True,
         "n_teams": int(len(agg)),
         "n_matches": int(len(games)),
-        "n_competitions": int(len(latest)),
+        "n_competitions": int(selected["competition_name"].nunique()),
+        "n_season_rows": int(len(selected)),
         "path": str(TEAM_CACHE),
         "errors": errors,
+        "from_cache": False,
     }
 
 
@@ -147,19 +238,25 @@ def load_statsbomb_team_index() -> dict[str, dict[str, Any]]:
         k = _norm(str(row.get("team") or row.get("team_norm") or ""))
         if k:
             out[k] = row.to_dict()
+            for ak in _alias_keys(str(row.get("team") or "")):
+                out.setdefault(ak, row.to_dict())
     return out
 
 
 def lookup_statsbomb_team(name: str, idx: dict[str, dict[str, Any]] | None = None) -> dict[str, Any] | None:
-    k = _norm(name)
-    if not k:
+    keys = _alias_keys(name)
+    if not keys:
         return None
     idx = idx or load_statsbomb_team_index()
-    if k in idx:
-        return idx[k]
-    hit = difflib.get_close_matches(k, list(idx.keys()), n=1, cutoff=0.88)
-    if hit:
-        row = idx[hit[0]]
-        if row and not _reserve_mismatch(name, hit[0]):
-            return row
+    for k in keys:
+        if k in idx:
+            return idx[k]
+    # fuzzy più aggressivo
+    pool = list(idx.keys())
+    for k in keys:
+        hit = difflib.get_close_matches(k, pool, n=1, cutoff=0.82)
+        if hit:
+            row = idx[hit[0]]
+            if row and not _reserve_mismatch(name, str(row.get("team") or hit[0])):
+                return row
     return None

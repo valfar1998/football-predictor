@@ -72,7 +72,7 @@ Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-22** (dopo backfill synthe
 ## Chiusi di recente (non ripetere)
 
 - Progresso `calendario N/M` durante **Aggiorna dati + modello** (95→99%, non più barra ferma).
-- **Bottoni quote leggeri:** `refresh_upcoming_odds` (EV/Kelly senza ML/MC); `build_upcoming` riusa predizioni; contesto skip se cache <72h; notify-refresh light.
+- **Bottoni quote leggeri:** `refresh_upcoming_odds` (EV/Kelly senza ML/MC); **Solo quote** = fd + Asian + Pinnacle/Betfair cache, niente mondiale/coppe/tipster/FBref; notify-refresh light.
 - Progresso % + log live sui bottoni lunghi (UI + echo terminale).
 - **Cards/corners fonti gratis:** FD `HY/AY/HC/AC` → `fd_side_rates.csv`; FBref match logs opzionale.
 - **Marcatori:** Understat player xG + FBref; lineup FotMob su top picks.

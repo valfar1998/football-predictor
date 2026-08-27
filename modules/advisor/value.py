@@ -43,7 +43,7 @@ def devig_multiplicative(odds_map: dict[str, float | None]) -> dict[str, float]:
 
 
 def calibrated_prob(prob: float, *, group: str, cal: dict | None = None) -> tuple[float, float, int]:
-    """p × fattore bin, con shrinkage se il campione è piccolo."""
+    """p × fattore bin × online_p_factor (solo 1X2), con shrinkage se il campione è piccolo."""
     cal = cal or load_calibration()
     market = "ou25" if group == "ou" else "1x2"
     factor, n = prob_bin_factor(cal, prob, market=market)
@@ -51,8 +51,12 @@ def calibrated_prob(prob: float, *, group: str, cal: dict | None = None) -> tupl
     full_n = max(min_n * 2, 80)
     weight = min(1.0, n / full_n) if full_n else 0.0
     adj = 1.0 + weight * (float(factor) - 1.0)
-    p_cal = max(0.02, min(0.96, float(prob) * adj))
-    return p_cal, float(factor), int(n)
+    online = 1.0
+    if str(group or "1x2") in {"1x2", "dc"}:
+        online = float(cal.get("online_p_factor") or 1.0)
+        online = min(1.04, max(0.96, online))
+    p_cal = max(0.02, min(0.96, float(prob) * adj * online))
+    return p_cal, float(factor) * online, int(n)
 
 
 def conservative_prob(
@@ -65,9 +69,9 @@ def conservative_prob(
 ) -> float:
     """Banda bassa: sconto per divergenza ML/MC e bin povero."""
     div = 0.0 if ml_prob is None else abs(float(mc_prob) - float(ml_prob))
-    haircut = 0.5 * div
-    if bin_n < min_bin:
-        haircut += 0.02 * (1.0 - bin_n / max(min_bin, 1))
+    haircut = 0.35 * div
+    if 0 < bin_n < min_bin:
+        haircut += 0.015 * (1.0 - bin_n / max(min_bin, 1))
     return max(0.02, min(p_cal, p_cal - haircut))
 
 

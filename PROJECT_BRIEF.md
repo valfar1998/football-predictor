@@ -526,7 +526,7 @@ Senza refresh pre-match con quote, residual/paper Kelly restano poveri (volume �
 Sidebar: fonti contesto + **Geocode**; caption **Modelli cluster** + **O/U/AH**; Telegram/GHA.  
 Bottoni lunghi: barra **% + log live** (`modules/progress_report.py`) e echo su terminale Streamlit.  
 **Quote leggere:** Betfair / Pinnacle / Asian / tipster → `refresh_upcoming_odds` (stesse p ML/MC, ricalcola solo EV/Kelly/voto).  
-**Solo quote / build_upcoming:** riusa predizioni se il modello non è più nuovo; contesto FBref/FotMob/… skip se cache <72h nel refresh leggero (**nota:** `--update` / Aggiorna dati + modello riscarica tutto e riallena → ricalcolo MC pieno lungo).  
+**Solo quote / `--odds-update`:** fixtures fd + Asian + Pinnacle/Betfair (se cache scaduta) + `build_upcoming` con riuso ML/MC. Non scarica mondiale, coppe extra, tipster, FBref/FotMob. Monte Carlo solo sulle partite nuove. Coppe/mondo: bottoni dedicati. (**nota:** `--update` / Aggiorna dati + modello riscarica tutto e riallena → ricalcolo MC pieno lungo).  
 **Modello da cloud:** `python main.py --pull-model` (o bottone UI) scarica l’artefatto Actions (`weekly-model-*` / `best-model-*`, include `features.csv`); poi Solo quote.  
 **Progresso Aggiorna dati + modello:** righe `calendario N/M` mappano 95→99% (`progress_report.py`).  
 **notify-refresh:** path leggero se esiste già il calendario.  
@@ -541,7 +541,7 @@ cd C:\Users\valba\Desktop\corsi\football-predictor
 .\.venv\Scripts\Activate.ps1
 python main.py --train              # 1X2 + cluster + market O/U-AH + conformal
 python main.py --train-markets      # solo O/U 2.5 + AH 0 (veloce)
-python main.py --odds-update        # quote + calendario (riuso predizioni se possibile)
+python main.py --odds-update        # Solo quote: fd + quote + calendario (riuso ML/MC)
 python main.py --asian-odds         # Asian + tipster + refresh value leggero
 python main.py --backfill-history   # synthetic settled da matches.csv (gate 80)
 python main.py --backfill-history --backfill-max 150

@@ -7,15 +7,33 @@ import pandas as pd
 from sklearn.metrics import log_loss
 
 
+def simplex_proba(proba: np.ndarray, n_classes: int = 3) -> np.ndarray:
+    """Clip + rinormalizza così ogni riga somma a 1 (niente warning sklearn)."""
+    p = np.clip(np.asarray(proba, dtype=float), 0.0, None)
+    if p.ndim == 1:
+        s = float(p.sum())
+        return p / s if s > 0 else p
+    if p.shape[1] < n_classes:
+        z = np.zeros((p.shape[0], n_classes), dtype=float)
+        z[:, : p.shape[1]] = p
+        p = z
+    elif p.shape[1] > n_classes:
+        p = p[:, :n_classes]
+    s = p.sum(axis=1, keepdims=True)
+    s = np.where(s <= 0, 1.0, s)
+    return p / s
+
+
 def brier_multiclass(y_true: np.ndarray, proba: np.ndarray, n_classes: int = 3) -> float:
     y = np.asarray(y_true, dtype=int)
-    p = np.clip(np.asarray(proba, dtype=float), 1e-12, 1.0)
+    p = simplex_proba(proba, n_classes)
     onehot = np.eye(n_classes)[y]
     return float(np.mean(np.sum((p - onehot) ** 2, axis=1)))
 
 
 def multiclass_log_loss(y_true: np.ndarray, proba: np.ndarray, n_classes: int = 3) -> float:
-    return float(log_loss(y_true, proba, labels=list(range(n_classes))))
+    p = simplex_proba(proba, n_classes)
+    return float(log_loss(y_true, p, labels=list(range(n_classes))))
 
 
 def expected_calibration_error(
@@ -24,7 +42,7 @@ def expected_calibration_error(
     n_bins: int = 10,
 ) -> dict[str, float]:
     """ECE sulla classe predetta (confidence vs accuracy) e gap medio dei bin."""
-    p = np.asarray(proba, dtype=float)
+    p = simplex_proba(proba)
     y = np.asarray(y_true, dtype=int)
     conf = p.max(axis=1)
     hit = (p.argmax(axis=1) == y).astype(float)
@@ -59,7 +77,7 @@ def expected_calibration_error(
 
 def probability_metrics(y_true: np.ndarray, proba: np.ndarray) -> dict[str, float]:
     y = np.asarray(y_true, dtype=int)
-    p = np.asarray(proba, dtype=float)
+    p = simplex_proba(proba)
     mask = np.isfinite(p).all(axis=1)
     y, p = y[mask], p[mask]
     if len(y) < 20:

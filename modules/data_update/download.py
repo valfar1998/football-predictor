@@ -33,15 +33,16 @@ def _write(path: Path, data: bytes) -> Path:
 def download_season_zip(season: str) -> Path | None:
     url = f"{BASE}/mmz4281/{season}/data.zip"
     dest_dir = FD_MAIN / season
+    print(f"download stagione {season}…", flush=True)
     try:
         data = _get(url)
     except Exception as exc:
-        print(f"skip stagione {season}: {exc}")
+        print(f"skip stagione {season}: {exc}", flush=True)
         return None
     dest_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         zf.extractall(dest_dir)
-    print(f"ok {season} ({len(list(dest_dir.glob('*.csv')))} csv)")
+    print(f"ok {season} ({len(list(dest_dir.glob('*.csv')))} csv)", flush=True)
     return dest_dir
 
 
@@ -52,10 +53,10 @@ def download_extra_leagues() -> list[Path]:
         try:
             data = _get(url)
         except Exception as exc:
-            print(f"skip extra {code}: {exc}")
+            print(f"skip extra {code}: {exc}", flush=True)
             continue
         saved.append(_write(FD_EXTRA / f"{code}.csv", data))
-        print(f"ok extra {code}")
+        print(f"ok extra {code}", flush=True)
     return saved
 
 
@@ -65,14 +66,18 @@ def download_fixtures() -> list[Path]:
         ("main.csv", f"{BASE}/fixtures.csv"),
         ("extra.csv", f"{BASE}/new_league_fixtures.csv"),
     ):
+        print(f"download fixtures {name}…", flush=True)
         data = _get(url)
         files.append(_write(FIXTURES / name, data))
-        print(f"ok fixtures {name}")
+        print(f"ok fixtures {name}", flush=True)
     return files
 
 
 def download_all(*, seasons: tuple[str, ...] = SEASON_ZIPS) -> dict:
     """Scarica stagioni europee, campionati extra e calendario con quote."""
+    from modules.data_update.cache_policy import CONTEXT_CACHE_H, cache_fresh
+
+    proc = ROOT / "data" / "processed"
     seasons_ok = [s for s in seasons if download_season_zip(s)]
     extra = download_extra_leagues()
     fixtures = download_fixtures()
@@ -105,37 +110,57 @@ def download_all(*, seasons: tuple[str, ...] = SEASON_ZIPS) -> dict:
         apif = {"n_cup_files": 0, "error": str(exc)}
         print(f"skip coppe API-Football: {exc}")
     try:
-        from modules.data_update.fbref_context import download_fbref_context
+        if cache_fresh(proc / "fbref_team_context.csv", hours=CONTEXT_CACHE_H):
+            fbref = {"ok": True, "n_teams": 0, "skipped_fresh": True}
+            print("FBref context: cache fresca (<72h), skip download", flush=True)
+        else:
+            from modules.data_update.fbref_context import download_fbref_context
 
-        fbref = download_fbref_context()
+            fbref = download_fbref_context()
     except Exception as exc:
         fbref = {"ok": False, "n_teams": 0, "error": str(exc)}
         print(f"skip FBref context: {exc}")
     try:
-        from modules.data_update.understat_context import download_understat_context
+        if cache_fresh(proc / "understat_team_context.csv", hours=CONTEXT_CACHE_H):
+            understat = {"ok": True, "n_teams": 0, "skipped_fresh": True}
+            print("Understat context: cache fresca (<72h), skip download", flush=True)
+        else:
+            from modules.data_update.understat_context import download_understat_context
 
-        understat = download_understat_context()
+            understat = download_understat_context()
     except Exception as exc:
         understat = {"ok": False, "n_teams": 0, "error": str(exc)}
         print(f"skip Understat context: {exc}")
     try:
-        from modules.data_update.statsbomb_context import download_statsbomb_context
+        if cache_fresh(proc / "statsbomb_team_context.csv", hours=CONTEXT_CACHE_H):
+            statsbomb = {"ok": True, "n_teams": 0, "skipped_fresh": True}
+            print("StatsBomb context: cache fresca (<72h), skip download", flush=True)
+        else:
+            from modules.data_update.statsbomb_context import download_statsbomb_context
 
-        statsbomb = download_statsbomb_context()
+            statsbomb = download_statsbomb_context(min_season=2015, seasons_per_comp=3)
     except Exception as exc:
         statsbomb = {"ok": False, "n_teams": 0, "error": str(exc)}
         print(f"skip StatsBomb context: {exc}")
     try:
-        from modules.data_update.sofascore_context import download_sofascore_context
+        if cache_fresh(proc / "sofascore_team_context.csv", hours=CONTEXT_CACHE_H):
+            sofascore = {"ok": True, "n_teams": 0, "skipped_fresh": True}
+            print("Sofascore context: cache fresca (<72h), skip download", flush=True)
+        else:
+            from modules.data_update.sofascore_context import download_sofascore_context
 
-        sofascore = download_sofascore_context()
+            sofascore = download_sofascore_context()
     except Exception as exc:
         sofascore = {"ok": False, "n_teams": 0, "error": str(exc)}
         print(f"skip Sofascore context: {exc}")
     try:
-        from modules.data_update.fotmob_context import download_fotmob_context
+        if cache_fresh(proc / "fotmob_matches.json", hours=CONTEXT_CACHE_H):
+            fotmob = {"ok": True, "n_teams": 0, "n_matches": 0, "skipped_fresh": True}
+            print("FotMob context: cache fresca (<72h), skip download", flush=True)
+        else:
+            from modules.data_update.fotmob_context import download_fotmob_context
 
-        fotmob = download_fotmob_context(days=7)
+            fotmob = download_fotmob_context(days=7)
     except Exception as exc:
         fotmob = {"ok": False, "n_teams": 0, "n_matches": 0, "error": str(exc)}
         print(f"skip FotMob context: {exc}")

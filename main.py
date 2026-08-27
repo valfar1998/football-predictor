@@ -52,7 +52,28 @@ def update_pipeline(*, retrain: bool = True) -> dict:
     }
 
 
+def pull_cloud_model_pipeline(*, rebuild_calendar: bool = False, on_progress=None) -> dict:
+    import importlib.util
+
+    path = ROOT / "scripts" / "pull_cloud_model.py"
+    spec = importlib.util.spec_from_file_location("pull_cloud_model", path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"impossibile caricare {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.pull_cloud_model(
+        rebuild_calendar=rebuild_calendar,
+        on_progress=on_progress,
+    )
+
+
 def refresh_odds_pipeline(*, asian: bool = True, on_progress=None) -> dict:
+    """Refresh quotidiano: fixtures fd, quote, calendario con riuso ML/MC.
+
+    Non scarica mondiale, coppe extra, tipster, ClubElo, FBref/FotMob/…
+    (bottoni dedicati). Monte Carlo solo sulle partite nuove.
+    Lo zip stagione corrente resta: un file, serve a settle_pending.
+    """
     from modules.progress_report import emit
 
     def p(frac: float, msg: str) -> None:
@@ -69,7 +90,7 @@ def refresh_odds_pipeline(*, asian: bool = True, on_progress=None) -> dict:
         download_fixtures()
     except Exception as exc:
         print(f"skip fixtures: {exc}", flush=True)
-    p(0.08, "Stagione corrente (zip)…")
+    p(0.08, "Risultati stagione (settle)…")
     try:
         download_season_zip(SEASON_ZIPS[-1])
     except Exception as exc:
@@ -77,29 +98,33 @@ def refresh_odds_pipeline(*, asian: bool = True, on_progress=None) -> dict:
     asian_info: dict = {}
     if asian:
         p(0.12, "Quote AsianBetSoccer (14 giorni)…")
-        rows = fetch_asian_odds(days=14, book="bet365", on_progress=span(0.12, 0.34))
+        rows = fetch_asian_odds(days=14, book="bet365", on_progress=span(0.12, 0.55))
         path = save_asian_odds(rows)
         asian_info = {"n_asian": len(rows), "asian_cache": str(path)}
     # Pinnacle da The Odds API (1 chiamata/giorno, cache 20h)
     try:
         from modules.data_update.odds_api import fetch_pinnacle_odds
-        p(0.36, "Quote Pinnacle…")
+        p(0.58, "Quote Pinnacle (cache 20h)…")
         pinn = fetch_pinnacle_odds()
         asian_info["pinnacle_events"] = pinn.get("n_events", 0)
         asian_info["pinnacle_remaining"] = pinn.get("remaining")
         asian_info["pinnacle_from_cache"] = pinn.get("from_cache", False)
         if not pinn.get("ok") and pinn.get("error"):
             asian_info["pinnacle_error"] = pinn["error"]
+        if pinn.get("from_cache"):
+            print("Pinnacle: cache fresca, skip fetch", flush=True)
     except Exception as exc:
         asian_info["pinnacle_error"] = str(exc)
         print(f"skip Pinnacle odds: {exc}", flush=True)
     try:
         from modules.data_update.betfair import fetch_betfair_odds
-        p(0.40, "Quote Betfair…")
+        p(0.62, "Quote Betfair (cache 6h)…")
         bf = fetch_betfair_odds()
         asian_info["betfair_events"] = bf.get("n_events", 0)
         asian_info["betfair_from_cache"] = bf.get("from_cache", False)
         asian_info["betfair_ok"] = bool(bf.get("ok"))
+        if bf.get("from_cache"):
+            print("Betfair: cache fresca, skip fetch", flush=True)
         if not bf.get("ok") and bf.get("error"):
             asian_info["betfair_error"] = bf["error"]
             asian_info["betfair_soft_fail"] = True
@@ -109,149 +134,15 @@ def refresh_odds_pipeline(*, asian: bool = True, on_progress=None) -> dict:
         asian_info["betfair_soft_fail"] = True
         asian_info["betfair_ok"] = False
         print(f"Betfair soft-fail (pipeline continua): {exc}", flush=True)
-    try:
-        from modules.data_update.clubelo import fetch_clubelo
-
-        p(0.44, "ClubElo…")
-        elo = fetch_clubelo()
-        asian_info["n_clubelo"] = 0 if elo is None or elo.empty else int(len(elo))
-    except Exception as exc:
-        asian_info["clubelo_error"] = str(exc)
-    try:
-        from modules.data_update.cups import download_org_cups
-
-        p(0.48, "Coppe football-data.org…")
-        cups_info = download_org_cups(days=14)
-    except Exception as exc:
-        cups_info = {"n_cup_files": 0, "error": str(exc)}
-        print(f"skip coppe org: {exc}", flush=True)
-    try:
-        from modules.data_update.world_fixtures import download_world_fixtures
-
-        p(0.52, "Calendario mondiale…")
-        world_info = download_world_fixtures(days=14)
-    except Exception as exc:
-        world_info = {"n_world_fixtures": 0, "error": str(exc)}
-        print(f"skip calendario mondiale: {exc}", flush=True)
-    try:
-        from modules.data_update.thesportsdb import download_cup_fixtures
-
-        p(0.56, "Coppe TheSportsDB…")
-        tsdb_info = download_cup_fixtures()
-    except Exception as exc:
-        tsdb_info = {"n_cup_files": 0, "error": str(exc)}
-        print(f"skip coppe TheSportsDB: {exc}", flush=True)
-    try:
-        from modules.data_update.api_football import download_cup_fixtures as download_api_football_cups
-
-        p(0.60, "Coppe API-Football…")
-        apif_info = download_api_football_cups(days=14)
-    except Exception as exc:
-        apif_info = {"n_cup_files": 0, "error": str(exc)}
-        print(f"skip coppe API-Football: {exc}", flush=True)
-
-    def _fresh(path: Path, hours: float = 72.0) -> bool:
-        try:
-            if not path.is_file():
-                return False
-            import time as _t
-
-            return (_t.time() - path.stat().st_mtime) < hours * 3600
-        except OSError:
-            return False
-
-    proc = ROOT / "data" / "processed"
-    fbref_info: dict = {"skipped_fresh": True} if _fresh(proc / "fbref_team_context.csv") else {}
-    if not fbref_info:
-        try:
-            from modules.data_update.fbref_context import download_fbref_context
-
-            p(0.64, "Contesto FBref (se cache >72h)…")
-            fbref_info = download_fbref_context()
-        except Exception as exc:
-            fbref_info = {"ok": False, "n_teams": 0, "error": str(exc)}
-            print(f"skip FBref context: {exc}", flush=True)
-    else:
-        p(0.64, "FBref: cache fresca, skip")
-        print("FBref context: cache fresca (<72h), skip download", flush=True)
-    understat_info: dict = {"skipped_fresh": True} if _fresh(proc / "understat_team_context.csv") else {}
-    if not understat_info:
-        try:
-            from modules.data_update.understat_context import download_understat_context
-
-            p(0.70, "Understat…")
-            understat_info = download_understat_context()
-        except Exception as exc:
-            understat_info = {"ok": False, "n_teams": 0, "error": str(exc)}
-            print(f"skip Understat context: {exc}", flush=True)
-    else:
-        p(0.70, "Understat: cache fresca, skip")
-        print("Understat context: cache fresca (<72h), skip download", flush=True)
-    fd_rates_info: dict = {"skipped_fresh": True} if _fresh(proc / "fd_side_rates.csv") else {}
-    if not fd_rates_info:
-        try:
-            from modules.data_update.side_rates import build_fd_side_rates
-
-            p(0.74, "FD cards/corners…")
-            fd_rates_info = build_fd_side_rates()
-        except Exception as exc:
-            fd_rates_info = {"ok": False, "n_teams": 0, "error": str(exc)}
-            print(f"skip FD cards/corners rates: {exc}", flush=True)
-    else:
-        p(0.74, "FD rates: cache fresca, skip")
-        print("FD side rates: cache fresca (<72h), skip", flush=True)
-    try:
-        from modules.data_update.statsbomb_context import download_statsbomb_context
-
-        p(0.78, "StatsBomb…")
-        statsbomb_info = (
-            {"skipped_fresh": True}
-            if _fresh(proc / "statsbomb_team_context.csv")
-            else download_statsbomb_context()
-        )
-        if statsbomb_info.get("skipped_fresh"):
-            print("StatsBomb context: cache fresca (<72h), skip download", flush=True)
-    except Exception as exc:
-        statsbomb_info = {"ok": False, "n_teams": 0, "error": str(exc)}
-        print(f"skip StatsBomb context: {exc}", flush=True)
-    fotmob_info: dict = {"skipped_fresh": True} if _fresh(proc / "fotmob_matches.json") else {}
-    if not fotmob_info:
-        try:
-            from modules.data_update.fotmob_context import download_fotmob_context
-
-            p(0.82, "FotMob…")
-            fotmob_info = download_fotmob_context(days=7)
-        except Exception as exc:
-            fotmob_info = {"ok": False, "n_teams": 0, "n_matches": 0, "error": str(exc)}
-            print(f"skip FotMob context: {exc}", flush=True)
-    else:
-        p(0.82, "FotMob: cache fresca, skip")
-        print("FotMob context: cache fresca (<72h), skip download", flush=True)
-    tips_info: dict = {}
-    try:
-        p(0.86, "Tipster…")
-        tips = fetch_tipsters()
-        tips_info = {"n_tipsters": tips.get("n"), "tipster_counts": tips.get("counts"), "tipster_errors": tips.get("errors")}
-    except Exception as exc:
-        tips_info = {"tipster_error": str(exc)}
-    p(0.90, "Ricostruisco il calendario (riuso predizioni)…")
-    upcoming = build_upcoming(reuse_predictions=True)
+    p(0.66, "Ricostruisco il calendario (riuso predizioni)…")
+    upcoming = build_upcoming(reuse_predictions=True, on_progress=span(0.66, 0.99))
     p(1.0, f"OK · {len(upcoming)} partite")
     return {
         "n_upcoming": len(upcoming),
-        "source": "football-data.co.uk + football-data.org + thesportsdb + world + asianbetsoccer",
+        "source": "football-data.co.uk + asianbetsoccer + pinnacle/betfair cache",
         "reuse_predictions": True,
+        "light": True,
         **asian_info,
-        **tips_info,
-        **{f"cups_{k}": v for k, v in cups_info.items()},
-        **{f"tsdb_{k}": v for k, v in tsdb_info.items()},
-        **{f"apif_{k}": v for k, v in apif_info.items()},
-        **{f"world_{k}": v for k, v in world_info.items()},
-        **{f"fbref_{k}": v for k, v in fbref_info.items()},
-        **{f"understat_{k}": v for k, v in understat_info.items()},
-        **{f"fd_rates_{k}": v for k, v in fd_rates_info.items()},
-        **{f"statsbomb_{k}": v for k, v in statsbomb_info.items()},
-        **{f"fotmob_{k}": v for k, v in fotmob_info.items()},
     }
 
 
@@ -576,7 +467,7 @@ def main() -> None:
         help="allena solo i classificatori O/U 2.5 e AH 0 (veloce)",
     )
     parser.add_argument("--update", action="store_true", help="scarica dati mondiali + quote, allena, calendario")
-    parser.add_argument("--odds-update", action="store_true", help="aggiorna fixtures/quote (incluso AsianBetSoccer) e pronostici")
+    parser.add_argument("--odds-update", action="store_true", help="refresh leggero: fixtures fd + quote + calendario (riuso ML/MC)")
     parser.add_argument(
         "--backfill-history",
         action="store_true",
@@ -665,15 +556,7 @@ def main() -> None:
         return
 
     if args.pull_model:
-        import importlib.util
-
-        path = ROOT / "scripts" / "pull_cloud_model.py"
-        spec = importlib.util.spec_from_file_location("pull_cloud_model", path)
-        if spec is None or spec.loader is None:
-            raise SystemExit(f"impossibile caricare {path}")
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        info = mod.pull_cloud_model(rebuild_calendar=bool(args.rebuild_calendar))
+        info = pull_cloud_model_pipeline(rebuild_calendar=bool(args.rebuild_calendar))
         print(json.dumps(info, indent=2, default=str))
         return
 
