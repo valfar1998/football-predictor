@@ -82,7 +82,13 @@ def _full_build(*, n_sims: int = 400) -> dict:
             print(f"skip coppe: {cups['error']}", flush=True)
     except Exception as exc:
         print(f"skip coppe: {exc}", flush=True)
-    rows = build_upcoming(n_sims=n_sims, reuse_predictions=False)
+    # Compat: su main remoto build_upcoming può non avere ancora reuse_predictions.
+    import inspect
+
+    kwargs: dict = {"n_sims": n_sims}
+    if "reuse_predictions" in inspect.signature(build_upcoming).parameters:
+        kwargs["reuse_predictions"] = False
+    rows = build_upcoming(**kwargs)
     return {"mode": "full", "n_upcoming": len(rows), "ok": True}
 
 
