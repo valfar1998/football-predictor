@@ -264,7 +264,7 @@ def _send_telegram_weekly(digest: str) -> bool:
         print("skip telegram digest: manca TELEGRAM_BOT_TOKEN/CHAT_ID", flush=True)
         return False
     # Telegram max ~4096; tieni il riassunto corto
-    body = "Football Predictor — digest apprendimento (ogni ~7 giorni)\n\n" + digest
+    body = f"{BRAND} — digest apprendimento\n\n" + digest
     if len(body) > 3500:
         body = body[:3490] + "\n…"
     data = urllib.parse.urlencode(

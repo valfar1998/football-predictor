@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from modules.data_update.asian_odds import load_asian_odds, spread_playability
 from modules.notify.telegram import load_credentials, send_message, telegram_status
@@ -16,10 +17,18 @@ MIN_UNIFIED = 9
 RARE_LINE = 1.0
 KEEP_DAYS = 21
 CHUNK = 10
+BRAND = "FOOTBALL PREDICTOR"
+TZ = ZoneInfo("Europe/Rome")
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _brand_header(*, continued: bool = False) -> str:
+    when = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
+    suffix = " (cont.)" if continued else ""
+    return f"{BRAND} — alert scommesse{suffix}\n{when} Roma"
 
 
 def _load_sent() -> dict[str, str]:
@@ -347,7 +356,8 @@ def _pack(title: str, items: list[dict]) -> list[tuple[str, list[str]]]:
             if "giocabilità" not in head.lower():
                 head = f"{head}{extra}"
         body = "\n\n".join(item["text"] for item in chunk)
-        messages.append((f"{head}\n\n{body}", [item["id"] for item in chunk]))
+        brand = _brand_header(continued=i > 0)
+        messages.append((f"{brand}\n\n{head}\n\n{body}", [item["id"] for item in chunk]))
     return messages
 
 
@@ -445,12 +455,12 @@ def resend_spread_match(home: str, away: str) -> dict:
         }
     score = match.get("score")
     verdict = str(match.get("verdict") or "").strip()
-    title = "📈 AsianBetSoccer · spread Raro (giocabilità 1–10)"
+    title = "📈 Spread Raro (giocabilità 1–10)"
     if score is not None:
-        title = f"📈 AsianBetSoccer · spread Raro · giocabilità {int(score)}/10"
+        title = f"📈 Spread Raro · giocabilità {int(score)}/10"
         if verdict:
             title += f" · {verdict}"
-    text = f"{title}\n\n{match['text']}"
+    text = f"{_brand_header()}\n\n{title}\n\n{match['text']}"
     if not load_credentials():
         print("telegram skip: credenziali assenti")
         return {"ok": False, "error": "credenziali assenti", "text": text}
@@ -465,8 +475,10 @@ def resend_spread_match(home: str, away: str) -> dict:
 
 
 def ping_bot() -> bool:
+    when = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
     return send_message(
-        "Football Predictor collegato allo stesso bot delle offerte.\n"
+        f"🧪 PROVA — {BRAND}\n{when} Roma\n\n"
+        "Bot collegato.\n"
         f"Avvisi: 🎯 GIOCA (voto ≥{MIN_UNIFIED} + action gioca), "
         f"👀 da guardare (voto ≥{MIN_UNIFIED} + no bet), "
         "spread Raro con giocabilità 1–10."
