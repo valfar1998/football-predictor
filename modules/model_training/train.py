@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, log_loss, roc_auc_score
 from sklearn.model_selection import train_test_split
@@ -21,6 +23,98 @@ ROOT = Path(__file__).resolve().parents[2]
 MODELS = ROOT / "data" / "models"
 OOF_PATH = MODELS / "oof_predictions.joblib"
 LABELS = ["H", "D", "A"]
+
+
+def _parallel_jobs(n_tasks: int, *, cap: int = 4) -> int:
+    cpus = os.cpu_count() or 4
+    return max(1, min(n_tasks, cap, cpus // 2 or 1))
+
+
+def _fit_rolling_fold(
+    k: int,
+    train_end: int,
+    test_start: int,
+    test_end: int,
+    x_all: np.ndarray,
+    y_all: np.ndarray,
+    *,
+    random_state: int,
+) -> tuple[int, int, int, np.ndarray, dict]:
+    from modules.calibration.metrics import probability_metrics, simplex_proba
+
+    model = XGBClassifier(
+        n_estimators=220,
+        max_depth=5,
+        learning_rate=0.06,
+        subsample=0.85,
+        colsample_bytree=0.85,
+        objective="multi:softprob",
+        eval_metric="mlogloss",
+        random_state=random_state,
+        n_jobs=max(1, (os.cpu_count() or 4) // 4),
+    )
+    model.fit(x_all[:train_end], y_all[:train_end])
+    p = model.predict_proba(x_all[test_start:test_end])
+    ordered = np.zeros((len(p), 3), dtype=float)
+    for src, lab in enumerate(model.classes_):
+        ordered[:, int(lab)] = p[:, src]
+    ordered = simplex_proba(ordered, 3)
+    y_test = y_all[test_start:test_end]
+    metrics = probability_metrics(y_test, ordered)
+    metrics["fold"] = k
+    return k, test_start, test_end, ordered, metrics
+
+
+def _cluster_metrics(y_true: np.ndarray, proba: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
+    from modules.calibration.metrics import brier_multiclass, expected_calibration_error, simplex_proba
+
+    p = simplex_proba(proba, 3)
+    cal = expected_calibration_error(p, y_true)
+    return {
+        "accuracy": float(accuracy_score(y_true, y_pred)),
+        "log_loss": float(log_loss(y_true, p, labels=[0, 1, 2])),
+        "auc_ovr": float(roc_auc_score(y_true, p, multi_class="ovr")),
+        "brier": brier_multiclass(y_true, p),
+        "ece": cal["ece"],
+        "calibration_gap": cal["calibration_gap"],
+    }
+
+
+def _fit_cluster_model(
+    cid: str,
+    x_train: np.ndarray,
+    x_test: np.ndarray,
+    y_train: np.ndarray,
+    y_test: np.ndarray,
+    *,
+    random_state: int,
+    n_train: int,
+    n_test: int,
+) -> tuple[str, Any, dict]:
+    model = XGBClassifier(
+        n_estimators=280,
+        max_depth=5,
+        learning_rate=0.06,
+        subsample=0.85,
+        colsample_bytree=0.85,
+        objective="multi:softprob",
+        eval_metric="mlogloss",
+        random_state=random_state,
+        n_jobs=max(1, (os.cpu_count() or 4) // 4),
+    )
+    model.fit(x_train, y_train)
+    proba = model.predict_proba(x_test)
+    ordered = np.zeros_like(proba)
+    for src, lab in enumerate(model.classes_):
+        ordered[:, int(lab)] = proba[:, src]
+    from modules.calibration.metrics import simplex_proba
+
+    ordered = simplex_proba(ordered, 3)
+    pred = ordered.argmax(axis=1)
+    metrics = _cluster_metrics(y_test, ordered, pred)
+    metrics["n_train"] = int(n_train)
+    metrics["n_test"] = int(n_test)
+    return cid, model, metrics
 
 
 def load_oof() -> dict | None:
@@ -113,24 +207,25 @@ class ModelTrainer:
         fold_id = np.full(n, -1, dtype=int)
         folds_report: list[dict] = []
         folds = self.rolling_folds(n, n_folds=n_folds)
-        for k, (train_end, test_start, test_end) in enumerate(folds):
-            train_df = feat.iloc[:train_end]
-            test_df = feat.iloc[test_start:test_end]
-            y_train = encoder.transform(train_df["result"])
-            y_test = encoder.transform(test_df["result"])
-            model = self._xgb(n_estimators=220)
-            model.fit(train_df[x_cols], y_train)
-            p = model.predict_proba(test_df[x_cols])
-            # allinea colonne all'ordine H,D,A
-            cls = list(model.classes_)
-            ordered = np.zeros((len(p), 3), dtype=float)
-            for src, lab in enumerate(cls):
-                ordered[:, int(lab)] = p[:, src]
-            ordered = simplex_proba(ordered, 3)
+        x_all = feat[x_cols].to_numpy(dtype=float)
+        n_jobs = _parallel_jobs(len(folds))
+        fold_results = Parallel(n_jobs=n_jobs, prefer="processes")(
+            delayed(_fit_rolling_fold)(
+                k,
+                train_end,
+                test_start,
+                test_end,
+                x_all,
+                y_all,
+                random_state=self.random_state,
+            )
+            for k, (train_end, test_start, test_end) in enumerate(folds)
+        )
+        for k, test_start, test_end, ordered, metrics in sorted(fold_results, key=lambda r: r[0]):
             proba[test_start:test_end] = ordered
             fold_id[test_start:test_end] = k
-            metrics = probability_metrics(y_test, ordered)
-            metrics["fold"] = k
+            train_df = feat.iloc[:test_start]
+            test_df = feat.iloc[test_start:test_end]
             metrics["train_end"] = str(pd.to_datetime(train_df["date"].max()).date())
             metrics["test_start"] = str(pd.to_datetime(test_df["date"].min()).date())
             metrics["test_end"] = str(pd.to_datetime(test_df["date"].max()).date())
@@ -267,10 +362,11 @@ class ModelTrainer:
                 best_name = name
                 best_model = model
 
-        # Modelli per cluster (solo XGB, se abbastanza righe)
+        # Modelli per cluster (solo XGB, se abbastanza righe) — in parallelo
         feat_sorted = self._with_feature_cols(feat).sort_values("date").reset_index(drop=True)
         cluster_models: dict[str, Any] = {}
         cluster_metrics: dict[str, Any] = {}
+        cluster_jobs: list[tuple] = []
         if "league" in feat_sorted.columns:
             feat_sorted["_cluster"] = feat_sorted["league"].map(lambda lg: cluster_for(str(lg)))
             for cid, sub in feat_sorted.groupby("_cluster"):
@@ -280,24 +376,29 @@ class ModelTrainer:
                 if cut < 200 or len(sub) - cut < 40:
                     continue
                 tr, te = sub.iloc[:cut], sub.iloc[cut:]
-                ytr = encoder.transform(tr["result"])
-                yte = encoder.transform(te["result"])
-                m = self._xgb(n_estimators=280)
-                m.fit(tr[x_cols], ytr)
-                proba = m.predict_proba(te[x_cols])
-                # reorder to encoder classes
-                cls = list(m.classes_)
-                ordered = np.zeros_like(proba)
-                for src, lab in enumerate(cls):
-                    ordered[:, int(lab)] = proba[:, src]
-                pred = ordered.argmax(axis=1)
-                cluster_models[str(cid)] = m
-                cluster_metrics[str(cid)] = {
-                    **self._metrics(yte, ordered, pred),
-                    "n_train": int(len(tr)),
-                    "n_test": int(len(te)),
-                }
-                print(f"cluster model {cid}: n={len(sub)} log_loss={cluster_metrics[cid]['log_loss']:.4f}")
+                cluster_jobs.append(
+                    (
+                        str(cid),
+                        tr[x_cols].to_numpy(dtype=float),
+                        te[x_cols].to_numpy(dtype=float),
+                        encoder.transform(tr["result"]),
+                        encoder.transform(te["result"]),
+                        int(len(tr)),
+                        int(len(te)),
+                    )
+                )
+        if cluster_jobs:
+            n_jobs = _parallel_jobs(len(cluster_jobs))
+            cluster_results = Parallel(n_jobs=n_jobs, prefer="processes")(
+                delayed(_fit_cluster_model)(
+                    cid, xtr, xte, ytr, yte, random_state=self.random_state, n_train=n_tr, n_test=n_te
+                )
+                for cid, xtr, xte, ytr, yte, n_tr, n_te in cluster_jobs
+            )
+            for cid, model, metrics in cluster_results:
+                cluster_models[cid] = model
+                cluster_metrics[cid] = metrics
+                print(f"cluster model {cid}: n_train={metrics.get('n_train')} log_loss={metrics['log_loss']:.4f}")
 
         bundle = {
             "model": best_model,

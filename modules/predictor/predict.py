@@ -80,6 +80,18 @@ class MatchPredictor:
         self.features = pd.read_csv(self.features_path, parse_dates=["date"])
         self._index_last_seen()
         try:
+            from modules.calibration.config import load_calibration
+
+            self._cal = load_calibration()
+        except Exception:
+            self._cal = {}
+        try:
+            from modules.data_update.team_names import known_team_index
+
+            self._team_index = known_team_index(self.last_idx.keys())
+        except Exception:
+            self._team_index = {}
+        try:
             from modules.model_training.market_models import load_market_models
 
             self.market_bundle = load_market_models()
@@ -94,10 +106,9 @@ class MatchPredictor:
 
     def _temperature_for(self, league: str | None) -> float:
         try:
-            from modules.calibration.config import load_calibration
             from modules.model_training.league_clusters import cluster_for
 
-            cal = load_calibration()
+            cal = self._cal or {}
             by_lg = cal.get("temperature_by_league") or {}
             if league and str(league) in by_lg:
                 return float(by_lg[str(league)])
@@ -126,12 +137,17 @@ class MatchPredictor:
         away = df[["index", "date", "away_team"]].rename(columns={"away_team": "team"})
         last = pd.concat([home, away], ignore_index=True).sort_values("date").groupby("team").tail(1)
         self.last_idx = dict(zip(last["team"], last["index"]))
+        dates = pd.to_datetime(self.features["date"], errors="coerce")
+        self._team_dates: dict[str, np.ndarray] = {}
+        for team in set(self.features["home_team"]) | set(self.features["away_team"]):
+            mask = (self.features["home_team"] == team) | (self.features["away_team"] == team)
+            self._team_dates[str(team)] = dates[mask].to_numpy(dtype="datetime64[ns]")
 
     def _latest_row(self, home: str, away: str, kickoff=None) -> pd.Series:
         """Usa l'ultima riga in cui ciascuna squadra compare, poi ricompone un vettore pre-match."""
-        from modules.data_update.team_names import known_team_index, resolve_known_team
+        from modules.data_update.team_names import resolve_known_team
 
-        idx = known_team_index(self.last_idx.keys())
+        idx = self._team_index
         home = resolve_known_team(home, idx) or _norm(home)
         away = resolve_known_team(away, idx) or _norm(away)
         if home not in self.last_idx or away not in self.last_idx:
@@ -215,9 +231,12 @@ class MatchPredictor:
         return pd.Series(payload)
 
     def _matches_7d(self, team: str, kickoff: pd.Timestamp) -> int:
-        mask = (self.features["home_team"] == team) | (self.features["away_team"] == team)
-        dates = pd.to_datetime(self.features.loc[mask, "date"], errors="coerce")
-        return int(((dates >= kickoff - pd.Timedelta(days=7)) & (dates < kickoff)).sum())
+        dates = getattr(self, "_team_dates", {}).get(team)
+        if dates is None or len(dates) == 0:
+            return 0
+        lo = np.datetime64(kickoff - pd.Timedelta(days=7), "ns")
+        hi = np.datetime64(kickoff, "ns")
+        return int(((dates >= lo) & (dates < hi)).sum())
 
     def predict(
         self,
@@ -231,13 +250,12 @@ class MatchPredictor:
         ext_xg_away: tuple[float, float] | None = None,
         weather: dict | None = None,
     ) -> dict:
-        from modules.data_update.team_names import known_team_index, resolve_known_team
+        from modules.data_update.team_names import resolve_known_team
         from modules.predictor.poisson import blend_1x2, dixon_coles_1x2
         from modules.predictor.lambda_utils import lambdas_from_features
 
-        idx = known_team_index(self.last_idx.keys())
-        home_team = resolve_known_team(home_team, idx) or _norm(home_team)
-        away_team = resolve_known_team(away_team, idx) or _norm(away_team)
+        home_team = resolve_known_team(home_team, self._team_index) or _norm(home_team)
+        away_team = resolve_known_team(away_team, self._team_index) or _norm(away_team)
         row = self._latest_row(home_team, away_team, kickoff=kickoff)
         if odds:
             p1, px, p2, ov, has = FeatureEngineer.implied_1x2(odds)

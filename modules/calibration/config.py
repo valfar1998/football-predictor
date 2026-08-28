@@ -34,18 +34,28 @@ DEFAULTS = {
 }
 
 
-def load_calibration() -> dict:
+_cal_cache: tuple[float, dict] | None = None
+
+
+def load_calibration(*, force: bool = False) -> dict:
+    global _cal_cache
     if not CAL_PATH.exists():
         return dict(DEFAULTS)
+    mtime = CAL_PATH.stat().st_mtime
+    if not force and _cal_cache is not None and _cal_cache[0] == mtime:
+        return dict(_cal_cache[1])
     data = json.loads(CAL_PATH.read_text(encoding="utf-8"))
     out = dict(DEFAULTS)
     out.update(data)
+    _cal_cache = (mtime, out)
     return out
 
 
 def save_calibration(data: dict) -> Path:
+    global _cal_cache
     CAL_PATH.parent.mkdir(parents=True, exist_ok=True)
     CAL_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _cal_cache = (CAL_PATH.stat().st_mtime, dict(DEFAULTS, **data))
     return CAL_PATH
 
 

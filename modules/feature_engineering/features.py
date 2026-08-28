@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict, deque
 from pathlib import Path
 
@@ -9,6 +10,8 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 PROCESSED = ROOT / "data" / "processed"
+STATE_PATH = PROCESSED / "feature_state.json"
+FEATURES_PATH = PROCESSED / "features.csv"
 
 
 class FeatureEngineer:
@@ -17,19 +20,110 @@ class FeatureEngineer:
         self.elo_k = elo_k
         self.elo_start = elo_start
 
-    def transform(self, matches: pd.DataFrame) -> pd.DataFrame:
-        """Restituisce un DataFrame con feature calcolate solo su partite precedenti (no leakage)."""
+    def transform(self, matches: pd.DataFrame, *, incremental: bool = True) -> pd.DataFrame:
+        """Restituisce feature pre-match (solo info precedenti alla partita, no leakage)."""
         df = matches.copy()
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date").reset_index(drop=True)
 
+        if incremental:
+            try:
+                inc = self._transform_incremental(df)
+                if inc is not None:
+                    print(f"feature incremental: +{inc.get('added', 0)} righe (tot {inc['n_rows']})")
+                    return inc["feat"]
+            except Exception as exc:
+                print(f"feature incremental skip → full rebuild: {exc}")
+
+        feat = self._transform_full(df)
+        print(f"feature rows raw={len(feat)}")
+        return feat
+
+    def _transform_full(self, df: pd.DataFrame) -> pd.DataFrame:
+        history, elo, last_played, recent = self._empty_runtime()
+        rows = self._process_matches(df, history, elo, last_played, recent, start=0)
+        feat = pd.DataFrame(rows)
+        feat = feat[(feat["n_home_hist"] >= 3) & (feat["n_away_hist"] >= 3)].reset_index(drop=True)
+        self._save_state(df, len(df) - 1, history, elo, last_played, recent)
+        return feat
+
+    def _transform_incremental(self, df: pd.DataFrame) -> dict | None:
+        if not STATE_PATH.is_file() or not FEATURES_PATH.is_file():
+            return None
+        state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        if int(state.get("matches_rows") or 0) != len(df):
+            return None
+        start = int(state.get("last_index", -1)) + 1
+        existing = pd.read_csv(FEATURES_PATH, parse_dates=["date"])
+        if start >= len(df):
+            return {"feat": existing, "added": 0, "n_rows": len(existing)}
+
+        history, elo, last_played, recent = self._restore_runtime(state)
+        new_rows = self._process_matches(df, history, elo, last_played, recent, start=start)
+        if not new_rows:
+            return {"feat": existing, "added": 0, "n_rows": len(existing)}
+
+        added_df = pd.DataFrame(new_rows)
+        feat = pd.concat([existing, added_df], ignore_index=True)
+        feat = feat[(feat["n_home_hist"] >= 3) & (feat["n_away_hist"] >= 3)].reset_index(drop=True)
+        self._save_state(df, len(df) - 1, history, elo, last_played, recent)
+        return {"feat": feat, "added": len(new_rows), "n_rows": len(feat)}
+
+    def _empty_runtime(self) -> tuple:
         history: dict[str, deque] = defaultdict(lambda: deque(maxlen=self.window))
-        elo: dict[str, float] = defaultdict(lambda: self.elo_start)
+        elo: dict[str, float] = defaultdict(lambda: 1500.0)
         last_played: dict[str, pd.Timestamp] = {}
         recent: dict[str, deque] = defaultdict(lambda: deque(maxlen=12))
-        rows = []
+        return history, elo, last_played, recent
 
-        for i, (_, m) in enumerate(df.iterrows(), start=1):
+    def _restore_runtime(self, state: dict) -> tuple:
+        history: dict[str, deque] = defaultdict(lambda: deque(maxlen=self.window))
+        for team, buf in (state.get("history") or {}).items():
+            history[team] = deque(list(buf)[-self.window :], maxlen=self.window)
+        elo = defaultdict(lambda: self.elo_start, {k: float(v) for k, v in (state.get("elo") or {}).items()})
+        last_played = {
+            k: pd.Timestamp(v) for k, v in (state.get("last_played") or {}).items()
+        }
+        recent: dict[str, deque] = defaultdict(lambda: deque(maxlen=12))
+        for team, dates in (state.get("recent") or {}).items():
+            recent[team] = deque([pd.Timestamp(d) for d in dates][-12:], maxlen=12)
+        return history, elo, last_played, recent
+
+    def _save_state(
+        self,
+        df: pd.DataFrame,
+        last_index: int,
+        history: dict[str, deque],
+        elo: dict[str, float],
+        last_played: dict[str, pd.Timestamp],
+        recent: dict[str, deque],
+    ) -> None:
+        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "last_index": int(last_index),
+            "matches_rows": int(len(df)),
+            "last_date": str(pd.Timestamp(df.iloc[last_index]["date"]).date()) if len(df) else None,
+            "elo": {k: round(float(v), 2) for k, v in elo.items()},
+            "history": {k: list(v) for k, v in history.items()},
+            "last_played": {k: str(pd.Timestamp(v).date()) for k, v in last_played.items()},
+            "recent": {k: [str(pd.Timestamp(d).date()) for d in v] for k, v in recent.items()},
+        }
+        STATE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _process_matches(
+        self,
+        df: pd.DataFrame,
+        history: dict[str, deque],
+        elo: dict[str, float],
+        last_played: dict[str, pd.Timestamp],
+        recent: dict[str, deque],
+        *,
+        start: int,
+    ) -> list[dict]:
+        rows: list[dict] = []
+        n = len(df)
+        for i in range(start, n):
+            m = df.iloc[i]
             home, away = m["home_team"], m["away_team"]
             h_stats = self._team_stats(history[home])
             a_stats = self._team_stats(history[away])
@@ -49,31 +143,25 @@ class FeatureEngineer:
                     "home_goals": m["home_goals"],
                     "away_goals": m["away_goals"],
                     "result": m["result"],
-                    # forma recente
                     "home_form_pts": h_stats["pts"],
                     "away_form_pts": a_stats["pts"],
                     "home_form_gd": h_stats["gd"],
                     "away_form_gd": a_stats["gd"],
-                    # xG / xGA
                     "home_xg_avg": h_stats["xg"],
                     "away_xg_avg": a_stats["xg"],
                     "home_xga_avg": h_stats["xga"],
                     "away_xga_avg": a_stats["xga"],
                     "xg_diff": h_stats["xg"] - a_stats["xg"],
                     "xga_diff": h_stats["xga"] - a_stats["xga"],
-                    # gol fatti/subiti
                     "home_gf_avg": h_stats["gf"],
                     "away_gf_avg": a_stats["gf"],
                     "home_ga_avg": h_stats["ga"],
                     "away_ga_avg": a_stats["ga"],
-                    # fattore casa (win rate casa nelle ultime N in casa, fallback 0.45)
                     "home_home_wr": h_stats["home_wr"],
                     "away_away_wr": a_stats["away_wr"],
-                    # qualità rosa (Elo pre-match)
                     "home_elo": elo[home],
                     "away_elo": elo[away],
                     "elo_diff": elo[home] - elo[away],
-                    # temporali
                     "month": int(m["date"].month),
                     "weekday": int(m["date"].weekday()),
                     "home_rest_days": rest_h,
@@ -96,14 +184,10 @@ class FeatureEngineer:
             last_played[away] = m["date"]
             recent[home].append(m["date"])
             recent[away].append(m["date"])
-            if i % 15000 == 0:
-                print(f"feature {i}/{len(df)}")
+            if (i + 1) % 15000 == 0:
+                print(f"feature {i + 1}/{n}")
 
-        feat = pd.DataFrame(rows)
-        print(f"feature rows raw={len(feat)}")
-        # scarta le prime giornate senza storia sufficiente
-        feat = feat[(feat["n_home_hist"] >= 3) & (feat["n_away_hist"] >= 3)].reset_index(drop=True)
-        return feat
+        return rows
 
     def _team_stats(self, buf: deque) -> dict[str, float]:
         if not buf:

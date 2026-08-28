@@ -340,12 +340,13 @@ def save_asian_odds(rows: list[dict]) -> Path:
 
 _CACHE_ROWS: list[dict] | None = None
 _CACHE_MTIME: float | None = None
+_ASIAN_BY_DATE: dict[str, list[dict]] | None = None
 
 
 def load_asian_odds() -> list[dict]:
-    global _CACHE_ROWS, _CACHE_MTIME
+    global _CACHE_ROWS, _CACHE_MTIME, _ASIAN_BY_DATE
     if not CACHE.exists():
-        _CACHE_ROWS, _CACHE_MTIME = [], None
+        _CACHE_ROWS, _CACHE_MTIME, _ASIAN_BY_DATE = [], None, {}
         return []
     mtime = CACHE.stat().st_mtime
     if _CACHE_ROWS is not None and _CACHE_MTIME == mtime:
@@ -353,6 +354,11 @@ def load_asian_odds() -> list[dict]:
     data = json.loads(CACHE.read_text(encoding="utf-8"))
     _CACHE_ROWS = data.get("matches") or []
     _CACHE_MTIME = mtime
+    by_date: dict[str, list[dict]] = {}
+    for row in _CACHE_ROWS:
+        day = str(row.get("date") or "")
+        by_date.setdefault(day, []).append(row)
+    _ASIAN_BY_DATE = by_date
     return _CACHE_ROWS
 
 
@@ -366,12 +372,14 @@ def find_asian_odds(home: str, away: str, match_date: str | None = None) -> dict
     rows = load_asian_odds()
     if not rows:
         return None
+    if match_date and _ASIAN_BY_DATE and match_date in _ASIAN_BY_DATE:
+        candidates = _ASIAN_BY_DATE[match_date]
+    else:
+        candidates = rows
     nh, na = _norm_team(home), _norm_team(away)
     best = None
     best_score = 0
-    for row in rows:
-        if match_date and row.get("date") and row["date"] != match_date:
-            continue
+    for row in candidates:
         rh, ra = _norm_team(row["home"]), _norm_team(row["away"])
         score = 0
         if nh == rh and na == ra:

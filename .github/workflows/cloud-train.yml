@@ -123,6 +123,7 @@ jobs:
             data/models/online_learn_report.json
             data/models/learn_digest.md
             data/models/learn_digest_meta.json
+            data/processed/our_history.sqlite
             docs/APPRENDIMENTO.md
           if-no-files-found: ignore
           retention-days: 14
@@ -182,6 +183,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, urllib.parse, urllib.request
+          from pathlib import Path
           token = "".join(os.environ.get("TELEGRAM_BOT_TOKEN", "").split())
           chat = "".join(os.environ.get("TELEGRAM_CHAT_ID", "").split())
           if not token or not chat:
@@ -191,9 +193,26 @@ jobs:
           run_id = os.environ.get("RUN_ID", "").strip()
           repo = os.environ.get("REPO", "").strip()
           run_url = f"https://github.com/{repo}/actions/runs/{run_id}" if repo and run_id else ""
+          learn_line = ""
+          report_path = Path("data/models/online_learn_report.json")
+          if report_path.is_file():
+              try:
+                  rep = json.loads(report_path.read_text(encoding="utf-8"))
+                  ok = rep.get("ok")
+                  n_train = rep.get("n_trainable", "?")
+                  n_settled = rep.get("n_settled", "?")
+                  err = rep.get("error")
+                  if ok:
+                      learn_line = f"\nApprendimento: OK · {n_train} trainable · {n_settled} chiuse"
+                  elif err:
+                      learn_line = f"\nApprendimento: skip ({err})"
+                  else:
+                      learn_line = f"\nApprendimento: non aggiornato · {n_train} trainable"
+              except Exception:
+                  pass
           text = (
               f"{icon} Football Predictor — Aggiorna dati e modello\n\n"
-              f"Esito: {status}\n"
+              f"Esito: {status}{learn_line}\n"
               f"Run: {run_url}"
           )
           data = urllib.parse.urlencode(

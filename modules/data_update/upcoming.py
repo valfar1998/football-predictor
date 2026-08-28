@@ -532,6 +532,7 @@ def refresh_upcoming_odds(*, on_progress=None, archive: bool = True) -> dict:
                     market_move=market_move,
                     odds_from_asian=(odds_source == "asianbetsoccer"),
                     league=str(row.get("league") or "") or None,
+                    lazy_secondary=True,
                 )
                 out.append(
                     _row_after_covered_advise(
@@ -622,7 +623,7 @@ def refresh_upcoming_odds(*, on_progress=None, archive: bool = True) -> dict:
             from modules.data_update.history import archive_upcoming, settle_pending
 
             hist_info = archive_upcoming(out)
-            settled = settle_pending()
+            settled = settle_pending(learn=False)
             hist_info["settled_now"] = settled.get("settled", 0)
             hist_info["n_settled"] = settled.get("n_settled", 0)
         except Exception as exc:
@@ -747,8 +748,11 @@ def build_upcoming(
     except Exception:
         pass
 
-    from modules.data_update.history import lookup_history_match
+    from modules.data_update.history import HistoryLookupCache, lookup_history_match
     from modules.data_update.weather import lookup_weather, prefetch_weather
+
+    hist_cache = HistoryLookupCache()
+    hist_cache.prefetch()
 
     wx_items = []
     for _, fx0 in fixtures.iterrows():
@@ -806,6 +810,7 @@ def build_upcoming(
                         market_move=market_move,
                         odds_from_asian=(odds_source == "asianbetsoccer"),
                         league=league,
+                        lazy_secondary=True,
                     )
                     base = dict(prev)
                     base.update(
@@ -857,7 +862,7 @@ def build_upcoming(
         us_a = lookup_understat_team(away, understat_idx)
         fm_xg_h = lookup_fotmob_xg(home, fotmob_xg)
         fm_xg_a = lookup_fotmob_xg(away, fotmob_xg)
-        hist = lookup_history_match(home, away, league=league)
+        hist = lookup_history_match(home, away, league=league, cache=hist_cache)
         try:
             pred = predictor.predict(
                 home,
@@ -1106,6 +1111,7 @@ def build_upcoming(
             market_move=market_move,
             odds_from_asian=(odds_source == "asianbetsoccer"),
             league=str(fx.get("league") or "") or None,
+            lazy_secondary=True,
         )
         play = advice["play"]
         alt = advice.get("play_alt")
@@ -1250,7 +1256,13 @@ def build_upcoming(
         from modules.data_update.history import archive_upcoming, settle_pending
 
         hist = archive_upcoming(rows)
-        settled = settle_pending()
+        settled = settle_pending(learn=True, learn_only_if_settled=True)
+        if settled.get("online_learn"):
+            ol = settled["online_learn"]
+            print(
+                f"apprendimento online: ok={ol.get('ok')} "
+                f"trainable={ol.get('n_trainable', '?')} settled={ol.get('n_settled', '?')}"
+            )
         print(
             f"storico locale: {hist.get('n_history')} record "
             f"(+{hist.get('added')} nuovi, {settled.get('settled', 0)} chiusi, "
@@ -1268,4 +1280,6 @@ def build_upcoming(
         dispatch_alerts(rows)
     except Exception as exc:
         print(f"skip telegram avvisi: {exc}")
+    finally:
+        hist_cache.close()
     return rows

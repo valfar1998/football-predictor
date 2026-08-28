@@ -55,7 +55,15 @@ LEARN_FILES = (
     "residual_ev.json",
     "data_signal_weights.json",
     "online_learn_report.json",
+    "learn_digest.md",
+    "learn_digest_meta.json",
 )
+
+# nome file → percorso locale di destinazione (se diverso da data/models/)
+LEARN_DEST: dict[str, Path] = {
+    "APPRENDIMENTO.md": ROOT / "docs" / "APPRENDIMENTO.md",
+    "our_history.sqlite": PROCESSED / "our_history.sqlite",
+}
 
 
 def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -204,19 +212,61 @@ def _pick_learn_run(*, prefer_run_id: int | None = None) -> tuple[dict, str] | N
     return None
 
 
-def _collect_files(src_root: Path, *, names: tuple[str, ...]) -> dict[str, Path]:
+def _collect_files(
+    src_root: Path,
+    *,
+    names: tuple[str, ...],
+    extra_names: tuple[str, ...] = (),
+) -> dict[str, Path]:
     """Mappa nome file → path trovato nell'estratto."""
+    wanted = set(names) | set(extra_names)
     found: dict[str, Path] = {}
     for path in src_root.rglob("*"):
         if not path.is_file():
             continue
         name = path.name
-        if name in names:
-            # preferisci path sotto data/
-            prev = found.get(name)
-            if prev is None or "data" in path.parts:
-                found[name] = path
+        if name not in wanted:
+            continue
+        # preferisci path sotto data/ o docs/
+        prev = found.get(name)
+        if prev is None or "data" in path.parts or "docs" in path.parts:
+            found[name] = path
     return found
+
+
+def _load_learn_report(path: Path) -> dict | None:
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _prefer_cloud_learn(cloud: dict | None, local: dict | None) -> bool:
+    """True se il report cloud è migliore del locale (non sovrascrivere un fit OK)."""
+    if not cloud:
+        return False
+    if not local:
+        return True
+    cloud_ok = bool(cloud.get("ok"))
+    local_ok = bool(local.get("ok"))
+    if cloud_ok and not local_ok:
+        return True
+    if not cloud_ok and local_ok:
+        return False
+    try:
+        return int(cloud.get("n_trainable") or 0) >= int(local.get("n_trainable") or 0)
+    except (TypeError, ValueError):
+        return cloud_ok
+
+
+def _install_learn_file(name: str, src: Path) -> Path:
+    dest = LEARN_DEST.get(name, MODELS / name)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    return dest
 
 
 def _download_artifact(run_id: int, artifact: str, tmp_path: Path) -> None:
@@ -311,17 +361,47 @@ def pull_cloud_model(*, rebuild_calendar: bool = False, on_progress=None) -> dic
             learn_tmp = Path(tmp)
             _download_artifact(learn_run_id, learn_artifact, learn_tmp)
             p(0.88, "Apprendimento scaricato · installo i file…")
-            learn_found = _collect_files(learn_tmp, names=LEARN_FILES)
+            learn_found = _collect_files(
+                learn_tmp,
+                names=LEARN_FILES,
+                extra_names=tuple(LEARN_DEST.keys()),
+            )
+            cloud_report = _load_learn_report(learn_found["online_learn_report.json"]) if "online_learn_report.json" in learn_found else None
+            local_report = _load_learn_report(MODELS / "online_learn_report.json")
+            cloud_learn_ok = bool(cloud_report and cloud_report.get("ok"))
+            if cloud_report and not _prefer_cloud_learn(cloud_report, local_report):
+                print(
+                    "avviso: apprendimento cloud peggiore del locale "
+                    f"(cloud trainable={cloud_report.get('n_trainable')}, "
+                    f"locale={ (local_report or {}).get('n_trainable')}) — "
+                    "tengo report/pesi locali, installo solo digest/docs/storico.",
+                    flush=True,
+                )
+            weight_files = {
+                "calibration.json",
+                "residual_ev.json",
+                "data_signal_weights.json",
+                "online_learn_report.json",
+            }
             n_learn = max(1, len(learn_found))
             for i, (name, src) in enumerate(learn_found.items(), start=1):
-                dest = MODELS / name
-                shutil.copy2(src, dest)
+                if name in weight_files and not cloud_learn_ok:
+                    continue
+                if name == "online_learn_report.json" and not _prefer_cloud_learn(cloud_report, local_report):
+                    continue
+                dest = _install_learn_file(name, src)
                 learn_installed.append(str(dest.relative_to(ROOT)))
                 print(f"ok learn {dest.relative_to(ROOT)}", flush=True)
                 p(0.88 + 0.08 * (i / n_learn), f"Learn {name} ({i}/{n_learn})")
             missing = [n for n in LEARN_FILES if n not in learn_found]
             if missing:
                 print(f"avviso: nell'artefatto learn mancano: {', '.join(missing)}", flush=True)
+            if "our_history.sqlite" not in learn_found:
+                print(
+                    "avviso: storico cloud (our_history.sqlite) non nell'artefatto — "
+                    "«Apprendi da partite chiuse» userà lo storico locale.",
+                    flush=True,
+                )
 
     info: dict = {
         "ok": True,
@@ -336,6 +416,8 @@ def pull_cloud_model(*, rebuild_calendar: bool = False, on_progress=None) -> dic
         "has_features": (PROCESSED / "features.csv").is_file(),
         "has_model": (MODELS / "best_model.joblib").is_file(),
         "has_learn": bool(learn_installed),
+        "has_history": (PROCESSED / "our_history.sqlite").is_file(),
+        "has_learn_digest": (MODELS / "learn_digest.md").is_file(),
     }
 
     if not info["has_features"]:
@@ -365,7 +447,7 @@ def pull_cloud_model(*, rebuild_calendar: bool = False, on_progress=None) -> dic
     if learn_installed:
         print(
             f"Apprendimento cloud: {len(learn_installed)} file "
-            "(calibrazione/residual/pesi/report).",
+            "(calibrazione/residual/pesi/report/digest/storico).",
             flush=True,
         )
     p(1.0, "Completato")

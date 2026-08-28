@@ -51,6 +51,32 @@ def checkpoint_history_db() -> None:
         conn.close()
 
 
+def _maybe_backfill_history(*, min_trainable: int = 25) -> dict | None:
+    """Backfill synthetic se lo storico cloud è troppo scarso per online_learn."""
+    try:
+        from modules.advisor.learn_policy import trainable_settled
+        from modules.data_update.history import load_history
+
+        settled = [r for r in load_history() if r.get("hit") is not None]
+        n_trainable = len(trainable_settled(settled))
+        if n_trainable >= min_trainable:
+            return None
+        from modules.data_update.history_backfill import backfill_from_matches
+
+        print(
+            f"cloud backfill: {n_trainable} trainable (serve >={min_trainable}), "
+            "popolo da matches.csv…",
+            flush=True,
+        )
+        info = backfill_from_matches(max_rows=120)
+        info["triggered"] = True
+        info["n_trainable_before"] = n_trainable
+        return info
+    except Exception as exc:
+        print(f"cloud backfill skip: {exc}", flush=True)
+        return {"triggered": True, "error": str(exc)}
+
+
 def _settle_only() -> dict:
     from modules.data_update.history import settle_pending
 
@@ -92,28 +118,26 @@ def _full_build(*, n_sims: int = 400) -> dict:
     return {"mode": "full", "n_upcoming": len(rows), "ok": True}
 
 
-def _run_settle_and_learn() -> dict:
+def _run_settle_and_learn(*, skip_learn: bool = False) -> dict:
     """Chiude esiti e aggiorna calibrazione/residual/pesi (apprendimento online)."""
-    out: dict = {}
+    out: dict = {"learn_skipped_duplicate": skip_learn}
     try:
         from modules.data_update.history import settle_pending
 
-        settled = settle_pending()
+        settled = settle_pending(learn=False)
         out["settle"] = {
             k: settled.get(k)
             for k in ("settled", "n_history", "n_settled", "n_rich", "online_learn", "online_learn_error")
             if k in settled
         }
-        if settled.get("online_learn"):
-            out["online_learn"] = settled["online_learn"]
-        if settled.get("online_learn_error"):
-            out["online_learn_error"] = settled["online_learn_error"]
     except Exception as exc:
         out["settle_error"] = str(exc)
         print(f"settle errore: {exc}", flush=True)
 
-    # Se history non ha ancora l'hook online_learn, eseguilo qui.
-    if "online_learn" not in out:
+    if not skip_learn:
+        bf = _maybe_backfill_history()
+        if bf:
+            out["backfill"] = bf
         try:
             from modules.advisor.online_learn import learn_from_settled
 
@@ -144,6 +168,10 @@ def cloud_learn(*, mode: str = "auto") -> dict:
     info: dict = {"cloud_learn": True, "has_model": _has_model(), "has_history": HISTORY_DB.is_file()}
     force_full = os.getenv("CLOUD_FULL_REBUILD", "").lower() in {"1", "true", "yes", "on"}
     m = (mode or "auto").strip().lower()
+
+    bf = _maybe_backfill_history()
+    if bf:
+        info["backfill"] = bf
 
     try:
         if m == "settle":
@@ -183,9 +211,10 @@ def cloud_learn(*, mode: str = "auto") -> dict:
             info["settle_fallback_error"] = str(exc2)
 
     # Sempre: settle esiti + apprendimento online + digest leggibile
-    # (anche dopo full/light: build_upcoming archivia, qui chiudiamo e impariamo)
+    # (light/full archiviano e imparano già: evita doppio fit)
+    already_learned = bool(info.get("online_learn"))
     if m != "settle":
-        info.update(_run_settle_and_learn())
+        info.update(_run_settle_and_learn(skip_learn=already_learned))
     else:
         # settle_only ha già chiuso; assicurati report + digest
         if "online_learn" not in info:

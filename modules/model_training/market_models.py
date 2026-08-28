@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed
 from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 from xgboost import XGBClassifier
 
 from modules.feature_engineering import FeatureEngineer
-
+from modules.model_training.train import _parallel_jobs
 ROOT = Path(__file__).resolve().parents[2]
 MODELS = ROOT / "data" / "models"
 MARKET_PATH = MODELS / "market_models.joblib"
@@ -78,6 +80,28 @@ def _metrics(y: np.ndarray, p: np.ndarray) -> dict[str, float]:
     }
 
 
+def _fit_market_fold(
+    k: int,
+    train_end: int,
+    test_start: int,
+    test_end: int,
+    x_all: np.ndarray,
+    y_ou: np.ndarray,
+    y_ah: np.ndarray,
+    *,
+    random_state: int,
+) -> tuple[int, int, int, np.ndarray, np.ndarray]:
+    m_ou = _xgb_bin(random_state, n_estimators=220)
+    m_ah = _xgb_bin(random_state + 1, n_estimators=220)
+    m_ou.set_params(n_jobs=max(1, (os.cpu_count() or 4) // 4))
+    m_ah.set_params(n_jobs=max(1, (os.cpu_count() or 4) // 4))
+    m_ou.fit(x_all[:train_end], y_ou[:train_end])
+    m_ah.fit(x_all[:train_end], y_ah[:train_end])
+    p_ou = m_ou.predict_proba(x_all[test_start:test_end])[:, 1]
+    p_ah = m_ah.predict_proba(x_all[test_start:test_end])[:, 1]
+    return k, test_start, test_end, p_ou, p_ah
+
+
 def train_market_models(
     feat: pd.DataFrame,
     *,
@@ -101,16 +125,17 @@ def train_market_models(
 
     oof_ou = np.full(n, np.nan, dtype=float)
     oof_ah = np.full(n, np.nan, dtype=float)
-    for k, (train_end, test_start, test_end) in enumerate(folds):
-        tr = feat.iloc[:train_end]
-        te = feat.iloc[test_start:test_end]
-        m_ou = _xgb_bin(random_state, n_estimators=220)
-        m_ah = _xgb_bin(random_state + 1, n_estimators=220)
-        m_ou.fit(tr[x_cols], y_ou[:train_end])
-        m_ah.fit(tr[x_cols], y_ah[:train_end])
-        oof_ou[test_start:test_end] = m_ou.predict_proba(te[x_cols])[:, 1]
-        oof_ah[test_start:test_end] = m_ah.predict_proba(te[x_cols])[:, 1]
-        print(f"market fold {k + 1}/{len(folds)} n_test={len(te)}")
+    x_all = feat[x_cols].to_numpy(dtype=float)
+    fold_results = Parallel(n_jobs=_parallel_jobs(len(folds)), prefer="processes")(
+        delayed(_fit_market_fold)(
+            k, train_end, test_start, test_end, x_all, y_ou, y_ah, random_state=random_state
+        )
+        for k, (train_end, test_start, test_end) in enumerate(folds)
+    )
+    for k, test_start, test_end, p_ou, p_ah in sorted(fold_results, key=lambda r: r[0]):
+        oof_ou[test_start:test_end] = p_ou
+        oof_ah[test_start:test_end] = p_ah
+        print(f"market fold {k + 1}/{len(folds)} n_test={test_end - test_start}")
 
     valid = np.isfinite(oof_ou) & np.isfinite(oof_ah)
     t_ou = _fit_temperature(oof_ou[valid], y_ou[valid]) if valid.sum() >= 80 else 1.0

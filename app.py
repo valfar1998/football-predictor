@@ -1228,10 +1228,18 @@ with st.sidebar:
 
             info = pull_cloud_model_pipeline(on_progress=prog)
             n_learn = len(info.get("learn_installed") or [])
+            has_history = info.get("has_history")
+            has_digest = info.get("has_learn_digest")
             if n_learn:
                 prog.done("OK · modello + apprendimento")
+                extra = []
+                if has_history:
+                    extra.append("storico cloud")
+                if has_digest:
+                    extra.append("digest")
+                suffix = f" ({', '.join(extra)})" if extra else ""
                 st.success(
-                    "Modello + apprendimento installati. "
+                    f"Modello + apprendimento installati{suffix}. "
                     "Premi «Solo quote e calendario» per usarli sul calendario."
                 )
             else:

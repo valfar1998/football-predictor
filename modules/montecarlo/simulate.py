@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from typing import Any
 
 import numpy as np
+
+
+def _top_scorelines(hg: np.ndarray, ag: np.ndarray, n: int, *, top_k: int = 8) -> list[dict[str, Any]]:
+    """Top scorelines senza materializzare liste Python da n migliaia di simulazioni."""
+    keys = hg.astype(np.int32) * 100 + ag.astype(np.int32)
+    uniq, counts = np.unique(keys, return_counts=True)
+    order = np.argsort(-counts)[:top_k]
+    out: list[dict[str, Any]] = []
+    for idx in order:
+        val = int(uniq[idx])
+        h, a = divmod(val, 100)
+        out.append({"score": f"{h}-{a}", "prob": round(int(counts[idx]) / n, 4)})
+    return out
 
 
 class MonteCarloSimulator:
@@ -120,9 +132,7 @@ class MonteCarloSimulator:
             "combo_nogol_u25": float((btts_no & u25).mean()),
         }
         dnb_den = max(p_h + p_a, 1e-9)
-        pairs = list(zip(hg.tolist(), ag.tolist()))
-        top = Counter(pairs).most_common(8)
-        scorelines = [{"score": f"{h}-{a}", "prob": round(c / n, 4)} for (h, a), c in top]
+        scorelines = _top_scorelines(hg, ag, n)
 
         # Cartellini / calci d'angolo: Poisson indipendente (λ da contesto o proxy)
         extras_out: dict[str, float] = {}

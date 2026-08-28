@@ -947,6 +947,7 @@ def advise(
     odds_from_asian: bool = False,
     tipster: dict | None = None,
     league: str | None = None,
+    lazy_secondary: bool = True,
 ) -> dict[str, Any]:
     """Mercati 1X2, DC, DNB, O/U, BTTS, multigol, exact, corner/card proxy, combo."""
     odds = odds or {}
@@ -1225,59 +1226,6 @@ def advise(
         )
 
     markets_scorer: list[dict[str, Any]] = []
-    try:
-        from modules.advisor.scorers import anytime_probs
-
-        fm_det = (
-            ((prediction.get("fotmob_context") or {}).get("details"))
-            or prediction.get("fotmob_details")
-            or {}
-        )
-        for row in anytime_probs(
-            home,
-            away,
-            lambda_home=float((prediction.get("expected_goals") or {}).get("home") or mc.get("lambda_home") or 1.2),
-            lambda_away=float((prediction.get("expected_goals") or {}).get("away") or mc.get("lambda_away") or 1.0),
-            top_n=4,
-            lineup_home=fm_det.get("lineup_home") if isinstance(fm_det, dict) else None,
-            lineup_away=fm_det.get("lineup_away") if isinstance(fm_det, dict) else None,
-        ):
-            p_any = float(row["p_anytime"])
-            p_first = float(row["p_first"])
-            src = str(row.get("source") or "xG share")
-            if row.get("in_lineup") is True:
-                src = f"{src}+XI"
-            elif row.get("in_lineup") is False:
-                src = f"{src}+bench"
-            markets_scorer.append(
-                derived(
-                    f"AS {row['player'][:18]}",
-                    f"{row['player']} anytime",
-                    "scorer",
-                    p_any,
-                    1 - p_any,
-                    p_any,
-                    0.25,
-                    _get_odd(odds, f"anytime_{row['player']}", "anytime"),
-                    src,
-                )
-            )
-            if p_first >= 0.06:
-                markets_scorer.append(
-                    derived(
-                        f"FS {row['player'][:18]}",
-                        f"{row['player']} first scorer",
-                        "scorer",
-                        p_first,
-                        1 - p_first,
-                        p_first,
-                        0.12,
-                        _get_odd(odds, f"first_{row['player']}", "first"),
-                        src,
-                    )
-                )
-    except Exception:
-        markets_scorer = []
 
     def _finish(m: dict[str, Any], overround: float) -> dict[str, Any]:
         g = m.get("group")
@@ -1306,14 +1254,14 @@ def advise(
         "ah": [_finish(m, rr_1x2) for m in markets_ah],
         "ou": [_finish(m, rr_ou) for m in markets_ou],
         "btts": [_finish(m, rr_ou) for m in markets_btts],
-        "multigol": [_finish(m, rr_ou) for m in markets_multigol],
-        "parity": [_finish(m, rr_ou) for m in markets_parity],
-        "exact": [_finish(m, rr_combo) for m in markets_exact],
         "team": [_finish(m, rr_ou) for m in markets_team],
-        "cards": [_finish(m, rr_ou) for m in markets_cards],
-        "corners": [_finish(m, rr_ou) for m in markets_corners],
-        "scorer": [_finish(m, rr_ou) for m in markets_scorer],
-        "combo": [_finish(m, rr_combo) for m in markets_combo],
+        "multigol": [],
+        "parity": [],
+        "exact": [],
+        "cards": [],
+        "corners": [],
+        "scorer": [],
+        "combo": [],
     }
     all_markets = [m for g in grouped.values() for m in g]
 
@@ -1352,6 +1300,74 @@ def advise(
         alt_ev = None if not play_alt else (play_alt.get("ev_cons") if play_alt.get("ev_cons") is not None else play_alt.get("ev"))
         if play_alt and (alt_ev or 0) >= min_ev_play and play_alt["score"] >= play_1x2["score"]:
             play = play_alt
+
+    need_secondary = (
+        not lazy_secondary
+        or int(play.get("score") or 0) >= 7
+        or play.get("action") == "gioca"
+    )
+    if need_secondary:
+        try:
+            from modules.advisor.scorers import anytime_probs
+
+            fm_det = (
+                ((prediction.get("fotmob_context") or {}).get("details"))
+                or prediction.get("fotmob_details")
+                or {}
+            )
+            for row in anytime_probs(
+                home,
+                away,
+                lambda_home=float((prediction.get("expected_goals") or {}).get("home") or mc.get("lambda_home") or 1.2),
+                lambda_away=float((prediction.get("expected_goals") or {}).get("away") or mc.get("lambda_away") or 1.0),
+                top_n=4,
+                lineup_home=fm_det.get("lineup_home") if isinstance(fm_det, dict) else None,
+                lineup_away=fm_det.get("lineup_away") if isinstance(fm_det, dict) else None,
+            ):
+                p_any = float(row["p_anytime"])
+                p_first = float(row["p_first"])
+                src = str(row.get("source") or "xG share")
+                if row.get("in_lineup") is True:
+                    src = f"{src}+XI"
+                elif row.get("in_lineup") is False:
+                    src = f"{src}+bench"
+                markets_scorer.append(
+                    derived(
+                        f"AS {row['player'][:18]}",
+                        f"{row['player']} anytime",
+                        "scorer",
+                        p_any,
+                        1 - p_any,
+                        p_any,
+                        0.25,
+                        _get_odd(odds, f"anytime_{row['player']}", "anytime"),
+                        src,
+                    )
+                )
+                if p_first >= 0.06:
+                    markets_scorer.append(
+                        derived(
+                            f"FS {row['player'][:18]}",
+                            f"{row['player']} first scorer",
+                            "scorer",
+                            p_first,
+                            1 - p_first,
+                            p_first,
+                            0.12,
+                            _get_odd(odds, f"first_{row['player']}", "first"),
+                            src,
+                        )
+                    )
+        except Exception:
+            markets_scorer = []
+        grouped["multigol"] = [_finish(m, rr_ou) for m in markets_multigol]
+        grouped["parity"] = [_finish(m, rr_ou) for m in markets_parity]
+        grouped["exact"] = [_finish(m, rr_combo) for m in markets_exact]
+        grouped["cards"] = [_finish(m, rr_ou) for m in markets_cards]
+        grouped["corners"] = [_finish(m, rr_ou) for m in markets_corners]
+        grouped["scorer"] = [_finish(m, rr_ou) for m in markets_scorer]
+        grouped["combo"] = [_finish(m, rr_combo) for m in markets_combo]
+        all_markets = [m for g in grouped.values() for m in g]
 
     ml_for_play = play.get("model_probability")
     if ml_for_play is None and play.get("group") == "1x2":

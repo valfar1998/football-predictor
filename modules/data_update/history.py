@@ -638,6 +638,10 @@ def archive_upcoming(rows: list[dict[str, Any]]) -> dict[str, Any]:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         added = 0
         from modules.data_update.team_names import resolve_known_team
+        try:
+            from modules.data_update.asian_odds import MOVE_RANK
+        except Exception:
+            MOVE_RANK = {}
 
         for row in rows:
             home = resolve_known_team(row.get("home") or "") or row.get("home")
@@ -653,8 +657,6 @@ def archive_upcoming(rows: list[dict[str, Any]]) -> dict[str, Any]:
             move = row.get("market_move") or {}
             move_rank = None
             try:
-                from modules.data_update.asian_odds import MOVE_RANK
-
                 move_rank = MOVE_RANK.get(move.get("movement_level") or "Stabile", 0)
             except Exception:
                 move_rank = row.get("move_rank")
@@ -1120,7 +1122,7 @@ def _fetch_world_results(*, days_back: int = 3) -> pd.DataFrame:
     return df
 
 
-def settle_pending() -> dict[str, Any]:
+def settle_pending(*, learn: bool = True, learn_only_if_settled: bool = False) -> dict[str, Any]:
     """Chiude i match archiviati usando coppe (org), football-data.co.uk e risultati mondiali."""
     conn = _connect()
     try:
@@ -1159,17 +1161,21 @@ def settle_pending() -> dict[str, Any]:
         print(f"skip world results settle: {exc}")
     summary = history_summary()
     summary["settled"] = settled
-    # Apprendimento continuo da esiti chiusi (bins, residual, pesi, soglie)
-    try:
-        from modules.advisor.online_learn import learn_from_settled
+    run_learn = learn and (not learn_only_if_settled or int(settled) > 0)
+    if run_learn:
+        # Apprendimento continuo da esiti chiusi (bins, residual, pesi, soglie)
+        try:
+            from modules.advisor.online_learn import learn_from_settled
 
-        learn = learn_from_settled()
-        summary["online_learn"] = {
-            k: learn.get(k) for k in ("ok", "n_settled", "error", "fitted_at") if k in learn
-        }
-        summary["online_learn_steps"] = learn.get("steps")
-    except Exception as exc:
-        summary["online_learn_error"] = str(exc)
+            learn_out = learn_from_settled()
+            summary["online_learn"] = {
+                k: learn_out.get(k)
+                for k in ("ok", "n_settled", "n_trainable", "error", "fitted_at")
+                if k in learn_out
+            }
+            summary["online_learn_steps"] = learn_out.get("steps")
+        except Exception as exc:
+            summary["online_learn_error"] = str(exc)
     try:
         from modules.advisor.analysis_outcomes import refresh_analysis_outcomes
 
@@ -1227,8 +1233,119 @@ def _history_weight(n_global: int, n_league: int = 0) -> float:
     return min(HISTORY_WEIGHT_MAX, w)
 
 
-def lookup_history_match(home: str, away: str, league: str | None = None) -> dict[str, Any]:
+class HistoryLookupCache:
+    """Cache per lookup_history_match durante build_upcoming (evita N connessioni SQL)."""
+
+    def __init__(self) -> None:
+        self._ready = False
+        self._n_global = 0
+        self._league_counts: dict[str, int] = {}
+        self._team_form: dict[str, dict[str, Any] | None] = {}
+        self._conn: sqlite3.Connection | None = None
+
+    def prefetch(self) -> None:
+        if self._ready or (not DB.exists() and not JSONL.exists()):
+            self._ready = True
+            return
+        self._conn = _connect()
+        _migrate_jsonl(self._conn)
+        self._n_global = int(
+            self._conn.execute("SELECT COUNT(*) FROM matches WHERE result IS NOT NULL").fetchone()[0]
+        )
+        if self._n_global >= MIN_GLOBAL_SETTLED:
+            league_rows = self._conn.execute(
+                "SELECT league, COUNT(*) AS n FROM matches WHERE result IS NOT NULL GROUP BY league"
+            ).fetchall()
+            self._league_counts = {
+                str(r["league"] or ""): int(r["n"]) for r in league_rows if r["league"]
+            }
+            all_rows = self._conn.execute(
+                "SELECT home, away, home_goals, away_goals, result FROM matches WHERE result IS NOT NULL"
+            ).fetchall()
+            by_team: dict[str, list] = {}
+            for r in all_rows:
+                for team in (r["home"], r["away"]):
+                    by_team.setdefault(str(team), []).append(r)
+            for team, trows in by_team.items():
+                if len(trows) < MIN_TEAM_MATCHES:
+                    self._team_form[team] = None
+                    continue
+                pts = gf = ga = 0
+                for r in trows:
+                    if r["home"] == team:
+                        g_for, g_against = int(r["home_goals"]), int(r["away_goals"])
+                    else:
+                        g_for, g_against = int(r["away_goals"]), int(r["home_goals"])
+                    gf += g_for
+                    ga += g_against
+                    if g_for > g_against:
+                        pts += 3
+                    elif g_for == g_against:
+                        pts += 1
+                n = len(trows)
+                self._team_form[team] = {
+                    "team": team,
+                    "n": n,
+                    "ppg": round(pts / n, 3),
+                    "gd_pg": round((gf - ga) / n, 3),
+                    "gf_pg": round(gf / n, 3),
+                    "ga_pg": round(ga / n, 3),
+                }
+        self._ready = True
+
+    def lookup(self, home: str, away: str, league: str | None = None) -> dict[str, Any]:
+        empty = {
+            "ready": False,
+            "n_global": 0,
+            "n_league": 0,
+            "home": None,
+            "away": None,
+            "weight": HISTORY_WEIGHT,
+        }
+        if not self._ready:
+            self.prefetch()
+        if not DB.exists() and not JSONL.exists():
+            return empty
+        from modules.data_update.team_names import resolve_known_team
+
+        home = resolve_known_team(home) or home
+        away = resolve_known_team(away) or away
+        lg = str(league or "").strip()
+        n_league = self._league_counts.get(lg, 0) if lg else 0
+        h = self._team_form.get(home)
+        a = self._team_form.get(away)
+        ready = int(self._n_global) >= MIN_GLOBAL_SETTLED and h is not None and a is not None
+        return {
+            "ready": ready,
+            "n_global": int(self._n_global),
+            "n_league": int(n_league),
+            "league": lg or None,
+            "min_team": MIN_TEAM_MATCHES,
+            "min_global": MIN_GLOBAL_SETTLED,
+            "weight": _history_weight(int(self._n_global), int(n_league)),
+            "home": h,
+            "away": a,
+        }
+
+    def close(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+
+
+def lookup_history_match(
+    home: str,
+    away: str,
+    league: str | None = None,
+    *,
+    cache: HistoryLookupCache | None = None,
+) -> dict[str, Any]:
     """Segnale per il quadro/voto: pronto solo dopo abbastanza esiti locali."""
+    if cache is not None:
+        return cache.lookup(home, away, league)
     empty = {"ready": False, "n_global": 0, "n_league": 0, "home": None, "away": None, "weight": HISTORY_WEIGHT}
     if not DB.exists() and not JSONL.exists():
         return empty
