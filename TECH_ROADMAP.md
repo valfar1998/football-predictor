@@ -82,6 +82,7 @@ Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-22** (dopo backfill synthe
 - **UI copia voto:** su singola / calendario / mercati, testo + scheda grafica in clipboard o download PNG/txt.
 - **Solo quote fermo a 0%:** progresso in-process + `python -u` sugli CLI figli.
 - **Score pro:** pesi fonti, Unified+Confidence+Risk 0–100, Priorità calendario, override meteo/assenze, Bet Type Recommender (`pro_scores.py`).
+- **GHA Asian timeout:** `TimeoutError` su un giorno → skip (retry HTTP); `notify_cloud` non crasha se Asian è lento.
 
 ---
 

@@ -146,15 +146,26 @@ def _extract_calls(source: str, fn: str) -> list[list[str | float | int]]:
     return calls
 
 
-def _http_get(url: str, timeout: int = 45) -> str:
-    req = urllib.request.Request(url, headers=HEADERS)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8", "replace")
+def _http_get(url: str, timeout: int = 45, *, retries: int = 2) -> str:
+    """GET con retry su timeout/rete. Ultimo errore rilanciato."""
+    last: BaseException | None = None
+    for attempt in range(max(1, retries + 1)):
+        try:
+            req = urllib.request.Request(url, headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read().decode("utf-8", "replace")
+        except (TimeoutError, urllib.error.URLError, OSError) as exc:
+            last = exc
+            if attempt >= retries:
+                break
+            time.sleep(1.5 * (attempt + 1))
+    assert last is not None
+    raise last
 
 
 def refresh_book_ids() -> dict[str, str]:
     """Rilegge gli hash bookmaker dalla pagina, perché AsianBetSoccer li ruota."""
-    html = _http_get(PAGE, timeout=30)
+    html = _http_get(PAGE, timeout=30, retries=1)
     found: dict[str, str] = {}
     for val, label in re.findall(
         r'<option[^>]*value=["\']([a-f0-9]{40})["\'][^>]*>([^<]+)',
@@ -174,7 +185,7 @@ def _fetch_js(day_offset: int, book: str = "bet365", stats: str = "Q") -> str:
     book_id = BOOKS.get(book, book)
     day_key = f"tablenext/day{day_offset}"
     url = f"{BASE}/{stats}/{day_key}/{book_id}.js?date={int(time.time() * 1000)}"
-    return _http_get(url, timeout=45)
+    return _http_get(url, timeout=45, retries=2)
 
 
 def _float(val: object) -> float | None:
@@ -313,8 +324,12 @@ def fetch_asian_odds(*, days: int = 14, book: str = "bet365", on_progress=None) 
             else:
                 print(f"asian skip day{offset}: HTTP {exc.code}", flush=True)
                 continue
-        except urllib.error.URLError as exc:
-            print(f"asian skip day{offset}: {exc}", flush=True)
+        except (TimeoutError, urllib.error.URLError, OSError) as exc:
+            # GHA/IP cloud: Asian spesso timeoutta; un giorno perso non deve killare notify.
+            print(f"asian skip day{offset}: {type(exc).__name__}: {exc}", flush=True)
+            continue
+        except Exception as exc:
+            print(f"asian skip day{offset}: {type(exc).__name__}: {exc}", flush=True)
             continue
         parsed = parse_payload(js, day_offset=offset, book=book)
         print(f"asian day{offset}: {len(parsed)} partite ({book})", flush=True)

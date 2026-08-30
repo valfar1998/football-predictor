@@ -29,7 +29,11 @@ def main() -> None:
     (ROOT / "data" / "processed").mkdir(parents=True, exist_ok=True)
     (ROOT / "data" / "models").mkdir(parents=True, exist_ok=True)
 
-    rows = fetch_asian_odds(days=4, book="bet365")
+    try:
+        rows = fetch_asian_odds(days=4, book="bet365")
+    except Exception as exc:
+        print(f"asian fetch fallito (continuo con cache): {exc}", flush=True)
+        rows = []
     info: dict = {"n_asian": len(rows), "cloud": True, "daily_learn": _daily_learn_enabled()}
     if rows:
         path = save_asian_odds(rows)

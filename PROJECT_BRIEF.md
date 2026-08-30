@@ -510,6 +510,8 @@ Senza refresh pre-match con quote, residual/paper Kelly restano poveri (volume �
 
 **Betfair:** soft-fail (`betfair_soft_fail` in `notify_cloud` / pipeline); GHA spesso 403 → continua con Pinnacle/Asian.
 
+**AsianBetSoccer (GHA):** timeout/404 su un giorno → skip + retry HTTP; `notify_cloud` non fallisce più se Asian è lento/vuoto (tiene la cache precedente).
+
 **Non vendorizzare:** Sportly SDK, Public-FotMob Django, bypass WAF aggressivi.
 
 ---
