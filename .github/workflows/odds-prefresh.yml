@@ -12,6 +12,9 @@ jobs:
   odds-update:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
 
@@ -83,6 +86,23 @@ jobs:
             echo "ERRORE: best_model.joblib non in cache né in artefatti Actions"
             exit 1
           fi
+
+      - name: Verifica modello prima del job
+        run: |
+          test -f data/models/best_model.joblib || {
+            echo "ERRORE: data/models/best_model.joblib assente dopo cache/artefatto"
+            exit 1
+          }
+          ls -lh data/models/best_model.joblib data/processed/features.csv 2>/dev/null || true
+
+      - uses: actions/cache/save@v4
+        if: hashFiles('data/models/best_model.joblib') != ''
+        with:
+          path: |
+            data/models/best_model.joblib
+            data/models/market_models.joblib
+            data/processed/features.csv
+          key: cloud-model-v1
 
       - uses: actions/cache/restore@v4
         with:
