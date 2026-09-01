@@ -35,23 +35,23 @@ Se il report dice “servono ≥25 righe trainable”, l’algoritmo sta ancora 
 
 ## Ultimo aggiornamento automatico
 
-# Digest apprendimento — 2026-08-27 08:33 UTC
+# Digest apprendimento — 2026-09-01 05:08 UTC
 
 - Esito fit: **OK**
-- Momento: `2026-08-26T19:22:08.735291+00:00`
-- Partite chiuse totali: **2481**
-- Usabili per imparare (ricche): **366** (live 266 + backfill 100)
-- Escluse (storico incompleto): **2115**
+- Momento: `2026-09-01T05:08:02.621770+00:00`
+- Partite chiuse totali: **335**
+- Usabili per imparare (ricche): **322** (live 202 + backfill 120)
+- Escluse (storico incompleto): **13**
 
 ## In cosa sta migliorando / correggendo
 
-- **ROI recente** (ultime 60 giocate): -35.0% (PnL -21.03 u)
-- **CLV medio:** -0.0085 · beat close +0.0%
-- **Soglia EV minima:** da `0.05` a `0.05` (più permissiva, usa anche CLV)
+- **ROI recente** (ultime 60 giocate): -4.7% (PnL -2.83 u)
+- **CLV medio:** -0.0040 · beat close +0.0%
+- **Soglia EV minima:** da `0.0305` a `0.036` (più severa, usa anche CLV)
 - **Calibrazione probabilità:** aggiornata (8 bin, blend max 0.72).
-- **Fattore p online:** `1.0066` (errore medio p−hit -0.0084)
-- **Residual EV:** ok su 1858 sample (RMSE 0.490, WF 0.536)
-- **Pesi data-signal:** aggiornati (hit rate +40.2%, ROI -13.8%, metodo `walk_forward_brier_roi`).
+- **Fattore p online:** `0.9968` (errore medio p−hit 0.0042)
+- **Residual EV:** ok su 1692 sample (RMSE 0.469, WF 0.487)
+- **Pesi data-signal:** aggiornati (hit rate +41.4%, ROI -7.3%, metodo `walk_forward_brier_roi`).
 
 ## Come leggerlo in pratica
 

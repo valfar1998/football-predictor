@@ -25,9 +25,11 @@ jobs:
         with:
           path: |
             data/models/best_model.joblib
+            data/models/market_models.joblib
             data/processed/features.csv
-          key: cloud-model-${{ github.run_id }}
+          key: cloud-model-v1
           restore-keys: |
+            cloud-model-v1
             cloud-model-
 
       - uses: actions/cache/restore@v4

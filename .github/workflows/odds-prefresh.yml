@@ -31,12 +31,58 @@ jobs:
             data/processed/our_history.sqlite-wal
             data/processed/our_history.sqlite-shm
             data/processed/upcoming_predictions.json
-            data/models/best_model.joblib
-            data/processed/features.csv
           key: cloud-history-v2
           restore-keys: |
             cloud-history-v2
+            cloud-history-
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/models/best_model.joblib
+            data/models/market_models.joblib
+            data/processed/features.csv
+          key: cloud-model-v1
+          restore-keys: |
+            cloud-model-v1
             cloud-model-
+
+      - name: Scarica modello da artefatto se cache assente
+        if: hashFiles('data/models/best_model.joblib') == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p data/models data/processed
+          found=0
+          for workflow in "Aggiorna dati e modello" "Ritreno settimanale"; do
+            run_ids=$(gh run list --workflow "$workflow" --status success --limit 3 --json databaseId --jq '.[].databaseId')
+            for run_id in $run_ids; do
+              arts=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --jq '.artifacts[].name')
+              for art in $arts; do
+                case "$art" in
+                  best-model-*|weekly-model-*)
+                    rm -rf /tmp/fp-model
+                    gh run download "$run_id" -n "$art" -D /tmp/fp-model
+                    find /tmp/fp-model -name best_model.joblib -exec cp -t data/models {} +
+                    find /tmp/fp-model -name market_models.joblib -exec cp -t data/models {} +
+                    find /tmp/fp-model -name features.csv -exec cp -t data/processed {} +
+                    if [ -f data/models/best_model.joblib ]; then
+                      echo "modelo da artefatto $art (run $run_id)"
+                      found=1
+                      break
+                    fi
+                  ;;
+                esac
+              done
+              [ "$found" = 1 ] && break
+            done
+            [ "$found" = 1 ] && break
+          done
+          if [ "$found" != 1 ]; then
+            echo "ERRORE: best_model.joblib non in cache né in artefatti Actions"
+            exit 1
+          fi
 
       - uses: actions/cache/restore@v4
         with:

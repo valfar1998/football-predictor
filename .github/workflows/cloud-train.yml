@@ -24,13 +24,15 @@ jobs:
         run: pip install -r requirements-cloud.txt
 
       - uses: actions/cache/restore@v4
+        id: history-cache
         with:
           path: |
             data/processed/our_history.sqlite
             data/processed/our_history.sqlite-wal
             data/processed/our_history.sqlite-shm
-          key: cloud-history-${{ github.run_id }}
+          key: cloud-history-v2
           restore-keys: |
+            cloud-history-v2
             cloud-history-
 
       - uses: actions/cache/restore@v4
@@ -50,6 +52,24 @@ jobs:
           key: cloud-upcoming-${{ github.run_id }}
           restore-keys: |
             cloud-upcoming-
+
+      - name: Verifica storico SQLite (cache)
+        run: |
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path(".").resolve()))
+          db = Path("data/processed/our_history.sqlite")
+          if not db.is_file():
+              print("history cache: MISS (nuovo DB)")
+          else:
+              try:
+                  from modules.data_update.history import history_summary
+                  hs = history_summary()
+                  print(f"history cache: OK n={hs.get('n_history')} rich={hs.get('n_rich')} synth={hs.get('n_synthetic')}")
+              except Exception as exc:
+                  print(f"history cache: file ok, summary err: {exc}")
+          PY
 
       - name: Scarica storico e allena
         env:
@@ -77,7 +97,7 @@ jobs:
             data/models/best_model.joblib
             data/models/market_models.joblib
             data/processed/features.csv
-          key: cloud-model-${{ github.run_id }}
+          key: cloud-model-v1
 
       - uses: actions/cache/restore@v4
         with:
@@ -141,7 +161,7 @@ jobs:
             data/processed/our_history.sqlite
             data/processed/our_history.sqlite-wal
             data/processed/our_history.sqlite-shm
-          key: cloud-history-${{ github.run_id }}
+          key: cloud-history-v2
 
       - uses: actions/cache/save@v4
         if: always()

@@ -51,4 +51,4 @@ jobs:
             data/models/best_model.joblib
             data/models/market_models.joblib
             data/processed/features.csv
-          key: cloud-model-${{ github.run_id }}
+          key: cloud-model-v1

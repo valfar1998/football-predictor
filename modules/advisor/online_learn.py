@@ -3,7 +3,7 @@
 Strategia (aggressive_learn=True in calibration.json):
 - Solo righe trainable: live ricche (quota+EV+fattori+accordo) + backfill synthetic ricco.
 - Storico live incompleto (~679 righe senza quota/fattori) → escluso dal fit.
-- Live ricche replicate ×5, backfill synthetic ×4 in bins / residual / pesi.
+- Live ricche replicate ×5 (×6 se ≥80 live) + backfill ×4/×2/×1 con recency (half-life 90 gg).
 """
 
 from __future__ import annotations
