@@ -16,6 +16,7 @@ import os
 import sqlite3
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -39,16 +40,45 @@ def _has_model() -> bool:
     return MODEL.is_file() and FEATURES.is_file()
 
 
-def checkpoint_history_db() -> None:
-    """Flush WAL prima di salvare la cache Actions."""
+def checkpoint_history_db() -> dict[str, Any]:
+    """Flush WAL prima di salvare la cache Actions; ritorna summary se disponibile."""
+    info: dict[str, Any] = {}
     if not HISTORY_DB.is_file():
-        return
+        info["history_db"] = "missing"
+        return info
     conn = sqlite3.connect(HISTORY_DB)
     try:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         conn.commit()
     finally:
         conn.close()
+    try:
+        from modules.data_update.history import history_summary
+
+        hs = history_summary()
+        info["history_checkpoint"] = {
+            k: hs.get(k)
+            for k in (
+                "n_history",
+                "n_settled",
+                "n_rich",
+                "n_rich_live",
+                "n_rich_live_target",
+                "n_synthetic",
+                "path",
+            )
+            if k in hs
+        }
+        cp = info["history_checkpoint"]
+        print(
+            f"history checkpoint: n={cp.get('n_history')} settled={cp.get('n_settled')} "
+            f"rich={cp.get('n_rich')} live_rich={cp.get('n_rich_live')}/{cp.get('n_rich_live_target')} "
+            f"synth={cp.get('n_synthetic')}",
+            flush=True,
+        )
+    except Exception as exc:
+        info["history_checkpoint_error"] = str(exc)
+    return info
 
 
 def _maybe_backfill_history(*, min_trainable: int = 25) -> dict | None:
@@ -166,6 +196,7 @@ def cloud_learn(*, mode: str = "auto") -> dict:
     MODELS.mkdir(parents=True, exist_ok=True)
 
     info: dict = {"cloud_learn": True, "has_model": _has_model(), "has_history": HISTORY_DB.is_file()}
+    info.update(checkpoint_history_db())
     force_full = os.getenv("CLOUD_FULL_REBUILD", "").lower() in {"1", "true", "yes", "on"}
     m = (mode or "auto").strip().lower()
 

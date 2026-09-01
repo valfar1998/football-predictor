@@ -1,6 +1,6 @@
 # Roadmap — stato e prossimi passi
 
-Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-30** (roadmap verso 10/10; Asian soft-fail GHA).
+Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-30** (settle secondari, phasing-out backfill, GHA odds-prefresh).
 
 **Regola d’oro:** live/contesto fragile → quadro/voto/no_bet; EV/Kelly solo da modelli/calibrazione su OOF o settled.
 
@@ -46,24 +46,26 @@ Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-30** (roadmap verso 10/10;
 
 ## Aperti (operatività / dati) — verso 10/10
 
-### 1) Live ricche — **51 → 80+** (priorità)
+### 1) Live ricche — **51 → 80+** (priorità operativa)
 
 - Routine pre-match: **Solo quote** / `--odds-update` ogni giorno.
+- **GHA `odds-prefresh.yml`**: 10:00 + 16:00 UTC (archivia pre-KO).
 - 80+ fixture con `quota_pick` + EV + fattori → paper/ROI indipendente dal backfill.
 
-### 2) Settle mercati secondari — ❌ da fare
+### 2) Settle mercati secondari — ✅ FATTO (codice)
 
-- `history.py`: hit post-match per **cards**, **corners**, **scorer** (oggi solo proxy MC).
+- Cards/corners: FD `HY/AY/HR/AR/HC/AC` in `settle_from_results`.
+- Scorer: `settle_scorer_pending()` + FotMob `extract_goal_scorers` + fuzzy match.
 
-### 3) Connettori dati — 🟡 parziale
+### 3) Connettori dati — 🟡 migliorato
 
-- Betfair 403 CI: soft-fail ✅; opzionale proxy/UA o API a consumo.
+- Betfair 403 CI: soft-fail + **cache stale** ✅; `http_client` UA rotation ✅.
 - Asian timeout GHA: retry + skip ✅.
 - FotMob/FBref: cache + monitor rotture.
 
-### 4) Phasing-out backfill synthetic — ⏳ gate 150 live
+### 4) Phasing-out backfill synthetic — ✅ gate automatico @150 live
 
-- A **≥ 150 live ricche**: escludere `synthetic_backfill=1` da residual / online_p_factor / pesi data_signal.
+- `learn_policy.backfill_excluded_from_fit`: esclude synthetic da `replicate_for_fit`.
 
 ### 5) Residual EV in produzione — ✅ FATTO
 
@@ -89,6 +91,10 @@ Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-30** (roadmap verso 10/10;
 - **Solo quote fermo a 0%:** progresso in-process + `python -u` sugli CLI figli.
 - **Score pro:** pesi fonti, Unified+Confidence+Risk 0–100, Priorità calendario, override meteo/assenze, Bet Type Recommender (`pro_scores.py`).
 - **GHA Asian timeout:** `TimeoutError` su un giorno → skip (retry HTTP); `notify_cloud` non crasha se Asian è lento.
+- **Settle secondari:** cards/corners FD + scorer FotMob in `history.settle_pending`.
+- **Phasing-out backfill:** fit solo live quando `n_rich_live ≥ 150`.
+- **GHA pre-match:** workflow `odds-prefresh.yml` (2×/giorno `--odds-update`).
+- **Connettori:** `http_client` UA rotation; Betfair cache stale su errori CI.
 
 ---
 

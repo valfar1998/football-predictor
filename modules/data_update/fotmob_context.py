@@ -301,7 +301,7 @@ def lookup_fotmob_match(
 def fetch_match_details(match_id: int | str) -> dict[str, Any] | None:
     """Dettaglio on-demand: xG, lineup available, momentum presente. Non usare in loop massivo."""
     try:
-        md = _get_json("matchDetails", {"matchId": match_id})
+        md = _get_json("matchDetails", {"matchId": match_id}) or {}
     except (HTTPError, URLError, TimeoutError, ValueError):
         return None
     content = md.get("content") or {}
@@ -471,7 +471,7 @@ def enrich_top_picks_fotmob(
             r
             for r in rows
             if (r.get("score_unified") or r.get("score") or 0) >= min_score
-            and ((r.get("prediction") or {}).get("fotmob_context") or {}).get("match", {}).get("match_id")
+            and (((r.get("prediction") or {}).get("fotmob_context") or {}).get("match") or {}).get("match_id")
         ),
         key=lambda r: float(r.get("score_unified") or r.get("score") or 0),
         reverse=True,
@@ -684,4 +684,121 @@ def lookup_fotmob_xg(name: str, idx: dict[str, dict[str, Any]] | None = None) ->
     if hit and not _reserve_mismatch(name, hit[0]):
         return idx[hit[0]]
     return None
+
+
+def _player_name_from_event(ev: dict[str, Any]) -> str | None:
+    if not isinstance(ev, dict):
+        return None
+    for key in ("playerName", "name", "title"):
+        val = ev.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    pl = ev.get("player")
+    if isinstance(pl, dict):
+        for key in ("name", "shortName", "fullName"):
+            val = pl.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+    elif isinstance(pl, str) and pl.strip():
+        return pl.strip()
+    return None
+
+
+def _is_goal_event(ev: dict[str, Any]) -> bool:
+    if not isinstance(ev, dict):
+        return False
+    typ = str(ev.get("type") or ev.get("eventType") or ev.get("title") or "").lower()
+    if "own" in typ and "goal" in typ:
+        return False
+    if "penalty missed" in typ or "miss" in typ:
+        return False
+    if "goal" in typ or typ in {"g", "goal"}:
+        return True
+    if ev.get("isGoal") is True:
+        return True
+    return False
+
+
+def _iter_fotmob_events(md: dict[str, Any]) -> list[dict[str, Any]]:
+    """Raccoglie eventi gol da strutture FotMob matchDetails (varianti API)."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(ev: Any) -> None:
+        if not isinstance(ev, dict):
+            return
+        name = _player_name_from_event(ev)
+        if not name or not _is_goal_event(ev):
+            return
+        minute = ev.get("time") or ev.get("minute") or ev.get("min") or 9999
+        try:
+            minute_f = float(minute)
+        except (TypeError, ValueError):
+            minute_f = 9999.0
+        key = f"{name.lower()}|{minute_f}"
+        if key in seen:
+            return
+        seen.add(key)
+        out.append({"player": name, "minute": minute_f, "raw": ev})
+
+    header = md.get("header") or {}
+    for block in (header.get("events"), header.get("Events")):
+        if isinstance(block, list):
+            for ev in block:
+                add(ev)
+        elif isinstance(block, dict):
+            for sub in block.values():
+                if isinstance(sub, list):
+                    for ev in sub:
+                        add(ev)
+
+    content = md.get("content") or {}
+    mf = content.get("matchFacts") or {}
+    for block in (mf.get("events"), mf.get("Events"), content.get("events")):
+        if isinstance(block, list):
+            for ev in block:
+                add(ev)
+
+    liveticker = content.get("liveticker") or {}
+    for block in (liveticker.get("events"), liveticker.get("Events")):
+        if isinstance(block, list):
+            for ev in block:
+                add(ev)
+
+    out.sort(key=lambda x: float(x.get("minute") or 9999))
+    return out
+
+
+def extract_goal_scorers(match_id: int | str, *, md: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Marcatori reale partita: anytime list + first scorer (esclusi autogol)."""
+    payload = md
+    if payload is None:
+        try:
+            payload = _get_json("matchDetails", {"matchId": match_id}) or {}
+        except (HTTPError, URLError, TimeoutError, ValueError, OSError):
+            return {"ok": False, "match_id": match_id, "scorers": [], "first_scorer": None}
+    events = _iter_fotmob_events(payload or {})
+    scorers = [str(e["player"]) for e in events if e.get("player")]
+    first = scorers[0] if scorers else None
+    return {
+        "ok": bool(scorers),
+        "match_id": match_id,
+        "scorers": scorers,
+        "first_scorer": first,
+        "n_goals": len(scorers),
+    }
+
+
+def scorer_hit(picked_player: str, scorers: list[str], *, mode: str = "anytime") -> bool | None:
+    """True/False se matchabile; None se lista marcatori vuota."""
+    from modules.advisor.scorers import _name_match
+
+    if not scorers:
+        return None
+    target = str(picked_player or "").strip()
+    if not target:
+        return None
+    if mode == "first":
+        return _name_match(target, scorers[0])
+    return any(_name_match(target, s) for s in scorers)
 

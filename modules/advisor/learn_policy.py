@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+from datetime import datetime, timezone
 from typing import Any
 
 # Repliche nel fit (bins / residual / pesi) — live e backfill pesano uguale, vecchio junk escluso
@@ -10,6 +12,18 @@ BACKFILL_RICH_REPLICATE = 4
 # Replicate live ×6 quando abbastanza live ricche (residual fit più reattivo)
 LIVE_RICH_REPLICATE_BOOST = 6
 LIVE_RICH_BOOST_MIN = 80
+
+# Phasing-out backfill synthetic: fit solo live quando ≥150 archivi ricchi pre-match
+LIVE_RICH_PHASEOUT_MIN = 150
+
+# Backfill decay: meno peso synthetic quando cresce il live
+BACKFILL_TIER_LOW = 40  # sotto: backfill ×4 (bootstrap)
+BACKFILL_TIER_MID = 80  # 40–79: ×2 · ≥80: ×1
+
+# Recency: partite recenti contano di più nel fit online
+RECENCY_HALF_LIFE_DAYS = 90.0
+RECENCY_FLOOR = 0.25
+BACKFILL_RECENCY_SCALE = 0.85
 
 LIVE_1X2_MIN_AGGRESSIVE = 30
 TRAINABLE_1X2_MIN = 60
@@ -64,24 +78,85 @@ def split_trainable(rows: list[dict[str, Any]]) -> tuple[list[dict], list[dict]]
     return live, backfill
 
 
+def _parse_row_date(rec: dict[str, Any]) -> datetime | None:
+    raw = rec.get("date") or rec.get("settled_at") or rec.get("saved_at")
+    if not raw:
+        return None
+    s = str(raw).strip()
+    try:
+        if "T" in s:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00")[:19])
+        else:
+            dt = datetime.strptime(s[:10], "%Y-%m-%d")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
+
+
+def recency_weight(
+    rec: dict[str, Any],
+    *,
+    half_life_days: float = RECENCY_HALF_LIFE_DAYS,
+    floor: float = RECENCY_FLOOR,
+) -> float:
+    """Peso 0.25–1.0: esiti recenti contano di più (exp decay, half-life ~90 gg)."""
+    dt = _parse_row_date(rec)
+    if dt is None:
+        return 1.0
+    now = datetime.now(timezone.utc)
+    age_days = max(0.0, (now - dt.astimezone(timezone.utc)).total_seconds() / 86400.0)
+    if age_days <= 0:
+        return 1.0
+    w = math.exp(-age_days * math.log(2) / max(half_life_days, 1.0))
+    return max(floor, min(1.0, w))
+
+
+def backfill_excluded_from_fit(n_live: int) -> bool:
+    """True quando il live ricco basta: niente righe synthetic_backfill nel fit."""
+    return int(n_live) >= LIVE_RICH_PHASEOUT_MIN
+
+
+def backfill_replicate_for(n_live: int) -> int:
+    """Riduce peso backfill synthetic man mano che crescono le live ricche."""
+    if n_live >= BACKFILL_TIER_MID:
+        return 1
+    if n_live >= BACKFILL_TIER_LOW:
+        return 2
+    return BACKFILL_RICH_REPLICATE
+
+
+def _effective_replicates(base: int, rec: dict[str, Any], *, live: bool) -> int:
+    w = recency_weight(rec)
+    if not live:
+        w *= BACKFILL_RECENCY_SCALE
+    return max(1, round(base * w))
+
+
 def replicate_for_fit(
     rows: list[dict[str, Any]],
     *,
     live_replicate: int | None = None,
-    backfill_replicate: int = BACKFILL_RICH_REPLICATE,
+    backfill_replicate: int | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """Live ricche ×5 (×6 se ≥80 live) + backfill synthetic ricco ×4."""
+    """Live ricche ×5 (×6 se ≥80 live) + backfill ×4/×2/×1; recency sulle repliche."""
     settled = [r for r in rows if r.get("hit") is not None]
     live, backfill = split_trainable(settled)
     if live_replicate is None:
         live_replicate = (
             LIVE_RICH_REPLICATE_BOOST if len(live) >= LIVE_RICH_BOOST_MIN else LIVE_RICH_REPLICATE
         )
+    if backfill_replicate is None:
+        backfill_replicate = 0 if backfill_excluded_from_fit(len(live)) else backfill_replicate_for(len(live))
     out: list[dict] = []
     for r in live:
-        out.extend([r] * max(1, live_replicate))
-    for r in backfill:
-        out.extend([r] * max(1, backfill_replicate))
+        n = _effective_replicates(live_replicate, r, live=True)
+        out.extend([r] * n)
+    if backfill_replicate > 0:
+        for r in backfill:
+            n = _effective_replicates(backfill_replicate, r, live=False)
+            out.extend([r] * n)
     skipped_old = len(settled) - len(live) - len(backfill)
     meta = {
         "n_settled_total": len(settled),
@@ -91,6 +166,18 @@ def replicate_for_fit(
         "fit_rows": len(out),
         "live_replicate": live_replicate,
         "backfill_replicate": backfill_replicate,
+        "recency_half_life_days": RECENCY_HALF_LIFE_DAYS,
+        "backfill_tier": (
+            "excluded"
+            if backfill_excluded_from_fit(len(live))
+            else "minimal"
+            if len(live) >= BACKFILL_TIER_MID
+            else "mid"
+            if len(live) >= BACKFILL_TIER_LOW
+            else "bootstrap"
+        ),
+        "backfill_excluded": backfill_excluded_from_fit(len(live)),
+        "live_rich_phaseout_min": LIVE_RICH_PHASEOUT_MIN,
     }
     return out, meta
 

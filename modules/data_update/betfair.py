@@ -18,6 +18,7 @@ import time
 import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -526,9 +527,47 @@ def fetch_betfair_odds(*, force: bool = False, days: int = 7, max_age_hours: flo
         print(f"ok Betfair odds: {len(events)} eventi")
         return {"ok": True, "n_events": len(events), "from_cache": False, "events": events}
     except HTTPError as exc:
+        stale = _load_stale_cache(max_age_hours=max(max_age_hours, 72.0))
+        if stale:
+            print(f"betfair_soft_fail HTTP {exc.code}: uso cache stale ({stale.get('n_events', 0)} eventi)")
+            return stale
         return {"ok": False, "error": f"HTTP {exc.code}: {exc.reason}", "n_events": 0, "events": [], "from_cache": False}
     except (URLError, TimeoutError, RuntimeError) as exc:
+        stale = _load_stale_cache(max_age_hours=max(max_age_hours, 72.0))
+        if stale:
+            print(f"betfair_soft_fail: {exc} — uso cache stale ({stale.get('n_events', 0)} eventi)")
+            return stale
         return {"ok": False, "error": str(exc), "n_events": 0, "events": [], "from_cache": False}
+
+
+def _load_stale_cache(*, max_age_hours: float = 72.0) -> dict[str, Any] | None:
+    """Cache Betfair anche scaduta (CI/GHA: meglio dati vecchi che niente)."""
+    if not CACHE.exists():
+        return None
+    try:
+        data = json.loads(CACHE.read_text(encoding="utf-8"))
+        events = data.get("events") or []
+        if not events:
+            return None
+        ts = str(data.get("fetched_at") or "")
+        age_h = None
+        if ts:
+            fetched = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            if fetched.tzinfo is None:
+                fetched = fetched.replace(tzinfo=timezone.utc)
+            age_h = round((datetime.now(timezone.utc) - fetched).total_seconds() / 3600, 1)
+        elif max_age_hours > 0:
+            age_h = round((datetime.now(timezone.utc).timestamp() - CACHE.stat().st_mtime) / 3600, 1)
+        return {
+            "ok": True,
+            "n_events": len(events),
+            "from_cache": True,
+            "stale_cache": True,
+            "cache_age_hours": age_h,
+            "events": events,
+        }
+    except Exception:
+        return None
 
 
 def load_betfair_cache() -> list[dict]:

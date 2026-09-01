@@ -88,6 +88,8 @@ _EXTRA_COLS = {
     "beat_close": "INTEGER",
     "quadro_agree_n": "INTEGER",
     "quadro_votes_n": "INTEGER",
+    "fotmob_match_id": "INTEGER",
+    "pick_label": "TEXT",
 }
 
 
@@ -241,6 +243,8 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
         ("beat_close", None),
         ("quadro_agree_n", None),
         ("quadro_votes_n", None),
+        ("fotmob_match_id", None),
+        ("pick_label", None),
     ):
         rec.setdefault(k, default)
     rec["data_factors"] = _json_dump(rec.get("data_factors"))
@@ -260,16 +264,18 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
             covered, home_goals, away_goals, result, hit, saved_at, settled_at,
             quota_pick, agree_share, data_edge, move_rank, residual, adj_ev,
             data_factors, no_bet_reasons, pick_group, model_cluster, ev_sharp,
-            context_partial, synthetic_backfill, clv, quota_close, beat_close,
-            quadro_agree_n, quadro_votes_n
+            context_partial, synthetic_backfill,             clv, quota_close, beat_close,
+            quadro_agree_n, quadro_votes_n,
+            fotmob_match_id, pick_label
         ) VALUES (
             :match_key, :date, :time, :home, :away, :league, :country, :pick, :action,
             :score, :score_unified, :ev_cons, :probability, :odds_source, :skip_reason,
             :covered, :home_goals, :away_goals, :result, :hit, :saved_at, :settled_at,
             :quota_pick, :agree_share, :data_edge, :move_rank, :residual, :adj_ev,
             :data_factors, :no_bet_reasons, :pick_group, :model_cluster, :ev_sharp,
-            :context_partial, :synthetic_backfill, :clv, :quota_close, :beat_close,
-            :quadro_agree_n, :quadro_votes_n
+            :context_partial, :synthetic_backfill,             :clv, :quota_close, :beat_close,
+            :quadro_agree_n, :quadro_votes_n,
+            :fotmob_match_id, :pick_label
         )
         ON CONFLICT(match_key) DO UPDATE SET
             time=excluded.time, league=excluded.league, country=excluded.country,
@@ -294,6 +300,8 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
             beat_close=COALESCE(excluded.beat_close, matches.beat_close),
             quadro_agree_n=COALESCE(excluded.quadro_agree_n, matches.quadro_agree_n),
             quadro_votes_n=COALESCE(excluded.quadro_votes_n, matches.quadro_votes_n),
+            fotmob_match_id=COALESCE(excluded.fotmob_match_id, matches.fotmob_match_id),
+            pick_label=COALESCE(excluded.pick_label, matches.pick_label),
             context_partial=CASE
                 WHEN matches.synthetic_backfill=0 AND excluded.synthetic_backfill=1 THEN matches.context_partial
                 ELSE COALESCE(excluded.context_partial, matches.context_partial)
@@ -630,6 +638,69 @@ def export_monthly_success_csv(*, path: Path | None = None) -> dict[str, Any]:
     }
 
 
+def _is_big5_league(league: str | None) -> bool:
+    try:
+        from modules.model_training.league_clusters import cluster_for
+
+        return str(cluster_for(league)).startswith("big5_")
+    except Exception:
+        return False
+
+
+def _normalize_archive_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Unifica campi annidati (play/prediction) per archivio trainable; priorità Big 5."""
+    out = dict(row)
+    play = out.get("play") if isinstance(out.get("play"), dict) else {}
+    pred = out.get("prediction") if isinstance(out.get("prediction"), dict) else {}
+
+    if out.get("quota_pick") is None:
+        out["quota_pick"] = play.get("odds_real") or out.get("odds_real")
+    if out.get("ev_cons") is None:
+        out["ev_cons"] = play.get("ev_cons") if play.get("ev_cons") is not None else out.get("ev")
+    if out.get("ev_sharp") is None:
+        out["ev_sharp"] = play.get("ev_sharp")
+    if out.get("probability") is None:
+        out["probability"] = play.get("probability") or play.get("p_cons")
+    if out.get("pick") is None and play.get("code"):
+        out["pick"] = play.get("code")
+    if out.get("pick_group") is None and play.get("group"):
+        out["pick_group"] = play.get("group")
+
+    sa = out.get("source_agreement")
+    if not isinstance(sa, dict):
+        sa = play.get("source_agreement") or pred.get("source_agreement")
+    if isinstance(sa, dict) and out.get("agree_share") is None:
+        out["agree_share"] = sa.get("agree_share")
+    if sa and not out.get("source_agreement"):
+        out["source_agreement"] = sa
+
+    ds = out.get("data_signal")
+    if not isinstance(ds, dict):
+        ds = pred.get("data_signal") or play.get("data_signal")
+    if isinstance(ds, dict):
+        if not out.get("data_factors") and ds.get("factors"):
+            out["data_factors"] = ds.get("factors")
+        if out.get("data_edge") is None and ds.get("edge") is not None:
+            out["data_edge"] = ds.get("edge")
+        if not out.get("data_signal"):
+            out["data_signal"] = ds
+
+    residual = out.get("residual_ev")
+    if not isinstance(residual, dict):
+        residual = play.get("residual_ev") or pred.get("residual_ev")
+    if isinstance(residual, dict):
+        if out.get("residual") is None:
+            out["residual"] = residual.get("residual")
+        if out.get("adj_ev") is None:
+            out["adj_ev"] = residual.get("adj_ev")
+
+    if _is_big5_league(out.get("league")):
+        # Big 5: prova anche markets[] per quota del pick
+        if out.get("quota_pick") is None and out.get("pick"):
+            out["quota_pick"] = _quota_from_row(out, pick=out.get("pick"))
+    return out
+
+
 def archive_upcoming(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Salva/aggiorna tutte le partite del calendario, comprese le N/D (logging ricco)."""
     conn = _connect()
@@ -643,7 +714,8 @@ def archive_upcoming(rows: list[dict[str, Any]]) -> dict[str, Any]:
         except Exception:
             MOVE_RANK = {}
 
-        for row in rows:
+        for raw_row in rows:
+            row = _normalize_archive_row(raw_row)
             home = resolve_known_team(row.get("home") or "") or row.get("home")
             away = resolve_known_team(row.get("away") or "") or row.get("away")
             pred = row.get("prediction") if isinstance(row.get("prediction"), dict) else {}
@@ -680,6 +752,8 @@ def archive_upcoming(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 q_vn = int(q_vn) if q_vn is not None else None
             except (TypeError, ValueError):
                 q_vn = None
+            fotmob_mid = _fotmob_id_from_row(row)
+            pick_label = row.get("pick_name") or row.get("pick_label")
             context_partial = 0 if (ds_ready and quota and factors and agree_v is not None) else 1
             try:
                 su_int = int(row.get("score_unified")) if row.get("score_unified") is not None else None
@@ -726,6 +800,8 @@ def archive_upcoming(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "beat_close": beat,
                 "quadro_agree_n": q_an,
                 "quadro_votes_n": q_vn,
+                "fotmob_match_id": fotmob_mid,
+                "pick_label": pick_label,
             }
             exists = conn.execute("SELECT 1 FROM matches WHERE match_key=?", (rec["match_key"],)).fetchone()
             if not exists:
@@ -733,7 +809,23 @@ def archive_upcoming(rows: list[dict[str, Any]]) -> dict[str, Any]:
             _upsert(conn, rec, now, keep_result=True)
         conn.commit()
         n = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
-        return {"n_history": int(n), "added": added, "updated": len(rows) - added, "path": str(DB), "rich": True}
+        n_rich_live = conn.execute(
+            """
+            SELECT COUNT(*) FROM matches
+            WHERE synthetic_backfill=0 AND quota_pick IS NOT NULL
+              AND (ev_cons IS NOT NULL OR ev_sharp IS NOT NULL)
+              AND data_factors IS NOT NULL AND agree_share IS NOT NULL
+            """
+        ).fetchone()[0]
+        return {
+            "n_history": int(n),
+            "added": added,
+            "updated": len(rows) - added,
+            "n_rich_live": int(n_rich_live),
+            "n_rich_live_target": 80,
+            "path": str(DB),
+            "rich": True,
+        }
     finally:
         conn.close()
 
@@ -799,6 +891,60 @@ def _clv_archive_fields(
         if bc is not None:
             beat = 1 if bc else 0
     return clv_v, qc, beat
+
+
+def _fotmob_id_from_row(row: dict[str, Any]) -> int | None:
+    raw = row.get("fotmob_match_id")
+    if raw is not None:
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            pass
+    pred = row.get("prediction") if isinstance(row.get("prediction"), dict) else {}
+    fm = pred.get("fotmob_context") if isinstance(pred.get("fotmob_context"), dict) else {}
+    match = fm.get("match") if isinstance(fm.get("match"), dict) else {}
+    mid = match.get("match_id")
+    if mid is not None:
+        try:
+            return int(mid)
+        except (TypeError, ValueError):
+            pass
+    try:
+        from modules.data_update.fotmob_context import lookup_fotmob_match
+
+        hit = lookup_fotmob_match(str(row.get("home") or ""), str(row.get("away") or ""), str(row.get("date") or "")[:10])
+        if hit and hit.get("match_id") is not None:
+            return int(hit["match_id"])
+    except Exception:
+        pass
+    return None
+
+
+def _scorer_pick_needed(pick: str, pick_group: str | None = None) -> bool:
+    p = str(pick or "").strip().upper()
+    grp = str(pick_group or "").lower()
+    return grp == "scorer" or p.startswith("AS ") or p.startswith("FS ")
+
+
+def _parse_scorer_pick(pick: str, pick_label: str | None = None) -> tuple[str, str] | None:
+    """Ritorna (mode anytime|first, player_name)."""
+    label = str(pick_label or "").strip()
+    if label:
+        low = label.lower()
+        if " first " in low or low.endswith(" first scorer") or low.startswith("first "):
+            name = label.replace(" first scorer", "").replace(" First Scorer", "").strip()
+            if name.lower().endswith(" first"):
+                name = name[:-6].strip()
+            return "first", name
+        if " anytime" in low:
+            return "anytime", label.replace(" anytime", "").replace(" Anytime", "").strip()
+    p = str(pick or "").strip()
+    up = p.upper()
+    if up.startswith("AS "):
+        return "anytime", p[3:].strip()
+    if up.startswith("FS "):
+        return "first", p[3:].strip()
+    return None
 
 
 def _side_stats_needed(pick: str) -> bool:
@@ -973,6 +1119,18 @@ def settle_from_results(results: pd.DataFrame) -> dict[str, Any]:
                 or (pick.upper().startswith("CORN") and (hc is None or ac is None))
             ):
                 continue
+            grp = str(rec["pick_group"] or "") if "pick_group" in rec.keys() else ""
+            if _scorer_pick_needed(pick, grp):
+                conn.execute(
+                    """
+                    UPDATE matches
+                    SET home_goals=?, away_goals=?, result=?
+                    WHERE match_key=? AND hit IS NULL
+                    """,
+                    (hg, ag, res, rec["match_key"]),
+                )
+                settled += 1
+                continue
             hit = _hit_for_pick(
                 pick,
                 res=res,
@@ -1122,6 +1280,89 @@ def _fetch_world_results(*, days_back: int = 3) -> pd.DataFrame:
     return df
 
 
+def settle_scorer_pending(*, max_fetch: int = 40) -> dict[str, Any]:
+    """Chiude pick marcatore (AS/FS) via FotMob matchDetails + fuzzy name match."""
+    from modules.data_update.fotmob_context import extract_goal_scorers, scorer_hit
+
+    conn = _connect()
+    settled = 0
+    skipped = 0
+    errors: list[str] = []
+    scorer_cache: dict[int, dict[str, Any]] = {}
+    try:
+        _migrate_jsonl(conn)
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = conn.execute(
+            """
+            SELECT * FROM matches
+            WHERE hit IS NULL
+              AND home_goals IS NOT NULL
+              AND away_goals IS NOT NULL
+              AND (
+                pick_group='scorer'
+                OR pick LIKE 'AS %'
+                OR pick LIKE 'FS %'
+              )
+            ORDER BY date DESC
+            LIMIT ?
+            """,
+            (int(max_fetch),),
+        ).fetchall()
+        for rec in rows:
+            pick = str(rec["pick"] or "")
+            parsed = _parse_scorer_pick(pick, rec["pick_label"] if "pick_label" in rec.keys() else None)
+            if not parsed:
+                skipped += 1
+                continue
+            mode, player = parsed
+            mid = rec["fotmob_match_id"] if "fotmob_match_id" in rec.keys() else None
+            if mid is None:
+                mid = _fotmob_id_from_row(_row_to_dict(rec))
+            if mid is None:
+                skipped += 1
+                continue
+            try:
+                mid_i = int(mid)
+            except (TypeError, ValueError):
+                skipped += 1
+                continue
+            if mid_i not in scorer_cache:
+                try:
+                    scorer_cache[mid_i] = extract_goal_scorers(mid_i)
+                except Exception as exc:
+                    errors.append(f"{mid_i}: {exc}")
+                    scorer_cache[mid_i] = {"ok": False, "scorers": []}
+            info = scorer_cache[mid_i]
+            scorers = info.get("scorers") or []
+            hit_v = scorer_hit(player, scorers, mode=mode)
+            if hit_v is None:
+                skipped += 1
+                continue
+            hg, ag = int(rec["home_goals"]), int(rec["away_goals"])
+            res = rec["result"]
+            if not res:
+                if hg > ag:
+                    res = "1"
+                elif hg < ag:
+                    res = "2"
+                else:
+                    res = "X"
+            conn.execute(
+                """
+                UPDATE matches
+                SET home_goals=?, away_goals=?, result=?, hit=?, settled_at=?,
+                    fotmob_match_id=COALESCE(fotmob_match_id, ?)
+                WHERE match_key=? AND hit IS NULL
+                """,
+                (hg, ag, res, 1 if hit_v else 0, now, mid_i, rec["match_key"]),
+            )
+            settled += 1
+        conn.commit()
+    finally:
+        conn.close()
+    return {"settled_scorers": settled, "skipped_scorers": skipped, "errors": errors[:8]}
+
+
 def settle_pending(*, learn: bool = True, learn_only_if_settled: bool = False) -> dict[str, Any]:
     """Chiude i match archiviati usando coppe (org), football-data.co.uk e risultati mondiali."""
     conn = _connect()
@@ -1159,6 +1400,13 @@ def settle_pending(*, learn: bool = True, learn_only_if_settled: bool = False) -
                 print(f"storico locale: {n} partite chiuse da fonti mondiali (TSDB/API-Football)")
     except Exception as exc:
         print(f"skip world results settle: {exc}")
+    try:
+        scorer_out = settle_scorer_pending()
+        settled += int(scorer_out.get("settled_scorers") or 0)
+        if scorer_out.get("settled_scorers"):
+            print(f"storico locale: {scorer_out['settled_scorers']} pick marcatore chiusi (FotMob)")
+    except Exception as exc:
+        print(f"skip scorer settle: {exc}")
     summary = history_summary()
     summary["settled"] = settled
     run_learn = learn and (not learn_only_if_settled or int(settled) > 0)
@@ -1476,12 +1724,22 @@ def history_summary() -> dict[str, Any]:
         synth = conn.execute(
             "SELECT COUNT(*) FROM matches WHERE synthetic_backfill=1"
         ).fetchone()[0]
+        n_rich_live = conn.execute(
+            """
+            SELECT COUNT(*) FROM matches
+            WHERE synthetic_backfill=0 AND quota_pick IS NOT NULL
+              AND (ev_cons IS NOT NULL OR ev_sharp IS NOT NULL)
+              AND data_factors IS NOT NULL AND agree_share IS NOT NULL
+            """
+        ).fetchone()[0]
         return {
             "n_history": int(n),
             "n_settled": int(settled),
             "n_nd": int(nd),
             "n_rich": int(rich),
             "n_rich_target": 80,
+            "n_rich_live": int(n_rich_live),
+            "n_rich_live_target": 80,
             "n_synthetic": int(synth),
             "ready": int(settled) >= MIN_GLOBAL_SETTLED,
             "min_global": MIN_GLOBAL_SETTLED,

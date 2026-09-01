@@ -1,0 +1,88 @@
+# Pre-match: archivia quote ricche (quota_pick + EV + fattori) prima del KO.
+# 10:00 e 16:00 UTC ≈ 12:00 e 18:00 IT (leggero shift ora solare).
+name: Pre-match odds archive
+
+on:
+  schedule:
+    - cron: "0 10 * * *"
+    - cron: "0 16 * * *"
+  workflow_dispatch:
+
+jobs:
+  odds-update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: requirements-cloud.txt
+
+      - name: Dipendenze cloud
+        run: pip install -r requirements-cloud.txt
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/processed/our_history.sqlite
+            data/processed/our_history.sqlite-wal
+            data/processed/our_history.sqlite-shm
+            data/processed/upcoming_predictions.json
+            data/models/best_model.joblib
+            data/processed/features.csv
+          key: cloud-history-v2
+          restore-keys: |
+            cloud-history-v2
+            cloud-model-
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/raw/asian_odds.json
+            data/raw/pinnacle_odds.json
+            data/raw/betfair_odds.json
+          key: odds-cache-${{ github.run_id }}
+          restore-keys: |
+            odds-cache-
+
+      - name: Solo quote pre-match (--odds-update)
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
+          BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
+          BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
+          PYTHONUTF8: "1"
+        run: |
+          python main.py --odds-update
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path(".").resolve()))
+          from modules.data_update.history import history_summary
+          hs = history_summary()
+          live = hs.get("n_rich_live", "?")
+          target = hs.get("n_rich_live_target", 80)
+          print(f"live ricche pre-match: {live}/{target}")
+          PY
+
+      - uses: actions/cache/save@v4
+        if: always() && hashFiles('data/processed/our_history.sqlite') != ''
+        with:
+          path: |
+            data/processed/our_history.sqlite
+            data/processed/our_history.sqlite-wal
+            data/processed/our_history.sqlite-shm
+            data/processed/upcoming_predictions.json
+          key: cloud-history-v2
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            data/raw/asian_odds.json
+            data/raw/pinnacle_odds.json
+            data/raw/betfair_odds.json
+          key: odds-cache-${{ github.run_id }}

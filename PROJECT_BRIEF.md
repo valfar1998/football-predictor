@@ -2,7 +2,7 @@
 
 Sintesi aggiornata del progetto **football-predictor**  
 Repo: [github.com/valfar1998/football-predictor](https://github.com/valfar1998/football-predictor) · branch `main`  
-Ultimo aggiornamento: **2026-08-30** — Asian soft-fail GHA; roadmap dati verso 10/10.
+Ultimo aggiornamento: **2026-08-30** — settle cards/corners/scorer; phasing-out backfill @150 live; GHA pre-match odds.
 
 Scopo di questo file: dare a un altro modello / analista contesto sufficiente per suggerire miglioramenti **senza** dover leggere tutto il codice.
 
@@ -560,9 +560,9 @@ Oggi il **codice** è al massimo (residual, pesi, online learn, pro_scores, GHA)
 | Limite | Impatto |
 |--------|---------|
 | **Live ricche pre-match ridotte** | **51 / 80+** target — paper Kelly e ROI restano parzialmente legati al backfill synthetic |
-| **Settle mercati esplorativi assente** | Cards, corner, marcatori: solo proxy MC; non alimentano `settle_pending` né calibrazione post-hoc |
+| **Settle mercati esplorativi** | Cards/corner via FD (`HY/HC/…`); marcatori via FotMob `matchDetails` + fuzzy name — **codice ✅**, copertura dati 🟡 |
 | **Connettori fragili** | API non ufficiali / scraping (403 Betfair in CI, rotazioni hash Asian, cambi FotMob/FBref) → soft-fail, cache, skip giorno |
-| **Backfill synthetic ancora nel fit** | Bootstrap utile ma non equivale a quote pre-KO reali; da phasing-out quando live ≥ 150 |
+| **Backfill synthetic ancora nel fit** | Bootstrap utile; **auto-escluso dal fit quando live ricche ≥ 150** (`learn_policy.backfill_excluded`) |
 
 Altri limiti minori: conformal O/U–AH fallback Poisson; quote book su marcatori rare; leghe minori con fallback Elo.
 
@@ -575,24 +575,26 @@ Ordine consigliato (solo dati/operatività — il codice core è chiuso):
 ### 1) Live ricche ≥ 80 (priorità assoluta)
 
 - Routine **quotidiana pre-match**: UI **Solo quote** o `python main.py --odds-update` (archive con `quota_pick`, `ev_cons`/`ev_sharp`, `data_factors`, `agree_share`).
+- **GHA** `.github/workflows/odds-prefresh.yml` — 10:00 e 16:00 UTC (2×/giorno pre-KO).
 - Ogni fixture archiviata **prima del KO** + settle post-match → fit sempre più credibile **senza** dipendere dal synthetic.
 - Target: **80+ live ricche** → validazione ROI e paper trading indipendente dal backfill.
 
-### 2) Settle mercati secondari (`history.py`)
+### 2) Settle mercati secondari (`history.py`) — ✅ implementato
 
-- Estendere `settle_pending` a **cartellini**, **corner**, **marcatori** (hit da risultato fd / StatsBomb / match log).
-- Oggi: MC + extras; niente hit in SQLite → niente aggiornamento bins/residual su quei mercati.
+- **Cartellini / corner:** `settle_from_results` legge `HY/AY/HR/AR/HC/AC` da football-data (`parse.py`); hit su pick `CARD*` / `CORN*`.
+- **Marcatori:** `settle_scorer_pending()` — FotMob `matchDetails` + `scorer_hit()` (fuzzy nome da `scorers.py`); salva `fotmob_match_id` + `pick_label` in archivio.
+- Resta operativo: far crescere pick scorer archiviati pre-match su Big 5 con match_id FotMob.
 
-### 3) Stabilizzazione connettori dati
+### 3) Stabilizzazione connettori dati — 🟡 migliorato
 
-- Betfair: mitigare 403 GHA (cache, soft-fail già attivo; opzionale proxy/rotazione UA o provider a consumo).
+- **Betfair:** soft-fail + **cache stale** su 403/errori CI (`betfair._load_stale_cache`).
+- **FotMob:** `http_client` con rotazione UA + retry curl_cffi multi-profile.
 - AsianBetSoccer: retry + skip giorno (GHA non crasha più su timeout).
 - FotMob/FBref: fallback cache + Big 5 only; monitorare rotture schema.
 
-### 4) Phasing-out backfill synthetic
+### 4) Phasing-out backfill synthetic — ✅ gate automatico
 
-- Quando **≥ 150 live ricche** archiviate pre-match: rimuovere dal fit di `residual_ev`, `online_p_factor`, `data_signal_weights` le righe `synthetic_backfill=1`.
-- Apprendimento **solo** da quote e fattori registrati pre-kickoff reali.
+- Quando **≥ 150 live ricche**: `replicate_for_fit` esclude righe `synthetic_backfill=1` (residual, online_p_factor, pesi data_signal).
 
 ### 5) Paper Kelly credibile
 
@@ -615,6 +617,9 @@ Ordine consigliato (solo dati/operatività — il codice core è chiuso):
 | Aggressive learn (live×5, backfill×4) | ✅ |
 | `online_p_factor` da live ricche (n=30) | ✅ |
 | Mercati estesi, UI pro_scores, GHA settimanale | ✅ |
+| Settle cards/corners/scorer (`history.py`) | ✅ |
+| Phasing-out backfill @150 live (`learn_policy`) | ✅ |
+| GHA pre-match odds (`odds-prefresh.yml`) | ✅ |
 
 ### Operatività (dati live) — verso 10/10 🟡
 
@@ -623,9 +628,9 @@ Ordine consigliato (solo dati/operatività — il codice core è chiuso):
 | Trainable totali | **151 / 80** ✅ | mantenere; spostare peso su live |
 | Live ricche pre-match | **51 / 80+** 🟡 | **≥ 80** con `--odds-update` quotidiano |
 | Paper Kelly @ quote reali | **parziale** | ROI su solo live ricche |
-| Settle cards/corners/scorer | ❌ | `settle_pending` esteso |
-| Backfill nel fit | **100 righe** 🟡 | phasing-out a **≥ 150 live** |
-| Connettori (Betfair/Asian/FotMob) | soft-fail ✅ | meno fragilità CI |
+| Settle cards/corners/scorer | ✅ codice | copertura pick secondari |
+| Backfill nel fit | **100 righe** 🟡 | auto-escluso a **≥ 150 live** ✅ |
+| Connettori (Betfair/Asian/FotMob) | UA retry + cache stale ✅ | monitor rotture |
 
 Dettaglio gate e azioni: `TECH_ROADMAP.md`.
 
