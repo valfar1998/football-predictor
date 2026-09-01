@@ -2,7 +2,7 @@
 
 Sintesi aggiornata del progetto **football-predictor**  
 Repo: [github.com/valfar1998/football-predictor](https://github.com/valfar1998/football-predictor) · branch `main`  
-Ultimo aggiornamento: **2026-08-22** — roadmap implementativa chiusa; apprendimento trainable-only; snapshot 830 settled / 151 trainable.
+Ultimo aggiornamento: **2026-08-30** — Asian soft-fail GHA; roadmap dati verso 10/10.
 
 Scopo di questo file: dare a un altro modello / analista contesto sufficiente per suggerire miglioramenti **senza** dover leggere tutto il codice.
 
@@ -553,14 +553,50 @@ streamlit run app.py
 
 ---
 
-## 10. Limiti noti
+## 10. Limiti verso il 10/10
 
-1. API non ufficiali (FotMob/FBref/Sofascore) fragili.  
-2. Residual produzione: trainable ≥ 80; paper Kelly credibile solo su **live ricche** con `quota_pick` (51 oggi).  
-3. Backfill synthetic: bootstrap calibrazione ok, **non** sostituisce quote pre-match reali.  
-4. Cards/corners: FD rates; niente settle hit. Marcatori: quote book rare.  
-5. Betfair CI 403; soft-fail gestito.  
-6. Conformal O/U–AH: OOF XGB preferito, altrimenti Poisson λ.  
+Oggi il **codice** è al massimo (residual, pesi, online learn, pro_scores, GHA). Il gap restante è **operativo/dati**, non architettura.
+
+| Limite | Impatto |
+|--------|---------|
+| **Live ricche pre-match ridotte** | **51 / 80+** target — paper Kelly e ROI restano parzialmente legati al backfill synthetic |
+| **Settle mercati esplorativi assente** | Cards, corner, marcatori: solo proxy MC; non alimentano `settle_pending` né calibrazione post-hoc |
+| **Connettori fragili** | API non ufficiali / scraping (403 Betfair in CI, rotazioni hash Asian, cambi FotMob/FBref) → soft-fail, cache, skip giorno |
+| **Backfill synthetic ancora nel fit** | Bootstrap utile ma non equivale a quote pre-KO reali; da phasing-out quando live ≥ 150 |
+
+Altri limiti minori: conformal O/U–AH fallback Poisson; quote book su marcatori rare; leghe minori con fallback Elo.
+
+---
+
+## 10.1 Come raggiungere il 10/10
+
+Ordine consigliato (solo dati/operatività — il codice core è chiuso):
+
+### 1) Live ricche ≥ 80 (priorità assoluta)
+
+- Routine **quotidiana pre-match**: UI **Solo quote** o `python main.py --odds-update` (archive con `quota_pick`, `ev_cons`/`ev_sharp`, `data_factors`, `agree_share`).
+- Ogni fixture archiviata **prima del KO** + settle post-match → fit sempre più credibile **senza** dipendere dal synthetic.
+- Target: **80+ live ricche** → validazione ROI e paper trading indipendente dal backfill.
+
+### 2) Settle mercati secondari (`history.py`)
+
+- Estendere `settle_pending` a **cartellini**, **corner**, **marcatori** (hit da risultato fd / StatsBomb / match log).
+- Oggi: MC + extras; niente hit in SQLite → niente aggiornamento bins/residual su quei mercati.
+
+### 3) Stabilizzazione connettori dati
+
+- Betfair: mitigare 403 GHA (cache, soft-fail già attivo; opzionale proxy/rotazione UA o provider a consumo).
+- AsianBetSoccer: retry + skip giorno (GHA non crasha più su timeout).
+- FotMob/FBref: fallback cache + Big 5 only; monitorare rotture schema.
+
+### 4) Phasing-out backfill synthetic
+
+- Quando **≥ 150 live ricche** archiviate pre-match: rimuovere dal fit di `residual_ev`, `online_p_factor`, `data_signal_weights` le righe `synthetic_backfill=1`.
+- Apprendimento **solo** da quote e fattori registrati pre-kickoff reali.
+
+### 5) Paper Kelly credibile
+
+- Con 80+ live con `quota_pick`: tab Valutazione → equity/Sharpe/ROI @ quote reali come metrica principale (non solo trainable totale 151).
 
 ---
 
@@ -580,13 +616,16 @@ streamlit run app.py
 | `online_p_factor` da live ricche (n=30) | ✅ |
 | Mercati estesi, UI pro_scores, GHA settimanale | ✅ |
 
-### Operatività (dati live) — in corso 🟡
+### Operatività (dati live) — verso 10/10 🟡
 
-| Area | Stato | Nota |
-|------|--------|------|
-| Trainable totali | **151 / 80** ✅ | 100 backfill + 51 live ricche |
-| Live ricche pre-match | **51 / 80+** | cresce con **Solo quote** pre-KO |
-| Paper Kelly @ quote reali | **parziale** | solo live con `quota_pick` |
+| Area | Stato | Target 10/10 |
+|------|--------|----------------|
+| Trainable totali | **151 / 80** ✅ | mantenere; spostare peso su live |
+| Live ricche pre-match | **51 / 80+** 🟡 | **≥ 80** con `--odds-update` quotidiano |
+| Paper Kelly @ quote reali | **parziale** | ROI su solo live ricche |
+| Settle cards/corners/scorer | ❌ | `settle_pending` esteso |
+| Backfill nel fit | **100 righe** 🟡 | phasing-out a **≥ 150 live** |
+| Connettori (Betfair/Asian/FotMob) | soft-fail ✅ | meno fragilità CI |
 
 Dettaglio gate e azioni: `TECH_ROADMAP.md`.
 
@@ -608,7 +647,7 @@ Dettaglio gate e azioni: `TECH_ROADMAP.md`.
 
 > **Sistema ibrido** (non un singolo algoritmo): ML cluster 1X2 + XGB O/U/AH + Poisson + MC multi-mercato → probabilità calibrate (bin OOF + blend online trainable-only + `online_p_factor`); edge da quote sharp/Asian; quadro tattico separato dall’EV; no_bet su filtri value/conformal/accordo/residual.  
 > **Apprendimento:** pre-match `archive_upcoming` → post-match `settle` → **Apprendi** aggiorna calibrazione/residual/pesi **senza** ritrenare XGB (ritrain GHA settimanale). Fit solo su **151 trainable** (51 live ricche + 100 backfill); **679 live incomplete ignorate**. Residual in produzione (WF-RMSE ≈ 0,53).  
-> **Roadmap codice:** ✅ chiusa. **Roadmap dati:** far crescere live ricche (51→80+) con **Solo quote** pre-match per paper Kelly credibile.
+> **Roadmap codice:** ✅ chiusa. **Roadmap dati (10/10):** live ricche 51→80+ → settle mercati secondari → phasing-out backfill a 150+ live → connettori più stabili.
 
 ---
 

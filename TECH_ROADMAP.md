@@ -1,6 +1,6 @@
 # Roadmap — stato e prossimi passi
 
-Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-22** (dopo backfill synthetic + learn trainable-only).
+Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-30** (roadmap verso 10/10; Asian soft-fail GHA).
 
 **Regola d’oro:** live/contesto fragile → quadro/voto/no_bet; EV/Kelly solo da modelli/calibrazione su OOF o settled.
 
@@ -44,32 +44,38 @@ Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-22** (dopo backfill synthe
 
 ---
 
-## Aperti (operatività / dati)
+## Aperti (operatività / dati) — verso 10/10
 
-### 1) Live ricche — crescita continua (51 → 80+ live-only)
+### 1) Live ricche — **51 → 80+** (priorità)
 
-- **Backfill synthetic (100)** → bootstrap fatto; non sostituisce il live ma accelera bins/residual/pesi.
-- **Cosa manca:** più archivi **live** pre-match completi (quota+EV+fattori) su Top leghe.
-- **Azione:** **Solo quote** prima del KO; preferire partite con quote reali / Asian.
+- Routine pre-match: **Solo quote** / `--odds-update` ogni giorno.
+- 80+ fixture con `quota_pick` + EV + fattori → paper/ROI indipendente dal backfill.
 
-### 2) Residual EV in produzione stabile — ✅ FATTO
+### 2) Settle mercati secondari — ❌ da fare
 
-- Codice attivo: `mode: full_production`, n=620 fit, WF-RMSE ≈ 0,53 (trainable-only + replicate).
-- Verifica in UI tab **Valutazione** dopo **Apprendi da partite chiuse**.
+- `history.py`: hit post-match per **cards**, **corners**, **scorer** (oggi solo proxy MC).
 
-### 3) Paper Kelly / ROI @ quote reali — 🟡 parziale
+### 3) Connettori dati — 🟡 parziale
 
-- **51 live** con `quota_pick`; backfill non ha quote reali pre-match.
-- Migliora con più archivi live ricchi pre-match.
+- Betfair 403 CI: soft-fail ✅; opzionale proxy/UA o API a consumo.
+- Asian timeout GHA: retry + skip ✅.
+- FotMob/FBref: cache + monitor rotture.
 
-### 4) Pesi `data_signal` su ROI reale — ✅ operativo
+### 4) Phasing-out backfill synthetic — ⏳ gate 150 live
 
-- `optimize_weights` su 655 righe replicate (151 trainable); Brier ≈ 0,25.
-- Bottone **Ottimizza pesi Analisi dati** in Valutazione (dopo Apprendi).
+- A **≥ 150 live ricche**: escludere `synthetic_backfill=1` da residual / online_p_factor / pesi data_signal.
+
+### 5) Residual EV in produzione — ✅ FATTO
+
+- WF-RMSE ≈ 0,53; verifica tab Valutazione.
+
+### 6) Pesi `data_signal` — ✅ operativo
+
+- Walk-forward su trainable; Ottimizza pesi in UI dopo Apprendi.
 
 ---
 
-## Chiusi di recente (non ripetere)
+## Chiusi (codice / recenti)
 
 - Progresso `calendario N/M` durante **Aggiorna dati + modello** (95→99%, non più barra ferma).
 - **Bottoni quote leggeri:** `refresh_upcoming_odds` (EV/Kelly senza ML/MC); **Solo quote** = fd + Asian + Pinnacle/Betfair cache, niente mondiale/coppe/tipster/FBref; notify-refresh light.
@@ -86,13 +92,14 @@ Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-22** (dopo backfill synthe
 
 ---
 
-## Ordine consigliato (da ora)
+## Ordine consigliato (verso 10/10)
 
 ```text
-1. Refresh pre-match quotidiano (Solo quote o Aggiorna) → storico ricco 51→80+
-2. Apprendi da partite chiuse ogni 1–2 giorni
-3. Monitor Valutazione: residual (ok), paper ROI, pesi data_signal
-4. Quando online_p_factor ≥80 settled 1X2: controllare calibrazione live vs OOF
+1. Live ricche 51→80+     (--odds-update pre-match quotidiano)
+2. Settle cards/corners/scorer   (history.py)
+3. Connettori più stabili  (Betfair/Asian/FotMob)
+4. Phasing-out backfill    (quando live ≥ 150)
+5. Paper Kelly su solo live ricche
 ```
 
 ---
