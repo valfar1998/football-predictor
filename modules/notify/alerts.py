@@ -1,4 +1,4 @@
-"""Avvisi Telegram: GIOCA (voto ≥8 + action gioca), da guardare (voto ≥8 + no bet), spread Raro."""
+"""Avvisi Telegram: GIOCA (voto ≥8 + action gioca), da guardare (voto ≥8 + no bet), spread Raro (giocabilità >8)."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ UPCOMING = ROOT / "data" / "processed" / "upcoming_predictions.json"
 SENT = ROOT / "data" / "processed" / "telegram_alerts_sent.json"
 MIN_UNIFIED = 8
 RARE_LINE = 1.0
+MIN_SPREAD_PLAYABILITY = 9  # solo giocabilità > 8
 KEEP_DAYS = 21
 CHUNK = 10
 BRAND = "FOOTBALL PREDICTOR"
@@ -321,6 +322,8 @@ def _rare_from_move(row: dict, move: dict | None) -> dict | None:
     tot_curr = move.get("total_curr", row.get("total_line") or row.get("total_curr"))
     playab = spread_playability(row, move)
     score = int(playab["score"])
+    if score < MIN_SPREAD_PLAYABILITY:
+        return None
     verdict = str(playab.get("verdict") or "")
     body = [
         _header(row),
@@ -436,7 +439,10 @@ def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False
     fresh_spread = [a for a in found["spread"] if a["id"] not in sent_ids]
     messages = _pack(f"🎯 GIOCA · voto ≥{MIN_UNIFIED}", fresh_gioca)
     messages += _pack(f"👀 Da guardare · voto ≥{MIN_UNIFIED} · NO BET", fresh_watch)
-    messages += _pack("📈 AsianBetSoccer · spread Raro (giocabilità 1–10)", fresh_spread)
+    messages += _pack(
+        f"📈 AsianBetSoccer · spread Raro · giocabilità >8 (min {MIN_SPREAD_PLAYABILITY}/10)",
+        fresh_spread,
+    )
 
     sent_n = 0
     if dry_run:
@@ -526,5 +532,5 @@ def ping_bot() -> bool:
         "Bot collegato.\n"
         f"Avvisi: 🎯 GIOCA (voto ≥{MIN_UNIFIED} + action gioca), "
         f"👀 da guardare (voto ≥{MIN_UNIFIED} + no bet), "
-        "spread Raro con giocabilità 1–10."
+        f"spread Raro con giocabilità >8 (min {MIN_SPREAD_PLAYABILITY}/10)."
     )
