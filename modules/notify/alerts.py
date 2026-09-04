@@ -1,4 +1,4 @@
-"""Avvisi Telegram: GIOCA (voto ≥9 + action gioca), da guardare (voto ≥9 + no bet), spread Raro."""
+"""Avvisi Telegram: GIOCA (voto ≥8 + action gioca), da guardare (voto ≥8 + no bet), spread Raro."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from modules.notify.telegram import load_credentials, send_message, telegram_sta
 ROOT = Path(__file__).resolve().parents[2]
 UPCOMING = ROOT / "data" / "processed" / "upcoming_predictions.json"
 SENT = ROOT / "data" / "processed" / "telegram_alerts_sent.json"
-MIN_UNIFIED = 9
+MIN_UNIFIED = 8
 RARE_LINE = 1.0
 KEEP_DAYS = 21
 CHUNK = 10
