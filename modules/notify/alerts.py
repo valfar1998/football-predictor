@@ -139,49 +139,85 @@ def _pick_line(row: dict) -> str:
 
 
 
-def _quota_of(row: dict) -> float | None:
-    """Quota book del pick consigliato (ignora bool odds_real)."""
+def _as_quota(val: object) -> float | None:
+    if isinstance(val, bool) or val is None:
+        return None
     try:
-        from modules.data_update.history import _quota_from_row
+        num = float(val)
+    except (TypeError, ValueError):
+        return None
+    if 1.01 <= num <= 100:
+        return num
+    return None
 
-        return _quota_from_row(row, pick=row.get("pick"))
-    except Exception:
-        pass
-    for key in ("quota_pick", "odds", "fair_odds"):
-        val = row.get(key)
-        if isinstance(val, bool) or val is None:
-            continue
-        try:
-            num = float(val)
-            if 1.01 <= num <= 100:
-                return num
-        except (TypeError, ValueError):
-            continue
+
+def _quota_of(row: dict) -> float | None:
+    """Quota book del pick consigliato (mai fair_odds)."""
+    num = _as_quota(row.get("quota_pick"))
+    if num is not None:
+        return num
+    if not isinstance(row.get("odds"), bool):
+        num = _as_quota(row.get("odds"))
+        if num is not None:
+            return num
     pick = str(row.get("pick") or "").strip().upper()
     flat = {
-        "1": "odd_1",
-        "X": "odd_x",
-        "2": "odd_2",
-        "O2.5": "odd_over_25",
-        "U2.5": "odd_under_25",
+        "1": ("odd_1", "1"),
+        "X": ("odd_x", "X"),
+        "2": ("odd_2", "2"),
+        "O2.5": ("odd_over_25", "over_2.5"),
+        "U2.5": ("odd_under_25", "under_2.5"),
     }
+    odds = row.get("odds")
     if pick in flat:
-        try:
-            num = float(row.get(flat[pick]))
-            if 1.01 <= num <= 100:
+        flat_key, dict_key = flat[pick]
+        num = _as_quota(row.get(flat_key))
+        if num is not None:
+            return num
+        if isinstance(odds, dict):
+            num = _as_quota(odds.get(dict_key))
+            if num is not None:
                 return num
-        except (TypeError, ValueError):
-            pass
     markets = row.get("markets")
     if isinstance(markets, list):
         for m in markets:
             if isinstance(m, dict) and str(m.get("code") or "").upper() == pick:
+                num = _as_quota(m.get("odds"))
+                if num is not None:
+                    return num
+    return None
+
+
+def _fair_quota_of(row: dict) -> float | None:
+    """Quota equa secondo l'analisi (1/p del pick consigliato)."""
+    num = _as_quota(row.get("fair_odds"))
+    if num is not None:
+        return num
+    pick = str(row.get("pick") or "").strip().upper()
+    markets = row.get("markets")
+    if isinstance(markets, list):
+        for m in markets:
+            if not isinstance(m, dict):
+                continue
+            if str(m.get("code") or "").upper() != pick:
+                continue
+            num = _as_quota(m.get("fair_odds"))
+            if num is not None:
+                return num
+            for pk in ("p_cons", "probability", "model_probability"):
                 try:
-                    num = float(m.get("odds"))
-                    if 1.01 <= num <= 100:
-                        return num
+                    p = float(m.get(pk))
                 except (TypeError, ValueError):
-                    pass
+                    continue
+                if p > 0.02:
+                    return round(1.0 / min(p, 0.98), 2)
+    for pk in ("probability", "p_cons"):
+        try:
+            p = float(row.get(pk))
+        except (TypeError, ValueError):
+            continue
+        if p > 0.02:
+            return round(1.0 / min(p, 0.98), 2)
     return None
 
 
@@ -189,6 +225,19 @@ def _fmt_quota(val: float | None) -> str | None:
     if val is None:
         return None
     return f"{val:.2f}".rstrip("0").rstrip(".")
+
+
+def _quota_lines(row: dict, *, book_label: str = "Quota") -> list[str]:
+    """Righe Telegram: quota book + quota equa dall'analisi."""
+    book = _fmt_quota(_quota_of(row))
+    fair = _fmt_quota(_fair_quota_of(row))
+    if book and fair and book != fair:
+        return [f"{book_label} {book} · equa {fair}"]
+    if book:
+        return [f"{book_label} {book}"]
+    if fair:
+        return [f"Equa (analisi) {fair}"]
+    return []
 
 
 def _hist_phrase(score: int) -> str | None:
@@ -221,9 +270,7 @@ def _score_alerts(rows: list[dict]) -> dict[str, list[dict]]:
             key = f"gioca|{_match_key(row)}|{score}"
             body = [_header(row), f"🎯 GIOCA · voto {score}/10"]
             body.append(f"Pick: {play}")
-            quota = _fmt_quota(_quota_of(row))
-            if quota:
-                body.append(f"Quota {quota}")
+            body.extend(_quota_lines(row, book_label="Quota"))
             if ev:
                 body.append(f"EV {ev}")
             kq = row.get("kelly_quarter")
@@ -245,9 +292,7 @@ def _score_alerts(rows: list[dict]) -> dict[str, list[dict]]:
         key = f"watch|{_match_key(row)}|{score}"
         body = [_header(row), f"👀 Da guardare · voto {score}/10 · NO BET"]
         body.append(f"Pick: {play} — non giocare")
-        quota = _fmt_quota(_quota_of(row))
-        if quota:
-            body.append(f"Quota rif. {quota}")
+        body.extend(_quota_lines(row, book_label="Quota rif."))
         if ev:
             body.append(f"EV {ev}")
         reason = _reasons_text(row)
