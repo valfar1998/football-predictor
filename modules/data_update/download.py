@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import io
+import time
 import zipfile
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from modules.data_update.leagues import EXTRA_LEAGUES, SEASON_ZIPS
@@ -14,20 +16,87 @@ RAW = ROOT / "data" / "raw"
 FD_MAIN = RAW / "fd" / "main"
 FD_EXTRA = RAW / "fd" / "extra"
 FIXTURES = RAW / "fixtures"
+FD_SEED = RAW / "fd_seed.zip"
 BASE = "https://www.football-data.co.uk"
-UA = "Mozilla/5.0 (compatible; football-predictor/1.0; +local)"
+UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+)
+
+# Fail-fast globale: un 503 confermato → non martellare FD per il resto del run.
+_fd_down = False
 
 
-def _get(url: str) -> bytes:
-    req = Request(url, headers={"User-Agent": UA})
-    with urlopen(req, timeout=60) as resp:
-        return resp.read()
+def _get(url: str, *, retries: int = 2, backoff_s: float = 1.5) -> bytes:
+    """GET con 1 retry su 429/5xx. Dopo un 503, i GET successivi falliscono subito."""
+    global _fd_down
+    if _fd_down:
+        raise HTTPError(url, 503, "Service Temporarily Unavailable (fail-fast)", hdrs=None, fp=None)
+
+    last: BaseException | None = None
+    for attempt in range(max(1, retries)):
+        req = Request(
+            url,
+            headers={
+                "User-Agent": UA,
+                "Accept": "text/csv,text/plain,*/*;q=0.8",
+                "Accept-Language": "en-GB,en;q=0.9",
+            },
+        )
+        try:
+            with urlopen(req, timeout=60) as resp:
+                return resp.read()
+        except HTTPError as exc:
+            last = exc
+            if exc.code == 503:
+                _fd_down = True
+            retriable = exc.code in {408, 429, 500, 502, 504}  # 503: no retry (sito down)
+            if retriable and attempt + 1 < retries:
+                sleep_s = min(backoff_s * (attempt + 1), 5.0)
+                print(f"retry {attempt + 1}/{retries} HTTP {exc.code}, sleep {sleep_s:.1f}s…", flush=True)
+                time.sleep(sleep_s)
+                continue
+            raise
+        except (URLError, TimeoutError, OSError) as exc:
+            last = exc
+            if attempt + 1 < retries:
+                sleep_s = min(backoff_s * (attempt + 1), 5.0)
+                print(f"retry {attempt + 1}/{retries} rete ({exc}), sleep {sleep_s:.1f}s…", flush=True)
+                time.sleep(sleep_s)
+                continue
+            raise
+    assert last is not None
+    raise last
 
 
 def _write(path: Path, data: bytes) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     return path
+
+
+def has_historical_data() -> bool:
+    """True se esistono CSV storici main e/o extra già sul disco."""
+    has_main = FD_MAIN.is_dir() and any(FD_MAIN.glob("*/*.csv"))
+    has_extra = FD_EXTRA.is_dir() and any(FD_EXTRA.glob("*.csv"))
+    return has_main or has_extra
+
+
+def extract_fd_seed(*, force: bool = False) -> bool:
+    """Estrae data/raw/fd_seed.zip se manca lo storico (o force=True)."""
+    if not force and has_historical_data():
+        return True
+    if not FD_SEED.is_file():
+        print("seed storico assente (data/raw/fd_seed.zip)", flush=True)
+        return False
+    print(f"estrai seed storico {FD_SEED.name}…", flush=True)
+    dest = RAW / "fd"
+    dest.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(FD_SEED) as zf:
+        zf.extractall(dest)
+    ok = has_historical_data()
+    print(f"{'ok' if ok else 'fail'} seed storico", flush=True)
+    return ok
 
 
 def download_season_zip(season: str) -> Path | None:
@@ -61,14 +130,24 @@ def download_extra_leagues() -> list[Path]:
 
 
 def download_fixtures() -> list[Path]:
+    """Scarica fixtures; in caso di errore tiene la cache locale se presente."""
     files = []
     for name, url in (
         ("main.csv", f"{BASE}/fixtures.csv"),
         ("extra.csv", f"{BASE}/new_league_fixtures.csv"),
     ):
         print(f"download fixtures {name}…", flush=True)
-        data = _get(url)
-        files.append(_write(FIXTURES / name, data))
+        dest = FIXTURES / name
+        try:
+            data = _get(url)
+        except Exception as exc:
+            if dest.is_file() and dest.stat().st_size > 0:
+                print(f"skip fixtures {name}: {exc} (uso cache locale)", flush=True)
+                files.append(dest)
+            else:
+                print(f"skip fixtures {name}: {exc}", flush=True)
+            continue
+        files.append(_write(dest, data))
         print(f"ok fixtures {name}", flush=True)
     return files
 
@@ -81,6 +160,8 @@ def download_all(*, seasons: tuple[str, ...] = SEASON_ZIPS) -> dict:
     seasons_ok = [s for s in seasons if download_season_zip(s)]
     extra = download_extra_leagues()
     fixtures = download_fixtures()
+    if not has_historical_data():
+        extract_fd_seed()
     try:
         from modules.data_update.cups import download_org_cups
 

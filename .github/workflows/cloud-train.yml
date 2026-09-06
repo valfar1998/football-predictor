@@ -38,6 +38,15 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: |
+            data/raw/fd
+            data/raw/fixtures
+          key: cloud-fd-v1
+          restore-keys: |
+            cloud-fd-
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
             data/models/residual_ev.json
             data/models/data_signal_weights.json
             data/models/online_learn_report.json
@@ -98,6 +107,14 @@ jobs:
             data/models/market_models.joblib
             data/processed/features.csv
           key: cloud-model-v1
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            data/raw/fd
+            data/raw/fixtures
+          key: cloud-fd-v1
 
       - uses: actions/cache/restore@v4
         with:

@@ -16,7 +16,13 @@ def main() -> None:
             sys.stdout.reconfigure(encoding="utf-8")
         except Exception:
             pass
-    from modules.data_update.download import download_extra_leagues, download_fixtures, download_season_zip
+    from modules.data_update.download import (
+        download_extra_leagues,
+        download_fixtures,
+        download_season_zip,
+        extract_fd_seed,
+        has_historical_data,
+    )
     from modules.data_update.leagues import SEASON_ZIPS
     from modules.dataset_loader import DatasetLoader
     from modules.feature_engineering import FeatureEngineer
@@ -27,7 +33,15 @@ def main() -> None:
         if download_season_zip(season):
             seasons_ok.append(season)
     extra = download_extra_leagues()
+    # fixtures non bloccanti: il train usa solo lo storico; 503 FD non deve far fallire CI
     download_fixtures()
+    if not has_historical_data():
+        if not extract_fd_seed():
+            raise SystemExit(
+                "bootstrap: nessun dato storico "
+                "(football-data.co.uk irraggiungibile e seed assente)"
+            )
+        print("bootstrap: uso seed storico locale (FD down)", flush=True)
     loader = DatasetLoader()
     matches, matches_path = loader.run("matches.csv")
     engineer = FeatureEngineer(window=5)

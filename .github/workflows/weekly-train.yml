@@ -23,6 +23,15 @@ jobs:
       - name: Dipendenze cloud
         run: pip install -r requirements-cloud.txt
 
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/raw/fd
+            data/raw/fixtures
+          key: cloud-fd-v1
+          restore-keys: |
+            cloud-fd-
+
       - name: Scarica storico e allena (1X2 + O/U + AH)
         env:
           PYTHONUTF8: "1"
@@ -44,6 +53,14 @@ jobs:
             data/processed/features.csv
           if-no-files-found: warn
           retention-days: 30
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            data/raw/fd
+            data/raw/fixtures
+          key: cloud-fd-v1
 
       - uses: actions/cache/save@v4
         with:
