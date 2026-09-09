@@ -204,6 +204,14 @@ def _gioca_progress(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     high = [r for r in gioca if (_score_int(r, "score_unified") or 0) >= 8]
     high_hits = sum(1 for r in high if int(r.get("hit") or 0) == 1)
+    high_pnl = 0.0
+    high_odds_n = 0
+    for r in high:
+        q = _valid_quota(r.get("quota_pick"))
+        if q is None:
+            continue
+        high_odds_n += 1
+        high_pnl += (q - 1.0) if int(r.get("hit") or 0) == 1 else -1.0
 
     return {
         "n": n,
@@ -222,6 +230,9 @@ def _gioca_progress(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "hits": high_hits,
             "hit_rate": round(high_hits / len(high), 4) if high else None,
             "label": f"{high_hits}/{len(high)}" if high else "0/0",
+            "odds_n": high_odds_n,
+            "roi": round(high_pnl / high_odds_n, 4) if high_odds_n else None,
+            "pnl": round(high_pnl, 2) if high_odds_n else None,
         },
     }
 
@@ -283,9 +294,11 @@ def build_analysis_outcomes_report(
         hv = gioca.get("high_vote") or {}
         if hv.get("n", 0) >= 1:
             hr = hv.get("hit_rate")
+            roi = hv.get("roi")
             highlights.append(
                 f"Giocate voto ≥8: {hv['label']}"
                 + (f" ({hr:.0%})" if hr is not None else "")
+                + (f" · ROI {roi:+.0%}" if roi is not None else "")
             )
     for row in by_unified:
         if int(row["key"]) >= 8 and row["n"] >= 2:

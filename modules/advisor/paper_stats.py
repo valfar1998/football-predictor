@@ -87,20 +87,29 @@ def _equity_stats(pnls: list[float]) -> dict[str, Any]:
     }
 
 
-def kelly_equity_snapshot(*, kelly_frac: float = 0.25, trainable_only: bool = True) -> dict[str, Any]:
+def kelly_equity_snapshot(
+    *,
+    kelly_frac: float = 0.25,
+    trainable_only: bool = True,
+    min_score: int | None = None,
+) -> dict[str, Any]:
     """Snapshot equity Kelly per drawdown guard (solo righe con quota)."""
     try:
         from modules.data_update.history import load_history
-        from modules.advisor.learn_policy import trainable_settled
+        from modules.advisor.learn_policy import ROI_MIN_SCORE, meets_roi_score, trainable_settled
     except Exception:
         return {"ok": False}
 
+    if min_score is None:
+        min_score = ROI_MIN_SCORE
     rows = sorted(
         [r for r in load_history() if r.get("hit") is not None],
         key=lambda r: str(r.get("date") or ""),
     )
     if trainable_only:
         rows = trainable_settled(rows)
+    if min_score:
+        rows = [r for r in rows if meets_roi_score(r, min_score=min_score)]
     bank = 100.0
     pnls: list[float] = []
     for r in rows:
@@ -129,23 +138,38 @@ def kelly_equity_snapshot(*, kelly_frac: float = 0.25, trainable_only: bool = Tr
     return {"ok": True, **eq}
 
 
-def paper_trading_report(*, bankroll: float = 100.0, kelly_frac: float = 0.25, trainable_only: bool = True) -> dict[str, Any]:
+def paper_trading_report(
+    *,
+    bankroll: float = 100.0,
+    kelly_frac: float = 0.25,
+    trainable_only: bool = True,
+    min_score: int | None = None,
+) -> dict[str, Any]:
     try:
         from modules.data_update.history import load_history
         from modules.model_training.league_clusters import cluster_for
-        from modules.advisor.learn_policy import trainable_settled, is_live
+        from modules.advisor.learn_policy import ROI_MIN_SCORE, is_live, meets_roi_score, trainable_settled
         from modules.advisor.staking import beat_close, kelly_risk_scale
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
+    if min_score is None:
+        min_score = ROI_MIN_SCORE
     all_settled = sorted(
         [r for r in load_history() if r.get("hit") is not None],
         key=lambda r: str(r.get("date") or ""),
     )
     rows = trainable_settled(all_settled) if trainable_only else all_settled
+    if min_score:
+        rows = [r for r in rows if meets_roi_score(r, min_score=min_score)]
     live_rows = [r for r in rows if is_live(r)]
     if not rows:
-        return {"ok": True, "n": 0, "note": "nessun esito settled"}
+        return {
+            "ok": True,
+            "n": 0,
+            "min_score": min_score,
+            "note": f"nessun esito settled con voto ≥{min_score}" if min_score else "nessun esito settled",
+        }
 
     def _bucket(key_fn, pool: list[dict]):
         g: dict[str, list] = defaultdict(list)
@@ -224,7 +248,9 @@ def paper_trading_report(*, bankroll: float = 100.0, kelly_frac: float = 0.25, t
     kelly_pnls = []
     clv_all: list[float] = []
     bank = float(bankroll)
-    pre_snap = kelly_equity_snapshot(kelly_frac=kelly_frac, trainable_only=trainable_only)
+    pre_snap = kelly_equity_snapshot(
+        kelly_frac=kelly_frac, trainable_only=trainable_only, min_score=min_score
+    )
     risk_scale = kelly_risk_scale(
         max_drawdown=pre_snap.get("max_drawdown") if pre_snap.get("ok") else None,
         sharpe=pre_snap.get("sharpe") if pre_snap.get("ok") else None,
@@ -266,6 +292,7 @@ def paper_trading_report(*, bankroll: float = 100.0, kelly_frac: float = 0.25, t
     return {
         "ok": True,
         "trainable_only": trainable_only,
+        "min_score": min_score,
         "n_settled_total": len(all_settled),
         "n": len(rows),
         "n_live": len(live_rows),

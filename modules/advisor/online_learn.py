@@ -20,10 +20,12 @@ from modules.advisor.learn_policy import (
     LIVE_ROI_MIN,
     OPF_ADJ_CAP_AGGRESSIVE,
     OPF_ERR_SCALE_AGGRESSIVE,
+    ROI_MIN_SCORE,
     TRAINABLE_1X2_MIN,
     TRAINABLE_ROI_MIN,
     aggressive_enabled,
     is_live,
+    meets_roi_score,
     replicate_for_fit,
     split_trainable,
     trainable_settled,
@@ -92,10 +94,15 @@ def _recent_roi(
     last_n: int = 80,
     min_n: int = 20,
     live_only: bool = False,
+    min_score: int | None = None,
 ) -> dict[str, Any]:
+    if min_score is None:
+        min_score = ROI_MIN_SCORE
     pool = trainable_settled(rows)
     if live_only:
         pool = [r for r in pool if is_live(r)]
+    if min_score:
+        pool = [r for r in pool if meets_roi_score(r, min_score=min_score)]
     chunk = pool[-last_n:]
     pnl = 0.0
     n = 0
@@ -106,8 +113,15 @@ def _recent_roi(
         n += 1
         pnl += (q - 1.0) if int(r.get("hit") or 0) == 1 else -1.0
     if n < min_n:
-        return {"ok": False, "n": n, "live_only": live_only}
-    return {"ok": True, "n": n, "roi": round(pnl / n, 4), "pnl": round(pnl, 2), "live_only": live_only}
+        return {"ok": False, "n": n, "live_only": live_only, "min_score": min_score}
+    return {
+        "ok": True,
+        "n": n,
+        "roi": round(pnl / n, 4),
+        "pnl": round(pnl, 2),
+        "live_only": live_only,
+        "min_score": min_score,
+    }
 
 
 def _clv_of_row(r: dict[str, Any]) -> float | None:

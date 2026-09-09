@@ -43,7 +43,7 @@ Ogni mattina il job cloud fa due cose diverse:
 | Cosa | Effetto pratico |
 |---|---|
 | **Calibrazione probabilità** | Se il modello è troppo fiducioso/timido, corregge le probabilità. |
-| **Soglia EV minima (`min_ev_play`)** | Se il ROI recente è negativo alza il filtro; se va bene lo allenta un po’. |
+| **Soglia EV minima (`min_ev_play`)** | Se il ROI recente (solo voto ≥8) è negativo alza il filtro; se va bene lo allenta un po’. |
 | **Fattore probabilità online** | Piccolo moltiplicatore sulle p usate nei filtri. |
 | **Residual EV** | Impara quanto l’edge stimato è ottimistico/pessimistico. |
 | **Pesi data-signal** | Ribilancia forma, xG, casa/trasferta, ecc. in base a cosa ha funzionato. |
@@ -131,12 +131,13 @@ def build_digest_text(report: dict[str, Any] | None, *, cal: dict[str, Any] | No
     lines.append("")
 
     if roi.get("ok"):
+        min_sc = roi.get("min_score") or 8
         lines.append(
-            f"- **ROI recente** (ultime {roi.get('n')} giocate): {_pct(roi.get('roi'))} "
+            f"- **ROI recente** (ultime {roi.get('n')} giocate, voto ≥{min_sc}): {_pct(roi.get('roi'))} "
             f"(PnL {roi.get('pnl', 'n/d')} u)"
         )
     else:
-        lines.append("- **ROI recente:** non ancora calcolabile (pochi esiti live).")
+        lines.append("- **ROI recente:** non ancora calcolabile (pochi esiti live con voto ≥8).")
 
     if clv.get("ok"):
         lines.append(

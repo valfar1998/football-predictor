@@ -2448,7 +2448,12 @@ with tab_eval:
                 delta=None if last10.get("hit_rate") is None else f"{last10['hit_rate']:.0%}",
             )
             hv = gioca.get("high_vote") or {}
-            g4.metric("Voto ≥8", hv.get("label") or "—")
+            roi_hv = hv.get("roi")
+            g4.metric(
+                "Voto ≥8",
+                hv.get("label") or "—",
+                delta=None if roi_hv is None else f"ROI {roi_hv:+.0%}",
+            )
             if gioca.get("by_week"):
                 st.caption("Andamento settimanale (hit rate cumula le giocate consigliate chiuse)")
                 week_df = pd.DataFrame(gioca["by_week"]).rename(
@@ -2516,8 +2521,8 @@ with tab_eval:
         from modules.advisor.data_signal_weights import optimize_weights
 
         st.caption(
-            "Report su righe **trainable** (151+). Kelly con **drawdown guard**. "
-            "CLV da quota archiviata vs close Asian/fd."
+            "Report su righe **trainable** con **voto unificato ≥8**. "
+            "Kelly con **drawdown guard**. CLV da quota archiviata vs close Asian/fd."
         )
         cbtn1, cbtn2, cbtn3 = st.columns(3)
         with cbtn1:
@@ -2539,8 +2544,9 @@ with tab_eval:
             st.caption(rep.get("note") or "nessun esito")
         else:
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Trainable", rep["n"], delta=f"tot {rep.get('n_settled_total', rep['n'])}")
-            m2.metric("Flat ROI", f"{rep.get('flat_roi', 0):.1%}")
+            min_sc = rep.get("min_score") or 8
+            m1.metric("Trainable ≥8", rep["n"], delta=f"tot {rep.get('n_settled_total', rep['n'])}")
+            m2.metric("Flat ROI", f"{rep.get('flat_roi', 0):.1%}", delta=f"voto ≥{min_sc}")
             m3.metric(
                 "ROI @ quote",
                 "n/d" if rep.get("odds_roi") is None else f"{rep.get('odds_roi'):.1%}",

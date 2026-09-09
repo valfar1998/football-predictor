@@ -10,7 +10,7 @@ Ogni mattina il job cloud fa due cose diverse:
 | Cosa | Effetto pratico |
 |---|---|
 | **Calibrazione probabilità** | Se il modello è troppo fiducioso/timido, corregge le probabilità. |
-| **Soglia EV minima (`min_ev_play`)** | Se il ROI recente è negativo alza il filtro; se va bene lo allenta un po’. |
+| **Soglia EV minima (`min_ev_play`)** | Se il ROI recente (solo voto ≥8) è negativo alza il filtro; se va bene lo allenta un po’. |
 | **Fattore probabilità online** | Piccolo moltiplicatore sulle p usate nei filtri. |
 | **Residual EV** | Impara quanto l’edge stimato è ottimistico/pessimistico. |
 | **Pesi data-signal** | Ribilancia forma, xG, casa/trasferta, ecc. in base a cosa ha funzionato. |

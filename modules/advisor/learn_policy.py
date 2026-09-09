@@ -29,6 +29,28 @@ LIVE_1X2_MIN_AGGRESSIVE = 30
 TRAINABLE_1X2_MIN = 60
 LIVE_ROI_MIN = 8
 TRAINABLE_ROI_MIN = 15
+# ROI (paper + min_ev) solo su voto unificato ≥8 — le giocate che si seguono davvero
+ROI_MIN_SCORE = 8
+
+
+def score_unified_of(rec: dict[str, Any]) -> int | None:
+    for key in ("score_unified", "score"):
+        v = rec.get(key)
+        if v is None or v == "":
+            continue
+        try:
+            s = int(v)
+            if 1 <= s <= 10:
+                return s
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def meets_roi_score(rec: dict[str, Any], *, min_score: int = ROI_MIN_SCORE) -> bool:
+    s = score_unified_of(rec)
+    return s is not None and s >= min_score
+
 
 BIN_BLEND_MAX_CONSERVATIVE = 0.40
 BIN_BLEND_MAX_AGGRESSIVE = 0.72
