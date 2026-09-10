@@ -18,3 +18,8 @@ def cache_fresh(path: Path, *, hours: float = CONTEXT_CACHE_H, min_bytes: int = 
         return age_h < float(hours)
     except OSError:
         return False
+
+
+def is_fresh(path: Path, *, max_age_hours: float = CONTEXT_CACHE_H, min_bytes: int = 80) -> bool:
+    """Alias usato dai fetch odds (Kambi/Pinnacle style)."""
+    return cache_fresh(path, hours=max_age_hours, min_bytes=min_bytes)

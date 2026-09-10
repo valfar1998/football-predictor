@@ -110,6 +110,12 @@ def _fill_book_odds(
         if odds.get(dst_k) is None and match.get(src_k) is not None:
             odds[dst_k] = match[src_k]
             filled = True
+    for k, v in match.items():
+        if not str(k).startswith("corners_"):
+            continue
+        if odds.get(k) is None and v is not None and not isinstance(v, (dict, list)):
+            odds[k] = v
+            filled = True
     if filled and odds_source not in {"asianbetsoccer"}:
         odds_source = source_name
     return odds, odds_source
@@ -129,6 +135,7 @@ def _collect_match_odds(
     away: str,
     pinnacle_events: list[dict],
     betfair_events: list[dict],
+    kambi_events: list[dict] | None = None,
 ) -> tuple[dict, str, dict | None]:
     odds = {
         "1": _odd(fx, "odd_home"),
@@ -157,11 +164,20 @@ def _collect_match_odds(
     pinnacle_match = None
     if pinnacle_events:
         try:
-            from modules.data_update.odds_api import lookup_pinnacle
+            from modules.data_update.odds_api import lookup_pinnacle, lookup_pinnacle_corners
 
             pinnacle_match = lookup_pinnacle(
                 home, away, events=pinnacle_events, kickoff_date=day
             )
+            corn = lookup_pinnacle_corners(
+                home,
+                away,
+                events=pinnacle_events,
+                kickoff_date=day,
+                fetch_if_missing=False,
+            )
+            if isinstance(corn, dict) and corn.get("corners_over"):
+                pinnacle_match = {**(pinnacle_match or {}), **corn}
         except Exception:
             pass
     odds, odds_source = _fill_book_odds(odds, odds_source, pinnacle_match, "pinnacle")
@@ -174,6 +190,17 @@ def _collect_match_odds(
         except Exception:
             pass
     odds, odds_source = _fill_book_odds(odds, odds_source, bf_match, "betfair")
+    kb_match = None
+    if kambi_events:
+        try:
+            from modules.data_update.kambi_football import lookup_kambi_football
+
+            kb_match = lookup_kambi_football(
+                home, away, events=kambi_events, kickoff_date=day, include_corners=False
+            )
+        except Exception:
+            pass
+    odds, odds_source = _fill_book_odds(odds, odds_source, kb_match, "kambi_unibet")
     return odds, odds_source, market_move
 
 
@@ -254,9 +281,10 @@ def _model_newer_than_upcoming() -> bool:
         return False
 
 
-def _load_odds_caches() -> tuple[list[dict], list[dict]]:
+def _load_odds_caches() -> tuple[list[dict], list[dict], list[dict]]:
     pinn: list[dict] = []
     bf: list[dict] = []
+    kb: list[dict] = []
     try:
         from modules.data_update.odds_api import load_pinnacle_cache
 
@@ -269,7 +297,13 @@ def _load_odds_caches() -> tuple[list[dict], list[dict]]:
         bf = load_betfair_cache()
     except Exception:
         pass
-    return pinn, bf
+    try:
+        from modules.data_update.kambi_football import load_kambi_football_cache
+
+        kb = load_kambi_football_cache()
+    except Exception:
+        pass
+    return pinn, bf, kb
 
 
 def _fx_proxy_from_row(row: dict) -> pd.Series:
@@ -500,7 +534,7 @@ def refresh_upcoming_odds(*, on_progress=None, archive: bool = True) -> dict:
     if not rows:
         return {"ok": False, "error": "Calendario vuoto", "n_upcoming": 0}
 
-    pinn, bf = _load_odds_caches()
+    pinn, bf, kb = _load_odds_caches()
     out: list[dict] = []
     n_ok = 0
     n_skip = 0
@@ -516,7 +550,7 @@ def refresh_upcoming_odds(*, on_progress=None, archive: bool = True) -> dict:
             n_skip += 1
             continue
         fx = _fx_proxy_from_row(row)
-        odds, odds_source, market_move = _collect_match_odds(fx, home, away, pinn, bf)
+        odds, odds_source, market_move = _collect_match_odds(fx, home, away, pinn, bf, kb)
         wx = (pred.get("weather") if isinstance(pred.get("weather"), dict) else None) or (
             (row.get("validation") or {}).get("weather") if isinstance(row.get("validation"), dict) else None
         )
@@ -735,18 +769,7 @@ def build_upcoming(
     cal_idx = build_calendar_index()
 
     # Cache quote esterne: zero chiamate API durante il ciclo
-    _pinnacle_events: list[dict] = []
-    _betfair_events: list[dict] = []
-    try:
-        from modules.data_update.odds_api import load_pinnacle_cache
-        _pinnacle_events = load_pinnacle_cache()
-    except Exception:
-        pass
-    try:
-        from modules.data_update.betfair import load_betfair_cache
-        _betfair_events = load_betfair_cache()
-    except Exception:
-        pass
+    _pinnacle_events, _betfair_events, _kambi_events = _load_odds_caches()
 
     from modules.data_update.history import HistoryLookupCache, lookup_history_match
     from modules.data_update.weather import lookup_weather, prefetch_weather
@@ -792,7 +815,7 @@ def build_upcoming(
             else None
         )
         odds, odds_source, market_move = _collect_match_odds(
-            fx, home, away, _pinnacle_events, _betfair_events
+            fx, home, away, _pinnacle_events, _betfair_events, _kambi_events
         )
         prev = prev_map.get(_match_key(day, home, away))
         prev_pred = prev.get("prediction") if isinstance(prev, dict) else None

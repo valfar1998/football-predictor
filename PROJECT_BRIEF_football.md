@@ -2,7 +2,7 @@
 
 Sintesi aggiornata del progetto **football-predictor**  
 Repo: [github.com/valfar1998/football-predictor](https://github.com/valfar1998/football-predictor) · branch `main`  
-Ultimo aggiornamento: **2026-08-30** — settle cards/corners/scorer; phasing-out backfill @150 live; GHA pre-match odds.
+Ultimo aggiornamento: **2026-09-10** — audit Odds API corner (Pinnacle); Pinnacle multi-lega Big5+UCL; Kambi football Unibet; FBref `crosses_conc` + Bundesliga + match-log cards.
 
 Scopo di questo file: dare a un altro modello / analista contesto sufficiente per suggerire miglioramenti **senza** dover leggere tutto il codice.
 

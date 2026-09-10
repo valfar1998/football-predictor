@@ -134,12 +134,27 @@ def refresh_odds_pipeline(*, asian: bool = True, on_progress=None) -> dict:
         asian_info["betfair_soft_fail"] = True
         asian_info["betfair_ok"] = False
         print(f"Betfair soft-fail (pipeline continua): {exc}", flush=True)
+    try:
+        from modules.data_update.kambi_football import fetch_kambi_football_odds
+
+        p(0.64, "Quote Kambi/Unibet football…")
+        kb = fetch_kambi_football_odds()
+        asian_info["kambi_events"] = kb.get("n_events", 0)
+        asian_info["kambi_from_cache"] = kb.get("from_cache", False)
+        asian_info["kambi_ok"] = bool(kb.get("ok"))
+        if kb.get("from_cache"):
+            print("Kambi football: cache fresca, skip fetch", flush=True)
+        if not kb.get("ok") and kb.get("error"):
+            asian_info["kambi_error"] = kb["error"]
+    except Exception as exc:
+        asian_info["kambi_error"] = str(exc)
+        print(f"skip Kambi football: {exc}", flush=True)
     p(0.66, "Ricostruisco il calendario (riuso predizioni)…")
     upcoming = build_upcoming(reuse_predictions=True, on_progress=span(0.66, 0.99))
     p(1.0, f"OK · {len(upcoming)} partite")
     return {
         "n_upcoming": len(upcoming),
-        "source": "football-data.co.uk + asianbetsoccer + pinnacle/betfair cache",
+        "source": "football-data.co.uk + asianbetsoccer + pinnacle/betfair/kambi cache",
         "reuse_predictions": True,
         "light": True,
         **asian_info,

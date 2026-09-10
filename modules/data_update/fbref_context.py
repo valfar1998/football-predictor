@@ -23,6 +23,15 @@ FBREF_LEAGUES = [
     "Big 5 European Leagues Combined",
 ]
 
+# Per match logs soccerdata rifiuta league='nan' (bug Bundesliga nel combined).
+FBREF_LEAGUES_EXPLICIT = [
+    "ENG-Premier League",
+    "ESP-La Liga",
+    "ITA-Serie A",
+    "GER-Bundesliga",
+    "FRA-Ligue 1",
+]
+
 
 def _norm(name: str) -> str:
     from modules.data_update.cups import _norm_key
@@ -212,11 +221,24 @@ def download_fbref_context(
             crs_c = _first_col(opp, ("Performance_Crs", "Crs", "Crosses"))
             if tcol and crs_c:
                 part = opp[[tcol, crs_c]].copy().rename(columns={tcol: "team", crs_c: "crosses_conc"})
+                # FBref opponent rows usano "vs Team" — allinea al nome squadra
+                part["team"] = (
+                    part["team"]
+                    .astype(str)
+                    .str.replace(r"^\s*vs\s+", "", regex=True)
+                    .str.strip()
+                )
                 part["crosses_conc"] = _to_num(part["crosses_conc"])
+                # Se più stagioni, somma/media: preferisci ultima stagione con n90
+                if "season" in opp.columns:
+                    part["season"] = opp["season"].values
+                    part = part.sort_values("season").drop_duplicates("team", keep="last")
                 if "n90" in out.columns:
                     part = part.merge(out[["team", "n90"]], on="team", how="left")
                     part["crosses_conc_p90"] = _per90(part["crosses_conc"], part["n90"])
                 keep = [c for c in ("team", "crosses_conc_p90") if c in part.columns]
+                if "crosses_conc_p90" in out.columns:
+                    out = out.drop(columns=["crosses_conc_p90"], errors="ignore")
                 out = out.merge(part[keep].drop_duplicates("team"), on="team", how="left")
                 extra_ok.append("misc_against")
     except Exception as exc:
@@ -225,6 +247,12 @@ def download_fbref_context(
     # Tiene l'ultima stagione disponibile per ogni team.
     if "season" in out.columns:
         out = out.sort_values("season").groupby("team", as_index=False).tail(1)
+
+    # Big 5 Combined: le righe Bundesliga arrivano spesso con league=nan.
+    if "league" in out.columns:
+        mask = out["league"].isna() | (out["league"].astype(str).str.lower() == "nan")
+        if bool(mask.any()) and int(mask.sum()) <= 22:
+            out.loc[mask, "league"] = "GER-Bundesliga"
 
     out["team_norm"] = out["team"].map(_norm)
     out = out.drop_duplicates(subset=["team_norm"], keep="last")
@@ -261,6 +289,68 @@ def download_fbref_context(
     }
 
 
+def _recover_match_team(df: pd.DataFrame) -> pd.DataFrame:
+    """soccerdata a volte lascia team=NaN nei match logs: recupera da match_report + venue."""
+    import re
+
+    out = df.copy()
+    tcol = _first_col(out, ("team", "Team"))
+    if not tcol:
+        out["team"] = pd.NA
+        tcol = "team"
+    vcol = _first_col(out, ("venue", "Venue"))
+    rcol = _first_col(out, ("match_report", "Match Report", "url"))
+    need = out[tcol].isna() | (out[tcol].astype(str).str.lower().isin({"nan", "none", ""}))
+    if not bool(need.any()) or not rcol or not vcol:
+        return out
+
+    month_re = re.compile(
+        r"-(January|February|March|April|May|June|July|August|September|October|November|December)-",
+        re.I,
+    )
+
+    def _from_row(row: pd.Series) -> str | None:
+        url = row.get(rcol)
+        venue_raw = row.get(vcol)
+        if url is None or (isinstance(url, float) and pd.isna(url)):
+            return None
+        url = str(url)
+        venue = "" if venue_raw is None or (isinstance(venue_raw, float) and pd.isna(venue_raw)) else str(venue_raw).strip().lower()
+        slug = url.rstrip("/").split("/")[-1]
+        m = month_re.search(slug)
+        clubs = slug[: m.start()] if m else slug
+        opp_c = _first_col(out, ("opponent", "Opponent"))
+        opp_raw = row.get(opp_c) if opp_c else None
+        opp = ""
+        if opp_raw is not None and not (isinstance(opp_raw, float) and pd.isna(opp_raw)):
+            opp = str(opp_raw).strip()
+        home_name = away_name = None
+        if opp:
+            opp_slug = opp.replace(" ", "-")
+            if clubs.lower().endswith("-" + opp_slug.lower()):
+                home_name = clubs[: -(len(opp_slug) + 1)].replace("-", " ").strip()
+                away_name = opp
+            elif clubs.lower().startswith(opp_slug.lower() + "-"):
+                home_name = opp
+                away_name = clubs[len(opp_slug) + 1 :].replace("-", " ").strip()
+        if home_name is None or away_name is None:
+            parts = clubs.split("-")
+            if len(parts) < 2:
+                return None
+            mid = max(1, len(parts) // 2)
+            home_name = " ".join(parts[:mid])
+            away_name = " ".join(parts[mid:])
+        if venue.startswith("home"):
+            return home_name
+        if venue.startswith("away"):
+            return away_name
+        return home_name
+
+    recovered = out.loc[need].apply(_from_row, axis=1)
+    out.loc[need, tcol] = recovered.values
+    return out
+
+
 def download_fbref_match_logs(
     *,
     fb=None,
@@ -282,7 +372,15 @@ def download_fbref_match_logs(
         try:
             emit(on_progress, 0.08, "Connessione FBref…")
             with quiet_soccerdata():
-                fb = sd.FBref(leagues=FBREF_LEAGUES, seasons=seasons, headless=True)
+                # Leghe esplicite: evita Invalid league 'nan' del Big 5 Combined
+                fb = sd.FBref(leagues=FBREF_LEAGUES_EXPLICIT, seasons=seasons, headless=True)
+        except Exception as exc:
+            return {"ok": False, "n_teams": 0, "error": str(exc)}
+    else:
+        # Riconnetti con leghe esplicite se il caller passa un FBref "Big 5 Combined"
+        try:
+            with quiet_soccerdata():
+                fb = sd.FBref(leagues=FBREF_LEAGUES_EXPLICIT, seasons=seasons, headless=True)
         except Exception as exc:
             return {"ok": False, "n_teams": 0, "error": str(exc)}
 
@@ -325,6 +423,7 @@ def download_fbref_match_logs(
         else:
             df = pd.concat([df, extra], ignore_index=True)
 
+    df = _recover_match_team(df)
     tcol = _first_col(df, ("team", "Team"))
     dcol = _first_col(df, ("date", "Date"))
     if not tcol:
@@ -343,15 +442,18 @@ def download_fbref_match_logs(
             break
 
     work = pd.DataFrame({"team": df[tcol].astype(str)})
+    # scarta placeholder
+    work = work[~work["team"].str.lower().isin({"nan", "none", ""})]
     if dcol:
-        work["date"] = pd.to_datetime(df[dcol], errors="coerce")
+        work["date"] = pd.to_datetime(df.loc[work.index, dcol], errors="coerce")
     else:
         work["date"] = pd.NaT
-    work["cards_y"] = _to_num(df[cards_c]) if cards_c else pd.NA
-    work["cards_r"] = _to_num(df[red_c]) if red_c else pd.NA
-    work["corners"] = _to_num(df[corner_c]) if corner_c else pd.NA
+    work["cards_y"] = _to_num(df.loc[work.index, cards_c]) if cards_c else pd.NA
+    work["cards_r"] = _to_num(df.loc[work.index, red_c]) if red_c else pd.NA
+    work["corners"] = _to_num(df.loc[work.index, corner_c]) if corner_c else pd.NA
     work = work.dropna(subset=["team"])
     work["team_norm"] = work["team"].map(_norm)
+    work = work[work["team_norm"].astype(str).str.len() >= 2]
     work = work.sort_values("date")
     work["rank"] = work.groupby("team_norm").cumcount(ascending=False)
     recent = work[work["rank"] < last_n]
@@ -364,6 +466,14 @@ def download_fbref_match_logs(
         corners_avg=("corners", "mean"),
     )
     agg = agg.drop_duplicates("team_norm", keep="first")
+    # Filtra artefact da split slug (es. "and Hove Albion"): tieni solo team noti FBref
+    if TEAM_CACHE.exists() and not agg.empty:
+        try:
+            known = set(pd.read_csv(TEAM_CACHE)["team_norm"].dropna().astype(str))
+            if known:
+                agg = agg[agg["team_norm"].isin(known)].copy()
+        except Exception:
+            pass
     agg["fetched_at"] = pd.Timestamp.utcnow().isoformat()
     MATCH_RATES_CACHE.parent.mkdir(parents=True, exist_ok=True)
     agg.to_csv(MATCH_RATES_CACHE, index=False)

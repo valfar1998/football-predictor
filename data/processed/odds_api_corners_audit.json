@@ -1,0 +1,460 @@
+{
+  "fetched_at": "2026-09-10T07:38:37.363499+00:00",
+  "markets_requested": [
+    "alternate_totals_corners",
+    "alternate_spreads_corners",
+    "corners_1x2",
+    "alternate_team_totals_corners"
+  ],
+  "sports": [
+    {
+      "sport_key": "soccer_epl",
+      "title": "Premier League",
+      "n_events": 20,
+      "samples": [
+        {
+          "event_id": "d09677edcf1fb82ad75a8df58bb26eab",
+          "home": "Aston Villa",
+          "away": "Nottingham Forest",
+          "commence_time": "2026-09-12T14:00:00Z",
+          "markets": {
+            "alternate_spreads_corners": 10,
+            "alternate_team_totals_corners": 4,
+            "alternate_totals_corners": 10
+          },
+          "lines_totals_corners": [
+            {
+              "name": "Over",
+              "point": 10.0,
+              "price": 1.93
+            },
+            {
+              "name": "Over",
+              "point": 9.0,
+              "price": 1.52
+            },
+            {
+              "name": "Over",
+              "point": 9.5,
+              "price": 1.72
+            },
+            {
+              "name": "Over",
+              "point": 10.5,
+              "price": 2.14
+            },
+            {
+              "name": "Over",
+              "point": 11.0,
+              "price": 2.49
+            },
+            {
+              "name": "Under",
+              "point": 10.0,
+              "price": 1.9
+            },
+            {
+              "name": "Under",
+              "point": 9.0,
+              "price": 2.48
+            },
+            {
+              "name": "Under",
+              "point": 9.5,
+              "price": 2.11
+            },
+            {
+              "name": "Under",
+              "point": 10.5,
+              "price": 1.7
+            },
+            {
+              "name": "Under",
+              "point": 11.0,
+              "price": 1.51
+            }
+          ],
+          "error": null,
+          "remaining": 442
+        }
+      ],
+      "error": null,
+      "remaining_after_events": 445
+    },
+    {
+      "sport_key": "soccer_spain_la_liga",
+      "title": "La Liga",
+      "n_events": 20,
+      "samples": [
+        {
+          "event_id": "79bc2eff76fa09664659765d5b1ded1a",
+          "home": "Sevilla",
+          "away": "Valencia",
+          "commence_time": "2026-09-11T19:00:00Z",
+          "markets": {
+            "alternate_spreads_corners": 10,
+            "alternate_team_totals_corners": 4,
+            "alternate_totals_corners": 10
+          },
+          "lines_totals_corners": [
+            {
+              "name": "Over",
+              "point": 8.5,
+              "price": 2.0
+            },
+            {
+              "name": "Over",
+              "point": 7.5,
+              "price": 1.53
+            },
+            {
+              "name": "Over",
+              "point": 8.0,
+              "price": 1.71
+            },
+            {
+              "name": "Over",
+              "point": 9.0,
+              "price": 2.26
+            },
+            {
+              "name": "Over",
+              "point": 9.5,
+              "price": 2.5
+            },
+            {
+              "name": "Under",
+              "point": 8.5,
+              "price": 1.83
+            },
+            {
+              "name": "Under",
+              "point": 7.5,
+              "price": 2.43
+            },
+            {
+              "name": "Under",
+              "point": 8.0,
+              "price": 2.12
+            },
+            {
+              "name": "Under",
+              "point": 9.0,
+              "price": 1.63
+            },
+            {
+              "name": "Under",
+              "point": 9.5,
+              "price": 1.51
+            }
+          ],
+          "error": null,
+          "remaining": 439
+        }
+      ],
+      "error": null,
+      "remaining_after_events": 442
+    },
+    {
+      "sport_key": "soccer_italy_serie_a",
+      "title": "Serie A",
+      "n_events": 20,
+      "samples": [
+        {
+          "event_id": "a9656d25ca6b06be9e477a098333bd70",
+          "home": "Venezia",
+          "away": "Fiorentina",
+          "commence_time": "2026-09-11T18:45:00Z",
+          "markets": {
+            "alternate_spreads_corners": 10,
+            "alternate_team_totals_corners": 4,
+            "alternate_totals_corners": 10
+          },
+          "lines_totals_corners": [
+            {
+              "name": "Over",
+              "point": 8.0,
+              "price": 1.82
+            },
+            {
+              "name": "Over",
+              "point": 7.0,
+              "price": 1.43
+            },
+            {
+              "name": "Over",
+              "point": 7.5,
+              "price": 1.63
+            },
+            {
+              "name": "Over",
+              "point": 8.5,
+              "price": 2.04
+            },
+            {
+              "name": "Over",
+              "point": 9.0,
+              "price": 2.37
+            },
+            {
+              "name": "Under",
+              "point": 8.0,
+              "price": 2.01
+            },
+            {
+              "name": "Under",
+              "point": 7.0,
+              "price": 2.72
+            },
+            {
+              "name": "Under",
+              "point": 7.5,
+              "price": 2.25
+            },
+            {
+              "name": "Under",
+              "point": 8.5,
+              "price": 1.77
+            },
+            {
+              "name": "Under",
+              "point": 9.0,
+              "price": 1.56
+            }
+          ],
+          "error": null,
+          "remaining": 436
+        }
+      ],
+      "error": null,
+      "remaining_after_events": 439
+    },
+    {
+      "sport_key": "soccer_germany_bundesliga",
+      "title": "Bundesliga",
+      "n_events": 18,
+      "samples": [
+        {
+          "event_id": "115c6679a72c5a360640b6baaa16e78c",
+          "home": "Union Berlin",
+          "away": "FC Schalke 04",
+          "commence_time": "2026-09-11T18:30:00Z",
+          "markets": {
+            "alternate_spreads_corners": 10,
+            "alternate_team_totals_corners": 4,
+            "alternate_totals_corners": 10
+          },
+          "lines_totals_corners": [
+            {
+              "name": "Over",
+              "point": 9.0,
+              "price": 1.82
+            },
+            {
+              "name": "Over",
+              "point": 8.0,
+              "price": 1.44
+            },
+            {
+              "name": "Over",
+              "point": 8.5,
+              "price": 1.64
+            },
+            {
+              "name": "Over",
+              "point": 9.5,
+              "price": 2.04
+            },
+            {
+              "name": "Over",
+              "point": 10.0,
+              "price": 2.35
+            },
+            {
+              "name": "Under",
+              "point": 9.0,
+              "price": 1.99
+            },
+            {
+              "name": "Under",
+              "point": 8.0,
+              "price": 2.66
+            },
+            {
+              "name": "Under",
+              "point": 8.5,
+              "price": 2.22
+            },
+            {
+              "name": "Under",
+              "point": 9.5,
+              "price": 1.76
+            },
+            {
+              "name": "Under",
+              "point": 10.0,
+              "price": 1.56
+            }
+          ],
+          "error": null,
+          "remaining": 433
+        }
+      ],
+      "error": null,
+      "remaining_after_events": 436
+    },
+    {
+      "sport_key": "soccer_france_ligue_one",
+      "title": "Ligue 1",
+      "n_events": 18,
+      "samples": [
+        {
+          "event_id": "a7e7bf9a8226e86eab6e5c1cb0780a0f",
+          "home": "Rennes",
+          "away": "Marseille",
+          "commence_time": "2026-09-11T18:45:00Z",
+          "markets": {
+            "alternate_spreads_corners": 10,
+            "alternate_team_totals_corners": 4,
+            "alternate_totals_corners": 10
+          },
+          "lines_totals_corners": [
+            {
+              "name": "Over",
+              "point": 10.0,
+              "price": 1.92
+            },
+            {
+              "name": "Over",
+              "point": 9.0,
+              "price": 1.51
+            },
+            {
+              "name": "Over",
+              "point": 9.5,
+              "price": 1.71
+            },
+            {
+              "name": "Over",
+              "point": 10.5,
+              "price": 2.13
+            },
+            {
+              "name": "Over",
+              "point": 11.0,
+              "price": 2.45
+            },
+            {
+              "name": "Under",
+              "point": 10.0,
+              "price": 1.89
+            },
+            {
+              "name": "Under",
+              "point": 9.0,
+              "price": 2.45
+            },
+            {
+              "name": "Under",
+              "point": 9.5,
+              "price": 2.1
+            },
+            {
+              "name": "Under",
+              "point": 10.5,
+              "price": 1.69
+            },
+            {
+              "name": "Under",
+              "point": 11.0,
+              "price": 1.51
+            }
+          ],
+          "error": null,
+          "remaining": 430
+        }
+      ],
+      "error": null,
+      "remaining_after_events": 433
+    },
+    {
+      "sport_key": "soccer_uefa_champs_league",
+      "title": "Champions League",
+      "n_events": 6,
+      "samples": [
+        {
+          "event_id": "548baa1054bef3f3c9f830d99280eefe",
+          "home": "Fenerbahce",
+          "away": "AS Roma",
+          "commence_time": "2026-09-10T16:45:00Z",
+          "markets": {
+            "alternate_spreads_corners": 10,
+            "alternate_team_totals_corners": 4,
+            "alternate_totals_corners": 10
+          },
+          "lines_totals_corners": [
+            {
+              "name": "Over",
+              "point": 9.0,
+              "price": 1.79
+            },
+            {
+              "name": "Over",
+              "point": 8.0,
+              "price": 1.41
+            },
+            {
+              "name": "Over",
+              "point": 8.5,
+              "price": 1.61
+            },
+            {
+              "name": "Over",
+              "point": 9.5,
+              "price": 2.02
+            },
+            {
+              "name": "Over",
+              "point": 10.0,
+              "price": 2.29
+            },
+            {
+              "name": "Under",
+              "point": 9.0,
+              "price": 2.02
+            },
+            {
+              "name": "Under",
+              "point": 8.0,
+              "price": 2.75
+            },
+            {
+              "name": "Under",
+              "point": 8.5,
+              "price": 2.27
+            },
+            {
+              "name": "Under",
+              "point": 9.5,
+              "price": 1.78
+            },
+            {
+              "name": "Under",
+              "point": 10.0,
+              "price": 1.59
+            }
+          ],
+          "error": null,
+          "remaining": 427
+        }
+      ],
+      "error": null,
+      "remaining_after_events": 430
+    }
+  ],
+  "summary": {
+    "sports_n": 6,
+    "samples_with_totals_corners": 6,
+    "remaining": 427
+  }
+}

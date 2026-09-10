@@ -1,14 +1,12 @@
 """Quote Pinnacle da The Odds API (the-odds-api.com).
 
 Piano gratuito: 500 chiamate/mese.
-Strategia: 1 fetch al giorno (o su richiesta manuale), cache JSON locale.
+Strategia: fetch per sport-key Big 5 (+ UCL) 1×/giorno, cache JSON locale.
 La cache viene usata da enrich_value come sharp odd di riferimento.
 
-Endpoint usato: /v4/sports/soccer/odds
-  - regions=eu
-  - markets=h2h,totals
-  - bookmakers=pinnacle
-  - oddsFormat=decimal
+Featured: /v4/sports/{sport_key}/odds  markets=h2h,totals
+Corner (per evento): /v4/sports/{sport_key}/events/{id}/odds
+  markets=alternate_totals_corners,alternate_spreads_corners,corners_1x2
 
 Chiave API: salva in data/raw/odds-api.key oppure env ODDS_API_KEY.
 """
@@ -25,12 +23,30 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[2]
 RAW = ROOT / "data" / "raw"
 CACHE = RAW / "pinnacle_odds.json"
+CORNERS_CACHE = RAW / "pinnacle_corners.json"
 KEY_PATH = RAW / "odds-api.key"
 BASE = "https://api.the-odds-api.com/v4"
 UA = "Mozilla/5.0 (compatible; football-predictor/1.0; +local)"
 
 # Numero di chiamate rimanenti lette dall'ultimo header di risposta
 _REMAINING_PATH = RAW / "odds-api-remaining.txt"
+
+# Sport key reali (il vecchio path /sports/soccer/odds restituiva pochissimi eventi).
+CORE_SPORT_KEYS: list[tuple[str, str]] = [
+    ("soccer_epl", "Premier League"),
+    ("soccer_spain_la_liga", "La Liga"),
+    ("soccer_italy_serie_a", "Serie A"),
+    ("soccer_germany_bundesliga", "Bundesliga"),
+    ("soccer_france_ligue_one", "Ligue 1"),
+    ("soccer_uefa_champs_league", "Champions League"),
+]
+
+CORNER_MARKETS = (
+    "alternate_totals_corners",
+    "alternate_spreads_corners",
+    "corners_1x2",
+    "alternate_team_totals_corners",
+)
 
 
 def _api_key() -> str | None:
@@ -87,19 +103,7 @@ def _cache_is_fresh(max_age_hours: float = 20.0) -> bool:
 
 
 def fetch_pinnacle_odds(*, force: bool = False, max_age_hours: float = 20.0) -> dict:
-    """Scarica le quote Pinnacle per tutte le partite di calcio prossime.
-
-    Restituisce un dizionario:
-      {
-        "ok": bool,
-        "n_events": int,
-        "remaining": int | None,
-        "from_cache": bool,
-        "events": [...],   # lista raw da Odds API
-      }
-
-    La cache viene aggiornata solo se stantia (> max_age_hours) o force=True.
-    """
+    """Scarica quote Pinnacle h2h+totals per Big 5 + UCL (una call per sport-key)."""
     key = _api_key()
     if not key:
         return {"ok": False, "error": "chiave ODDS_API_KEY non trovata", "n_events": 0, "events": [], "from_cache": False}
@@ -108,33 +112,69 @@ def fetch_pinnacle_odds(*, force: bool = False, max_age_hours: float = 20.0) -> 
         try:
             data = json.loads(CACHE.read_text(encoding="utf-8"))
             events = data.get("events") or []
-            return {"ok": True, "n_events": len(events), "remaining": data.get("remaining"), "from_cache": True, "events": events}
+            return {
+                "ok": True,
+                "n_events": len(events),
+                "remaining": data.get("remaining"),
+                "from_cache": True,
+                "events": events,
+                "by_sport": data.get("by_sport") or {},
+            }
         except Exception:
             pass
 
+    all_events: list[dict] = []
+    by_sport: dict[str, int] = {}
+    remaining: int | None = None
+    errors: list[str] = []
     try:
-        url = (
-            f"{BASE}/sports/soccer/odds"
-            f"?regions=eu"
-            f"&markets=h2h,totals"
-            f"&bookmakers=pinnacle"
-            f"&oddsFormat=decimal"
-            f"&dateFormat=iso"
-        )
-        events, headers = _get(url, key)
-        remaining = _remaining(headers)
-        if remaining is not None:
-            _REMAINING_PATH.write_text(str(remaining), encoding="utf-8")
+        for sport_key, _title in CORE_SPORT_KEYS:
+            url = (
+                f"{BASE}/sports/{sport_key}/odds"
+                f"?regions=eu"
+                f"&markets=h2h,totals"
+                f"&bookmakers=pinnacle"
+                f"&oddsFormat=decimal"
+                f"&dateFormat=iso"
+            )
+            try:
+                events, headers = _get(url, key)
+                remaining = _remaining(headers)
+                if remaining is not None:
+                    _REMAINING_PATH.write_text(str(remaining), encoding="utf-8")
+            except HTTPError as exc:
+                errors.append(f"{sport_key}: HTTP {exc.code}")
+                continue
+            except (URLError, TimeoutError) as exc:
+                errors.append(f"{sport_key}: {exc}")
+                continue
+            batch = events if isinstance(events, list) else []
+            for ev in batch:
+                if isinstance(ev, dict):
+                    row = dict(ev)
+                    row["sport_key"] = sport_key
+                    all_events.append(row)
+            by_sport[sport_key] = len(batch)
         payload = {
             "fetched_at": datetime.now(timezone.utc).isoformat(),
             "remaining": remaining,
-            "events": events if isinstance(events, list) else [],
+            "events": all_events,
+            "by_sport": by_sport,
+            "errors": errors,
         }
         CACHE.parent.mkdir(parents=True, exist_ok=True)
         CACHE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        n = len(payload["events"])
-        print(f"ok Pinnacle odds: {n} eventi (chiamate rimanenti: {remaining})")
-        return {"ok": True, "n_events": n, "remaining": remaining, "from_cache": False, "events": payload["events"]}
+        n = len(all_events)
+        print(f"ok Pinnacle odds: {n} eventi su {len(by_sport)} sport (chiamate rimanenti: {remaining})")
+        return {
+            "ok": n > 0,
+            "n_events": n,
+            "remaining": remaining,
+            "from_cache": False,
+            "events": all_events,
+            "by_sport": by_sport,
+            "error": None if n else ("; ".join(errors) or "nessun evento"),
+        }
     except HTTPError as exc:
         return {"ok": False, "error": f"HTTP {exc.code}: {exc.reason}", "n_events": 0, "events": [], "from_cache": False}
     except (URLError, TimeoutError) as exc:
@@ -279,3 +319,166 @@ def remaining_calls() -> int | None:
         except (ValueError, OSError):
             pass
     return None
+
+
+def _parse_corner_markets(data: dict) -> dict:
+    """Estrae linee corner O/U (e opz. 1X2/spread) da payload event odds."""
+    out: dict = {
+        "corners_over": {},
+        "corners_under": {},
+        "corners_1x2": {},
+        "markets_present": [],
+    }
+    for bm in data.get("bookmakers") or []:
+        if str(bm.get("key") or "").lower() != "pinnacle":
+            continue
+        for mkt in bm.get("markets") or []:
+            mk = str(mkt.get("key") or "")
+            out["markets_present"].append(mk)
+            if mk == "alternate_totals_corners":
+                for o in mkt.get("outcomes") or []:
+                    try:
+                        pt = float(o.get("point"))
+                        price = float(o.get("price"))
+                        name = str(o.get("name") or "").lower()
+                    except (TypeError, ValueError):
+                        continue
+                    key = f"{pt:g}"
+                    if name == "over":
+                        out["corners_over"][key] = round(price, 3)
+                    elif name == "under":
+                        out["corners_under"][key] = round(price, 3)
+            elif mk == "corners_1x2":
+                for o in mkt.get("outcomes") or []:
+                    try:
+                        price = float(o.get("price"))
+                    except (TypeError, ValueError):
+                        continue
+                    name = str(o.get("name") or "")
+                    out["corners_1x2"][name] = round(price, 3)
+    out["markets_present"] = sorted(set(out["markets_present"]))
+    return out
+
+
+def fetch_event_corner_odds(
+    sport_key: str,
+    event_id: str,
+    *,
+    force: bool = False,
+) -> dict:
+    """Fetch mercati corner Pinnacle per un singolo evento (1 credito tipico)."""
+    key = _api_key()
+    if not key:
+        return {"ok": False, "error": "chiave ODDS_API_KEY non trovata"}
+    cache: dict = {}
+    if CORNERS_CACHE.exists() and not force:
+        try:
+            cache = json.loads(CORNERS_CACHE.read_text(encoding="utf-8"))
+        except Exception:
+            cache = {}
+        hit = (cache.get("events") or {}).get(event_id)
+        if isinstance(hit, dict) and hit.get("corners_over"):
+            hit = dict(hit)
+            hit["from_cache"] = True
+            hit["ok"] = True
+            return hit
+
+    markets = ",".join(CORNER_MARKETS)
+    url = (
+        f"{BASE}/sports/{sport_key}/events/{event_id}/odds"
+        f"?regions=eu&markets={markets}&bookmakers=pinnacle&oddsFormat=decimal"
+    )
+    try:
+        data, headers = _get(url, key)
+        remaining = _remaining(headers)
+        if remaining is not None:
+            _REMAINING_PATH.write_text(str(remaining), encoding="utf-8")
+    except HTTPError as exc:
+        return {"ok": False, "error": f"HTTP {exc.code}: {exc.reason}", "event_id": event_id}
+    except (URLError, TimeoutError) as exc:
+        return {"ok": False, "error": str(exc), "event_id": event_id}
+
+    parsed = _parse_corner_markets(data if isinstance(data, dict) else {})
+    row = {
+        "ok": bool(parsed.get("corners_over")),
+        "event_id": event_id,
+        "sport_key": sport_key,
+        "home_team": (data or {}).get("home_team") if isinstance(data, dict) else None,
+        "away_team": (data or {}).get("away_team") if isinstance(data, dict) else None,
+        "commence_time": (data or {}).get("commence_time") if isinstance(data, dict) else None,
+        "remaining": remaining,
+        "from_cache": False,
+        **parsed,
+    }
+    # advisor keys corners_over_9.5
+    for line, price in (parsed.get("corners_over") or {}).items():
+        row[f"corners_over_{line}"] = price
+    for line, price in (parsed.get("corners_under") or {}).items():
+        row[f"corners_under_{line}"] = price
+
+    events_map = dict(cache.get("events") or {}) if isinstance(cache, dict) else {}
+    events_map[event_id] = {k: v for k, v in row.items() if k != "remaining"}
+    payload = {
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "remaining": remaining,
+        "events": events_map,
+    }
+    CORNERS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    CORNERS_CACHE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return row
+
+
+def lookup_pinnacle_corners(
+    home: str,
+    away: str,
+    *,
+    events: list[dict] | None = None,
+    kickoff_date: str | None = None,
+    fetch_if_missing: bool = False,
+) -> dict | None:
+    """Trova corner odds: cache corner → opz. fetch se evento noto in pinnacle_odds."""
+    if events is None:
+        events = load_pinnacle_cache()
+    matched = None
+    kd = None
+    if kickoff_date:
+        try:
+            kd = date.fromisoformat(str(kickoff_date)[:10])
+        except ValueError:
+            pass
+    for ev in events:
+        ev_home = str(ev.get("home_team") or "")
+        ev_away = str(ev.get("away_team") or "")
+        if not (_team_match(home, ev_home) and _team_match(away, ev_away)):
+            continue
+        if kd:
+            ct = str(ev.get("commence_time") or "")[:10]
+            try:
+                if abs((date.fromisoformat(ct) - kd).days) > 1:
+                    continue
+            except ValueError:
+                pass
+        matched = ev
+        break
+    if not matched:
+        return None
+    eid = str(matched.get("id") or "")
+    sport_key = str(matched.get("sport_key") or matched.get("sport_key") or "")
+    if CORNERS_CACHE.exists():
+        try:
+            cache = json.loads(CORNERS_CACHE.read_text(encoding="utf-8"))
+            hit = (cache.get("events") or {}).get(eid)
+            if isinstance(hit, dict) and hit.get("corners_over"):
+                return hit
+        except Exception:
+            pass
+    if fetch_if_missing and eid and sport_key:
+        return fetch_event_corner_odds(sport_key, eid)
+    return {
+        "ok": False,
+        "event_id": eid,
+        "sport_key": sport_key,
+        "needs_fetch": True,
+        "home_team": matched.get("home_team"),
+        "away_team": matched.get("away_team"),
+    }
