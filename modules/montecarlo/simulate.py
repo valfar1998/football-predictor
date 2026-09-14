@@ -140,10 +140,13 @@ class MonteCarloSimulator:
         if extras:
             lam_cards = float(extras.get("lambda_cards") or 0)
             lam_corners = float(extras.get("lambda_corners") or 0)
+            lam_shots = float(extras.get("lambda_shots") or 0)
             if extras.get("cards_source"):
                 meta_src["cards_source"] = extras["cards_source"]
             if extras.get("corners_source"):
                 meta_src["corners_source"] = extras["corners_source"]
+            if extras.get("shots_source"):
+                meta_src["shots_source"] = extras["shots_source"]
             if lam_cards > 0.5:
                 cards = rng.poisson(lam=lam_cards, size=n)
                 for line in (2.5, 3.5, 4.5, 5.5):
@@ -151,9 +154,14 @@ class MonteCarloSimulator:
                     extras_out[f"cards_under_{line}"] = float((cards < line).mean())
             if lam_corners > 1.0:
                 corners = rng.poisson(lam=lam_corners, size=n)
-                for line in (7.5, 8.5, 9.5, 10.5, 11.5):
+                for line in (7.5, 8.5, 9.5, 10.5, 11.5, 12.5):
                     extras_out[f"corners_over_{line}"] = float((corners > line).mean())
                     extras_out[f"corners_under_{line}"] = float((corners < line).mean())
+            if lam_shots > 5.0:
+                shots = rng.poisson(lam=lam_shots, size=n)
+                for line in (19.5, 20.5, 21.5, 22.5, 23.5, 24.5, 25.5, 26.5, 27.5):
+                    extras_out[f"shots_over_{line}"] = float((shots > line).mean())
+                    extras_out[f"shots_under_{line}"] = float((shots < line).mean())
 
         return {
             "n_sims": n,

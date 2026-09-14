@@ -1213,7 +1213,7 @@ def advise(
 
     markets_corners = []
     corner_src = str(mc.get("corners_source") or "proxy")
-    for line in (8.5, 9.5, 10.5, 11.5):
+    for line in (7.5, 8.5, 9.5, 10.5, 11.5, 12.5):
         ok, uk = f"corners_over_{line}", f"corners_under_{line}"
         if ok not in mc:
             continue
@@ -1225,6 +1225,20 @@ def advise(
             derived(f"CORNU{line}", f"Corner Under {line}", "corners", pu, po, pu, 0.5, _get_odd(odds, uk), f"λ {corner_src}")
         )
 
+    markets_shots = []
+    shot_src = str(mc.get("shots_source") or "proxy")
+    for line in (19.5, 20.5, 21.5, 22.5, 23.5, 24.5, 25.5, 26.5, 27.5):
+        ok, uk = f"shots_over_{line}", f"shots_under_{line}"
+        if ok not in mc:
+            continue
+        po, pu = float(mc[ok]), float(mc.get(uk, 1 - mc[ok]))
+        markets_shots.append(
+            derived(f"SHOTO{line}", f"Tiri Over {line}", "shots", po, pu, po, 0.5, _get_odd(odds, ok), f"λ {shot_src}")
+        )
+        markets_shots.append(
+            derived(f"SHOTU{line}", f"Tiri Under {line}", "shots", pu, po, pu, 0.5, _get_odd(odds, uk), f"λ {shot_src}")
+        )
+
     markets_scorer: list[dict[str, Any]] = []
 
     def _finish(m: dict[str, Any], overround: float) -> dict[str, Any]:
@@ -1233,7 +1247,7 @@ def advise(
             rr_1x2
             if g in {"1x2", "dc", "dnb", "ah"}
             else rr_ou
-            if g in {"ou", "btts", "team", "cards", "corners", "multigol", "parity", "scorer"}
+            if g in {"ou", "btts", "team", "cards", "corners", "shots", "multigol", "parity", "scorer"}
             else rr_combo
         )
         return _with_composite(
@@ -1248,6 +1262,28 @@ def advise(
             )
         )
 
+    def _extra_key(m: dict[str, Any]) -> float:
+        edge = m.get("edge_pp")
+        evn = m.get("ev_cons") if m.get("ev_cons") is not None else m.get("ev")
+        base = float(m.get("score") or 0) + max(edge if edge is not None else evn or -0.05, -0.05) * 3
+        # Boost corner (obiettivo value-bet tattico)
+        if m.get("group") == "corners":
+            base += 1.25
+            if m.get("odds_real") and odds.get("side_odds_source") == "kambi_unibet":
+                base += 0.35
+        elif m.get("group") == "shots":
+            base += 0.35
+        return base
+
+    def _market_ev(m: dict[str, Any] | None) -> float | None:
+        if not m:
+            return None
+        if m.get("ev_cons") is not None:
+            return float(m["ev_cons"])
+        if m.get("ev") is not None:
+            return float(m["ev"])
+        return None
+
     grouped = {
         "1x2": [_finish(m, rr_1x2) for m in markets_1x2],
         "dc": [_finish(m, rr_1x2) for m in markets_dc],
@@ -1259,7 +1295,9 @@ def advise(
         "parity": [],
         "exact": [],
         "cards": [],
-        "corners": [],
+        # Corner/tiri: finish subito così competono per il pick primario
+        "corners": [_finish(m, rr_ou) for m in markets_corners],
+        "shots": [_finish(m, rr_ou) for m in markets_shots],
         "scorer": [],
         "combo": [],
     }
@@ -1272,9 +1310,35 @@ def advise(
         if with_odds_1x2
         else None
     )
-    extras = [m for m in all_markets if m["group"] != "1x2" and _actionable(m) and m.get("odds_real")]
+    with_odds_ou = [m for m in grouped["ou"] if m.get("odds_real")]
+    with_odds_corners = [m for m in grouped["corners"] if m.get("odds_real") and _actionable(m)]
+    with_odds_shots = [m for m in grouped["shots"] if m.get("odds_real") and _actionable(m)]
+    min_ev_play = float(cal.get("min_ev_play", MIN_EDGE))
+    playable_corners = [
+        m
+        for m in with_odds_corners
+        if (_market_ev(m) or -1.0) >= min_ev_play
+    ]
+    playable_shots = [
+        m for m in with_odds_shots if (_market_ev(m) or -1.0) >= min_ev_play
+    ]
+    play_corner = None
+    if with_odds_corners:
+        best_corn = max(with_odds_corners, key=_extra_key)
+        play_corner = _pick_headline(best_corn, best_corn if best_corn.get("odds_real") else None)
+    play_shot = None
+    if with_odds_shots:
+        best_sh = max(with_odds_shots, key=_extra_key)
+        play_shot = _pick_headline(best_sh, best_sh if best_sh.get("odds_real") else None)
+
+    extras = [
+        m
+        for m in all_markets
+        if m["group"] not in {"1x2", "corners"} and _actionable(m) and m.get("odds_real")
+    ]
     play_alt = None
-    invalid_no_odds = not with_odds_1x2
+    # Invalido solo se manca qualsiasi quota utile (corner / tiri / 1X2 / O/U)
+    invalid_no_odds = not (with_odds_1x2 or with_odds_ou or with_odds_corners or with_odds_shots)
 
     if invalid_no_odds:
         play_1x2 = _analysis_play(
@@ -1284,27 +1348,58 @@ def advise(
             reason="pick invalido: senza quote non si calcolano edge, EV, Kelly, quota equa, CLV",
         )
         play = play_1x2
-    else:
-        play_1x2 = _pick_headline(probable_1x2, best_value_1x2)
+    elif playable_corners:
+        # Priorità corner: migliore CORN* giocabile (quota + EV)
+        best_playable = max(playable_corners, key=_extra_key)
+        play = _pick_headline(best_playable, best_playable)
+        play_1x2 = (
+            _pick_headline(probable_1x2, best_value_1x2)
+            if with_odds_1x2
+            else _analysis_play(
+                action="no_bet",
+                kind="nessun_pick",
+                name="1X2 senza quota (corner prioritario)",
+                reason="fallback 1X2 assente; pick primario su corner",
+            )
+        )
         if extras:
-            def extra_key(m):
-                edge = m.get("edge_pp")
-                evn = m.get("ev_cons") if m.get("ev_cons") is not None else m.get("ev")
-                return m["score"] + max(edge if edge is not None else evn or -0.05, -0.05) * 3
-
-            play_alt = max(extras, key=extra_key)
+            play_alt = max(extras, key=_extra_key)
+            play_alt = _pick_headline(play_alt, play_alt if play_alt.get("odds_real") else None)
+    else:
+        play_1x2 = (
+            _pick_headline(probable_1x2, best_value_1x2)
+            if with_odds_1x2
+            else _analysis_play(
+                action="invalido",
+                kind="invalido",
+                name="pick invalido (quote 1X2 assenti)",
+                reason="pick invalido: senza quote 1X2 e senza corner giocabile",
+            )
+        )
+        if not with_odds_1x2 and with_odds_ou:
+            # Fallback O/U se manca 1X2 ma ci sono totals
+            best_ou = max(with_odds_ou, key=_extra_key)
+            play_1x2 = _pick_headline(best_ou, best_ou if best_ou.get("odds_real") else None)
+        elif not with_odds_1x2 and with_odds_corners:
+            # Quote corner presenti ma EV sotto soglia: non invalidare la partita
+            best_corn = max(with_odds_corners, key=_extra_key)
+            play_1x2 = _pick_headline(best_corn, best_corn if best_corn.get("odds_real") else None)
+        if extras:
+            play_alt = max(extras, key=_extra_key)
             play_alt = _pick_headline(play_alt, play_alt if play_alt.get("odds_real") else None)
 
         play = play_1x2
-        min_ev_play = float(cal.get("min_ev_play", MIN_EDGE))
-        alt_ev = None if not play_alt else (play_alt.get("ev_cons") if play_alt.get("ev_cons") is not None else play_alt.get("ev"))
+        alt_ev = _market_ev(play_alt)
         if play_alt and (alt_ev or 0) >= min_ev_play and play_alt["score"] >= play_1x2["score"]:
             play = play_alt
+        # Corner con quota ma EV sotto soglia: resta play_corner informativo, non forza il primario
 
     need_secondary = (
         not lazy_secondary
         or int(play.get("score") or 0) >= 7
         or play.get("action") == "gioca"
+        or bool(playable_corners)
+        or bool(playable_shots)
     )
     if need_secondary:
         try:
@@ -1364,7 +1459,7 @@ def advise(
         grouped["parity"] = [_finish(m, rr_ou) for m in markets_parity]
         grouped["exact"] = [_finish(m, rr_combo) for m in markets_exact]
         grouped["cards"] = [_finish(m, rr_ou) for m in markets_cards]
-        grouped["corners"] = [_finish(m, rr_ou) for m in markets_corners]
+        # corners già finiti sopra
         grouped["scorer"] = [_finish(m, rr_ou) for m in markets_scorer]
         grouped["combo"] = [_finish(m, rr_combo) for m in markets_combo]
         all_markets = [m for g in grouped.values() for m in g]
@@ -1688,6 +1783,8 @@ def advise(
         "play": play,
         "play_1x2": play_1x2,
         "play_alt": play_alt,
+        "play_corner": play_corner,
+        "play_shot": play_shot,
         "most_probable": probable_1x2,
         "best_value": best_value_1x2,
         "markets": markets_1x2,
@@ -1696,7 +1793,13 @@ def advise(
         "extras": extras,
         "expected_goals": prediction.get("expected_goals"),
         "most_likely_scores": mc.get("most_likely_scores", []),
-        "has_odds": any(bool(m.get("odds_real")) for m in grouped["1x2"]),
+        "has_odds": any(
+            bool(m.get("odds_real"))
+            for m in (grouped.get("1x2") or [])
+            + (grouped.get("ou") or [])
+            + (grouped.get("corners") or [])
+            + (grouped.get("shots") or [])
+        ),
         "market_move": market_move,
         "market_align": alignment or {"agrees": [], "disagrees": [], "delta": 0, "label": "n/d"},
         "tipster": play.get("tipster") or tipster,

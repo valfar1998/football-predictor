@@ -1,8 +1,8 @@
-"""Palinsesto football Unibet via Kambi Guest API (1X2, O/U gol, corner su evento).
+"""Palinsesto football Unibet via Kambi Guest API (1X2, O/U gol, corner/tiri su evento).
 
 Stesso schema del tennis-predictor (DoH + curl_cffi), sport=football.
-Corner: non sono nel listView — si arricchiscono on-demand da
-`/betoffer/event/{id}.json` (Total Corners).
+Corner/tiri: non sono nel listView — si arricchiscono on-demand da
+`/betoffer/event/{id}.json` (Total Corners / Total Shots).
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ ENDPOINTS = (
 )
 SKIP_STATES = frozenset({"FINISHED", "CANCELLED", "ABANDONED", "POSTPONED", "SUSPENDED"})
 CORNER_LINES = (7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 10.5, 11.0, 11.5, 12.0, 12.5)
+SHOT_LINES = (18.5, 19.5, 20.5, 21.5, 22.5, 23.5, 24.5, 25.5, 26.5, 27.5, 28.5, 29.5, 30.5)
 
 
 def _enabled() -> bool:
@@ -426,14 +427,20 @@ def _fetch_event_betoffers(kambi_id: int | str) -> list[dict]:
     return list(payload.get("betOffers") or [])
 
 
-def _parse_total_corners(offers: list[dict]) -> dict[str, float]:
-    """Ritorna keys corners_over_9.5 / corners_under_9.5 …"""
+def _parse_ou_line_offers(
+    offers: list[dict],
+    *,
+    criterion_match,
+    key_prefix: str,
+    allowed_lines: tuple[float, ...] | None = None,
+) -> dict[str, float]:
+    """Generic Total X Over/Under → ``{prefix}_over_{line}`` / ``_under_``."""
     out: dict[str, float] = {}
     for offer in offers:
         if not isinstance(offer, dict) or offer.get("closed"):
             continue
         crit = str((offer.get("criterion") or {}).get("englishLabel") or "").lower()
-        if crit != "total corners":
+        if not criterion_match(crit):
             continue
         over = under = None
         point = None
@@ -460,12 +467,48 @@ def _parse_total_corners(offers: list[dict]) -> dict[str, float]:
                 under = odd
         if point is None:
             continue
-        # Kambi a volte espone linee intere; accetta anche .0/.5
+        if allowed_lines is not None:
+            # tollera float noise
+            if not any(abs(point - float(x)) < 0.01 for x in allowed_lines):
+                # accetta comunque linee .0/.5 ragionevoli fuori allowlist stretta
+                if point < min(allowed_lines) - 1 or point > max(allowed_lines) + 1:
+                    continue
         if over is not None:
-            out[f"corners_over_{point:g}"] = over
+            out[f"{key_prefix}_over_{point:g}"] = over
         if under is not None:
-            out[f"corners_under_{point:g}"] = under
+            out[f"{key_prefix}_under_{point:g}"] = under
     return out
+
+
+def _parse_total_corners(offers: list[dict]) -> dict[str, float]:
+    """Ritorna keys corners_over_9.5 / corners_under_9.5 …"""
+    return _parse_ou_line_offers(
+        offers,
+        criterion_match=lambda c: c.strip() == "total corners" or c.strip() == "total corner kicks",
+        key_prefix="corners",
+        allowed_lines=CORNER_LINES,
+    )
+
+
+def _parse_total_shots(offers: list[dict]) -> dict[str, float]:
+    """Ritorna keys shots_over_22.5 / shots_under_22.5 … (total shots, non SOT)."""
+
+    def _is_total_shots(crit: str) -> bool:
+        c = crit.strip()
+        if "corner" in c:
+            return False
+        if "on target" in c or "on-target" in c or "sot" in c:
+            return False
+        if c in {"total shots", "total number of shots", "match shots"}:
+            return True
+        return "total" in c and "shot" in c and "team" not in c
+
+    return _parse_ou_line_offers(
+        offers,
+        criterion_match=_is_total_shots,
+        key_prefix="shots",
+        allowed_lines=SHOT_LINES,
+    )
 
 
 def lookup_kambi_football(
@@ -475,8 +518,9 @@ def lookup_kambi_football(
     events: list[dict] | None = None,
     kickoff_date: str | None = None,
     include_corners: bool = False,
+    include_shots: bool = False,
 ) -> dict | None:
-    """Match fuzzy su cache listView; opz. arricchisce Total Corners via betoffers."""
+    """Match fuzzy su cache listView; opz. arricchisce Total Corners/Shots via betoffers."""
     if events is None:
         events = load_kambi_football_cache()
     if not events:
@@ -519,12 +563,17 @@ def lookup_kambi_football(
         "commence_time": ev.get("commence_time"),
         "competition": ev.get("competition"),
         "odds_source": "kambi_unibet",
+        "kambi_id": ev.get("kambi_id"),
     }
-    if include_corners and ev.get("kambi_id") is not None:
+    if (include_corners or include_shots) and ev.get("kambi_id") is not None:
         try:
             offers = _fetch_event_betoffers(ev["kambi_id"])
-            result.update(_parse_total_corners(offers))
-            result["corners_fetched"] = True
+            if include_corners:
+                result.update(_parse_total_corners(offers))
+                result["corners_fetched"] = True
+            if include_shots:
+                result.update(_parse_total_shots(offers))
+                result["shots_fetched"] = True
         except Exception as exc:
-            result["corners_error"] = str(exc)
+            result["side_markets_error"] = str(exc)
     return result

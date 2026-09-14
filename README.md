@@ -13,9 +13,12 @@ cd C:\Users\valba\Desktop\corsi\football-predictor
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+# include soccerdata locale: pip install -e ./soccerdata-master
 python main.py --train          # prima volta o dopo settimane offline
 streamlit run app.py            # oppure: python main.py --ui
 ```
+
+`soccerdata` non viene da PyPI: è il tree in **`soccerdata-master/`** (FBref, Understat, Sofascore, WhoScored). Se uno scraper si rompe, patch lì e reinstalla con `pip install -e ./soccerdata-master`.
 
 ### Uso quotidiano (UI)
 

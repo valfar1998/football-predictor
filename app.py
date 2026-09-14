@@ -52,6 +52,7 @@ GROUP_LABEL = {
     "team": "Gol squadra",
     "cards": "Cartellini",
     "corners": "Corner",
+    "shots": "Tiri",
     "scorer": "Marcatori (xG+XI)",
     "combo": "Combo (risultato + O/U / Gol)",
 }

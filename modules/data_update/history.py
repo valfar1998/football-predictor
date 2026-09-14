@@ -90,6 +90,8 @@ _EXTRA_COLS = {
     "quadro_votes_n": "INTEGER",
     "fotmob_match_id": "INTEGER",
     "pick_label": "TEXT",
+    "sofascore_match_id": "INTEGER",
+    "sofascore_stats": "TEXT",
 }
 
 
@@ -193,7 +195,7 @@ def _json_dump(val: Any) -> str | None:
 
 def _row_to_dict(r: sqlite3.Row) -> dict[str, Any]:
     d = dict(r)
-    for key in ("data_factors", "no_bet_reasons"):
+    for key in ("data_factors", "no_bet_reasons", "sofascore_stats"):
         raw = d.get(key)
         if isinstance(raw, str) and raw.strip().startswith(("[", "{")):
             try:
@@ -245,10 +247,13 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
         ("quadro_votes_n", None),
         ("fotmob_match_id", None),
         ("pick_label", None),
+        ("sofascore_match_id", None),
+        ("sofascore_stats", None),
     ):
         rec.setdefault(k, default)
     rec["data_factors"] = _json_dump(rec.get("data_factors"))
     rec["no_bet_reasons"] = _json_dump(rec.get("no_bet_reasons"))
+    rec["sofascore_stats"] = _json_dump(rec.get("sofascore_stats"))
     prev = conn.execute("SELECT * FROM matches WHERE match_key=?", (rec["match_key"],)).fetchone()
     if prev and keep_result and prev["result"]:
         rec["result"] = prev["result"]
@@ -266,7 +271,7 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
             data_factors, no_bet_reasons, pick_group, model_cluster, ev_sharp,
             context_partial, synthetic_backfill,             clv, quota_close, beat_close,
             quadro_agree_n, quadro_votes_n,
-            fotmob_match_id, pick_label
+            fotmob_match_id, pick_label, sofascore_match_id, sofascore_stats
         ) VALUES (
             :match_key, :date, :time, :home, :away, :league, :country, :pick, :action,
             :score, :score_unified, :ev_cons, :probability, :odds_source, :skip_reason,
@@ -275,7 +280,7 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
             :data_factors, :no_bet_reasons, :pick_group, :model_cluster, :ev_sharp,
             :context_partial, :synthetic_backfill,             :clv, :quota_close, :beat_close,
             :quadro_agree_n, :quadro_votes_n,
-            :fotmob_match_id, :pick_label
+            :fotmob_match_id, :pick_label, :sofascore_match_id, :sofascore_stats
         )
         ON CONFLICT(match_key) DO UPDATE SET
             time=excluded.time, league=excluded.league, country=excluded.country,
@@ -302,6 +307,8 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
             quadro_votes_n=COALESCE(excluded.quadro_votes_n, matches.quadro_votes_n),
             fotmob_match_id=COALESCE(excluded.fotmob_match_id, matches.fotmob_match_id),
             pick_label=COALESCE(excluded.pick_label, matches.pick_label),
+            sofascore_match_id=COALESCE(excluded.sofascore_match_id, matches.sofascore_match_id),
+            sofascore_stats=COALESCE(excluded.sofascore_stats, matches.sofascore_stats),
             context_partial=CASE
                 WHEN matches.synthetic_backfill=0 AND excluded.synthetic_backfill=1 THEN matches.context_partial
                 ELSE COALESCE(excluded.context_partial, matches.context_partial)
@@ -949,7 +956,7 @@ def _parse_scorer_pick(pick: str, pick_label: str | None = None) -> tuple[str, s
 
 def _side_stats_needed(pick: str) -> bool:
     p = str(pick or "").strip().upper()
-    return p.startswith("CARD") or p.startswith("CORN")
+    return p.startswith("CARD") or p.startswith("CORN") or p.startswith("SHOT")
 
 
 def _int_stat(v: Any) -> int | None:
@@ -974,8 +981,10 @@ def _hit_for_pick(
     ar: int | None = None,
     hc: int | None = None,
     ac: int | None = None,
+    sh: int | None = None,
+    sa: int | None = None,
 ) -> int | None:
-    """Valuta hit su gol, cartellini e corner. None se stats side mancanti."""
+    """Valuta hit su gol, cartellini, corner e tiri. None se stats side mancanti."""
     p = str(pick or "").strip().upper().replace(" ", "")
     if p in {"1", "X", "2"}:
         return 1 if p == res else 0
@@ -1049,6 +1058,19 @@ def _hit_for_pick(
         if p.startswith("CORNO"):
             return 1 if corners > line else 0
         return 1 if corners < line else 0
+    # Tiri SHOTO22.5 / SHOTU22.5
+    if p.startswith("SHOTO") or p.startswith("SHOTU"):
+        if sh is None or sa is None:
+            return None
+        shots = int(sh) + int(sa)
+        body = p[5:].replace("PLUS", "+")
+        try:
+            line = float(body)
+        except ValueError:
+            return 0
+        if p.startswith("SHOTO"):
+            return 1 if shots > line else 0
+        return 1 if shots < line else 0
     # Exact score 2-1
     if "-" in p and p[0].isdigit():
         try:
@@ -1114,20 +1136,43 @@ def settle_from_results(results: pd.DataFrame) -> dict[str, Any]:
             ar = _int_stat(fx.get("away_red") if "away_red" in fx.index else fx.get("AR"))
             hc = _int_stat(fx.get("home_corners") if "home_corners" in fx.index else fx.get("HC"))
             ac = _int_stat(fx.get("away_corners") if "away_corners" in fx.index else fx.get("AC"))
+            sh = _int_stat(
+                fx.get("home_shots")
+                if "home_shots" in fx.index
+                else fx.get("SH")
+                if "SH" in fx.index
+                else fx.get("shots_home")
+            )
+            sa = _int_stat(
+                fx.get("away_shots")
+                if "away_shots" in fx.index
+                else fx.get("SA")
+                if "SA" in fx.index
+                else fx.get("shots_away")
+            )
+            pu = pick.upper()
             if _side_stats_needed(pick) and (
-                (pick.upper().startswith("CARD") and (hy is None or ay is None))
-                or (pick.upper().startswith("CORN") and (hc is None or ac is None))
+                (pu.startswith("CARD") and (hy is None or ay is None))
+                or (pu.startswith("CORN") and (hc is None or ac is None))
+                or (pu.startswith("SHOT") and (sh is None or sa is None))
             ):
                 continue
             grp = str(rec["pick_group"] or "") if "pick_group" in rec.keys() else ""
             if _scorer_pick_needed(pick, grp):
+                sofa_mid = None
+                if "sofascore_match_id" in fx.index and fx.get("sofascore_match_id") is not None:
+                    try:
+                        sofa_mid = int(fx.get("sofascore_match_id"))
+                    except (TypeError, ValueError):
+                        sofa_mid = None
                 conn.execute(
                     """
                     UPDATE matches
-                    SET home_goals=?, away_goals=?, result=?
+                    SET home_goals=?, away_goals=?, result=?,
+                        sofascore_match_id=COALESCE(sofascore_match_id, ?)
                     WHERE match_key=? AND hit IS NULL
                     """,
-                    (hg, ag, res, rec["match_key"]),
+                    (hg, ag, res, sofa_mid, rec["match_key"]),
                 )
                 settled += 1
                 continue
@@ -1143,16 +1188,25 @@ def settle_from_results(results: pd.DataFrame) -> dict[str, Any]:
                 ar=ar,
                 hc=hc,
                 ac=ac,
+                sh=sh,
+                sa=sa,
             )
             if hit is None:
                 continue
+            sofa_mid = None
+            if "sofascore_match_id" in fx.index and fx.get("sofascore_match_id") is not None:
+                try:
+                    sofa_mid = int(fx.get("sofascore_match_id"))
+                except (TypeError, ValueError):
+                    sofa_mid = None
             conn.execute(
                 """
                 UPDATE matches
-                SET home_goals=?, away_goals=?, result=?, hit=?, settled_at=?
+                SET home_goals=?, away_goals=?, result=?, hit=?, settled_at=?,
+                    sofascore_match_id=COALESCE(sofascore_match_id, ?)
                 WHERE match_key=?
                 """,
-                (hg, ag, res, hit, now, rec["match_key"]),
+                (hg, ag, res, hit, now, sofa_mid, rec["match_key"]),
             )
             settled += 1
         conn.commit()
@@ -1281,14 +1335,17 @@ def _fetch_world_results(*, days_back: int = 3) -> pd.DataFrame:
 
 
 def settle_scorer_pending(*, max_fetch: int = 40) -> dict[str, Any]:
-    """Chiude pick marcatore (AS/FS) via FotMob matchDetails + fuzzy name match."""
+    """Chiude pick marcatore (AS/FS): Sofascore incidents prima, poi FotMob."""
     from modules.data_update.fotmob_context import extract_goal_scorers, scorer_hit
+    from modules.data_update.sofascore_postmatch import extract_goal_scorers_sofascore
 
     conn = _connect()
     settled = 0
     skipped = 0
+    sofa_n = 0
+    fotmob_n = 0
     errors: list[str] = []
-    scorer_cache: dict[int, dict[str, Any]] = {}
+    scorer_cache: dict[str, dict[str, Any]] = {}
     try:
         _migrate_jsonl(conn)
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1315,26 +1372,47 @@ def settle_scorer_pending(*, max_fetch: int = 40) -> dict[str, Any]:
                 skipped += 1
                 continue
             mode, player = parsed
-            mid = rec["fotmob_match_id"] if "fotmob_match_id" in rec.keys() else None
-            if mid is None:
-                mid = _fotmob_id_from_row(_row_to_dict(rec))
-            if mid is None:
-                skipped += 1
-                continue
-            try:
-                mid_i = int(mid)
-            except (TypeError, ValueError):
-                skipped += 1
-                continue
-            if mid_i not in scorer_cache:
+            scorers: list[str] = []
+            sofa_mid = None
+            if "sofascore_match_id" in rec.keys() and rec["sofascore_match_id"] is not None:
                 try:
-                    scorer_cache[mid_i] = extract_goal_scorers(mid_i)
-                except Exception as exc:
-                    errors.append(f"{mid_i}: {exc}")
-                    scorer_cache[mid_i] = {"ok": False, "scorers": []}
-            info = scorer_cache[mid_i]
-            scorers = info.get("scorers") or []
-            hit_v = scorer_hit(player, scorers, mode=mode)
+                    sofa_mid = int(rec["sofascore_match_id"])
+                except (TypeError, ValueError):
+                    sofa_mid = None
+            if sofa_mid is not None:
+                ck = f"sofa:{sofa_mid}"
+                if ck not in scorer_cache:
+                    try:
+                        scorer_cache[ck] = extract_goal_scorers_sofascore(sofa_mid)
+                    except Exception as exc:
+                        errors.append(f"sofa {sofa_mid}: {exc}")
+                        scorer_cache[ck] = {"ok": False, "scorers": []}
+                scorers = list((scorer_cache[ck] or {}).get("scorers") or [])
+            hit_v = scorer_hit(player, scorers, mode=mode) if scorers else None
+            used_sofa = bool(scorers) and hit_v is not None
+            fotmob_mid = None
+            if hit_v is None:
+                mid = rec["fotmob_match_id"] if "fotmob_match_id" in rec.keys() else None
+                if mid is None:
+                    mid = _fotmob_id_from_row(_row_to_dict(rec))
+                if mid is None:
+                    skipped += 1
+                    continue
+                try:
+                    mid_i = int(mid)
+                except (TypeError, ValueError):
+                    skipped += 1
+                    continue
+                fotmob_mid = mid_i
+                ck = f"fm:{mid_i}"
+                if ck not in scorer_cache:
+                    try:
+                        scorer_cache[ck] = extract_goal_scorers(mid_i)
+                    except Exception as exc:
+                        errors.append(f"fm {mid_i}: {exc}")
+                        scorer_cache[ck] = {"ok": False, "scorers": []}
+                scorers = list((scorer_cache[ck] or {}).get("scorers") or [])
+                hit_v = scorer_hit(player, scorers, mode=mode)
             if hit_v is None:
                 skipped += 1
                 continue
@@ -1351,20 +1429,33 @@ def settle_scorer_pending(*, max_fetch: int = 40) -> dict[str, Any]:
                 """
                 UPDATE matches
                 SET home_goals=?, away_goals=?, result=?, hit=?, settled_at=?,
-                    fotmob_match_id=COALESCE(fotmob_match_id, ?)
+                    fotmob_match_id=COALESCE(fotmob_match_id, ?),
+                    sofascore_match_id=COALESCE(sofascore_match_id, ?)
                 WHERE match_key=? AND hit IS NULL
                 """,
-                (hg, ag, res, 1 if hit_v else 0, now, mid_i, rec["match_key"]),
+                (hg, ag, res, 1 if hit_v else 0, now, fotmob_mid, sofa_mid, rec["match_key"]),
             )
             settled += 1
+            if used_sofa:
+                sofa_n += 1
+            else:
+                fotmob_n += 1
         conn.commit()
     finally:
         conn.close()
-    return {"settled_scorers": settled, "skipped_scorers": skipped, "errors": errors[:8]}
+    note = "Sofascore" if sofa_n and not fotmob_n else ("FotMob" if fotmob_n and not sofa_n else "Sofascore/FotMob")
+    return {
+        "settled_scorers": settled,
+        "skipped_scorers": skipped,
+        "errors": errors[:8],
+        "sofascore_scorers": sofa_n,
+        "fotmob_scorers": fotmob_n,
+        "source_note": note,
+    }
 
 
 def settle_pending(*, learn: bool = True, learn_only_if_settled: bool = False) -> dict[str, Any]:
-    """Chiude i match archiviati usando coppe (org), football-data.co.uk e risultati mondiali."""
+    """Chiude i match archiviati: Sofascore Big 5 prima, poi coppe/FD/mondo e scorers."""
     conn = _connect()
     try:
         _migrate_jsonl(conn)
@@ -1376,6 +1467,29 @@ def settle_pending(*, learn: bool = True, learn_only_if_settled: bool = False) -
         conn.close()
 
     settled = 0
+    # Fonte primaria Big 5: Sofascore schedule (+ stats side se disponibili)
+    try:
+        from modules.data_update.sofascore_postmatch import (
+            enrich_settled_sofascore_stats,
+            fetch_sofascore_results,
+        )
+
+        sofa = fetch_sofascore_results(days_back=7)
+        if sofa is not None and not sofa.empty:
+            n = int(settle_from_results(sofa).get("settled") or 0)
+            settled += n
+            if n:
+                print(f"storico locale: {n} partite chiuse da Sofascore (Big 5)")
+        enrich_out = enrich_settled_sofascore_stats(limit=60, days_back=14)
+        if enrich_out.get("updated"):
+            print(f"storico locale: {enrich_out['updated']} stats Sofascore salvate")
+            # Secondo passaggio: cards/corners ora in cache → riprova settle
+            sofa2 = fetch_sofascore_results(days_back=7, with_side_stats=True)
+            if sofa2 is not None and not sofa2.empty:
+                n2 = int(settle_from_results(sofa2).get("settled") or 0)
+                settled += n2
+    except Exception as exc:
+        print(f"skip Sofascore settle: {exc}")
     try:
         from modules.data_update.cups import load_org_cup_results
 
@@ -1404,7 +1518,8 @@ def settle_pending(*, learn: bool = True, learn_only_if_settled: bool = False) -
         scorer_out = settle_scorer_pending()
         settled += int(scorer_out.get("settled_scorers") or 0)
         if scorer_out.get("settled_scorers"):
-            print(f"storico locale: {scorer_out['settled_scorers']} pick marcatore chiusi (FotMob)")
+            src = scorer_out.get("source_note") or "Sofascore/FotMob"
+            print(f"storico locale: {scorer_out['settled_scorers']} pick marcatore chiusi ({src})")
     except Exception as exc:
         print(f"skip scorer settle: {exc}")
     summary = history_summary()

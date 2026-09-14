@@ -2,12 +2,12 @@
 
 Sintesi aggiornata del progetto **football-predictor**  
 Repo: [github.com/valfar1998/football-predictor](https://github.com/valfar1998/football-predictor) · branch `main`  
-Ultimo aggiornamento: **2026-09-10** — audit Odds API corner (Pinnacle); Pinnacle multi-lega Big5+UCL; Kambi football Unibet; FBref `crosses_conc` + Bundesliga + match-log cards.
+Ultimo aggiornamento: **2026-09-14** — **Kambi primario** (corner/tiri); value-bet focus corner; ROI paper solo voto≥8; Sofascore post-match.
 
 Scopo di questo file: dare a un altro modello / analista contesto sufficiente per suggerire miglioramenti **senza** dover leggere tutto il codice.
 
 **Lingua UI/note:** italiano.  
-**Stack:** Python 3.10+, Streamlit, pandas, scikit-learn, XGBoost, soccerdata, statsbombpy, mplsoccer.
+**Stack:** Python 3.10+, Streamlit, pandas, scikit-learn, XGBoost, soccerdata (locale `soccerdata-master/`), statsbombpy, mplsoccer.
 
 **Convenzione docs:** dopo ogni modifica di codice aggiornare **questo file** e `TECH_ROADMAP.md`.
 
@@ -23,10 +23,10 @@ App di **analisi e value betting** sul calcio (pre-match), non un bookmaker né 
 2. Costruisce feature (forma, xG rolling, Elo, casa/trasferta, `mkt_p_*`, `days_into_season`, …)  
 3. Allena ML 1X2 (globale + **cluster**) + **XGB O/U 2.5 / AH 0** + conformal OOF + temperature  
 4. Simula Monte Carlo → probabilità multi-mercato (+ bootstrap IC; conformal 1X2/O/U/AH)  
-5. Confronta con quote (Asian, Pinnacle/Odds API, Betfair, football-data) → EV / Kelly / voto  
+5. Confronta con quote (**Kambi** corner/tiri primario, Asian steam, Pinnacle/Betfair gap) → EV / Kelly / voto  
 6. Arricchisce **quadro** + validazione + accordo dinamico + residual (gate produzione)  
-7. **Archive ricco** pre-match → **settle** post-match → **`online_learn`** (calibrazione leggera)  
-8. UI: calendario (CSV/JSON), tutti i mercati, singola, valutazione / paper / apprendimento  
+7. **Archive ricco** pre-match → **settle** (Sofascore Big 5 → FD/mondo) → **`online_learn`**  
+8. UI: calendario (CSV/JSON), tutti i mercati, singola, valutazione / paper (**ROI voto≥8**) / apprendimento  
 
 ### Principio di design (non negoziabile)
 
@@ -124,7 +124,9 @@ Partite **N/D** (squadra fuori training): solo quadro/validazione, voto max ~3, 
 ### Fase post-match (apprendimento leggero)
 
 ```text
-risultato fd  ──►  settle_pending (hit 0/1)
+Sofascore Big 5 (gol+stats) ─┐
+fd / coppe / mondo           ├─►  settle_pending (hit 0/1)
+scorer Sofascore→FotMob      ─┘
                         │
                         ▼
               learn_from_settled()
@@ -142,6 +144,7 @@ risultato fd  ──►  settle_pending (hit 0/1)
 ```
 
 **Importante:** il fit usa solo righe **trainable** (vedi §1.4). Le ~679 live vecchie senza quota/EV/fattori **non entrano** nel fit.
+Stats Sofascore (`sofascore_stats` JSON + `sofascore_match_stats.json`) sono materiale per analisi future — **non** entrano in EV/Kelly.
 
 ### Cosa decide se “giocare” o no
 
@@ -220,6 +223,7 @@ Da ora il sistema **impara soprattutto** da: live ricche (×5 nel fit) + backfil
 | **FBref** (soccerdata, Big 5) | Poss, tiri, xG squadra, player | `fbref_team_context.csv` |
 | **Understat** | xG squadra + player per marcatori | `understat_*_context.csv` |
 | **StatsBomb / Sofascore / FotMob** | Open data, classifiche, match recenti | `*_team_context.csv`, `fotmob_matches.json` |
+| **Sofascore post-match** (Big 5) | Settle gol primario + stats/incidenti | `sofascore_match_id`, `sofascore_stats`, `sofascore_match_stats.json` |
 | **ClubElo** | Elo pubblico (cache 72h) | `data/raw/clubelo.csv` |
 | **side_rates** (interno) | Medie HY/HC ultime partite da CSV fd | `fd_side_rates.csv` |
 
@@ -410,7 +414,7 @@ football-predictor/
 | `market_models` | XGB binari **O/U 2.5** + **AH 0** + temperature | `market_models.joblib`; CLI `--train-markets` |
 | `poisson` / Dixon–Coles | λ | Understat → FotMob rolling → FBref; meteo |
 | `MatchPredictor` | `_model_for(league)` + `market_ml` + conformal 1X2 | T: lega → cluster → globale |
-| `MonteCarloSimulator` | Scoreline → mercati estesi | `ah_home_0`; + `extras` cards/corners |
+| `MonteCarloSimulator` | Scoreline → mercati estesi | `ah_home_0`; + `extras` cards/corners/**shots** |
 | `conformal.py` | 1X2 + O/U + AH; preferisce OOF XGB | Fallback Poisson λ; fix chiave `over_2.5` |
 | Calibrazione | T globale/lega/**cluster**, reliability bins, `online_p_factor` | Anche da settle |
 
@@ -435,7 +439,8 @@ football-predictor/
 | `team` | Gol squadra O/U + vince a 0 | Core |
 | `combo` | 1X2+O/U, 1X2+BTTS, Gol+O2.5, … | Core |
 | `cards` | Cartellini O/U 2.5–5.5 | **FD rates** (HY/AY) → FBref match logs → season → proxy |
-| `corners` | Corner O/U 8.5–11.5 | **FD rates** (HC/AC) → FBref match logs → crosses → proxy |
+| `corners` | Corner O/U 7.5–12.5 | **Mercato preferito** (value-bet focus): quota **Kambi** on-demand + EV ≥ `min_ev_play`. λ: FD → FBref → crosses → proxy |
+| `shots` | Tiri O/U ~19.5–27.5 | Analisi + alt pick; quota Kambi Total Shots; λ FBref/proxy blend corner; settle Sofascore `shots_*` |
 | `scorer` | Anytime / first | Understat+FBref xG; **boost lineup FotMob** se disponibile |
 
 Artefatti: `market_models.joblib`, `fd_side_rates.csv`, `understat_player_xg.csv`, `fbref_match_side_rates.csv` (opz.).
@@ -443,11 +448,16 @@ Artefatti: `market_models.joblib`, `fd_side_rates.csv`, `understat_player_xg.csv
 Quote: se assenti → probabilità sì, EV/Kelly con quota **stimata**; consiglio “gioca” forte legato a `odds_real` dove possibile.  
 `quota_pick` in archive: preferisce `odds_real` → `odds` → `fair_odds`.
 
-Settle (`history._hit_for_pick`): O/U, BTTS, multigol, parity, exact, DC, **AH0** — non cards/corners/scorer.
+Settle (`history.settle_pending`): **Sofascore Big 5 primo** (gol + HY/HC se statistics), poi fd/coppe/mondo; scorers Sofascore incidents → FotMob. `_hit_for_pick`: O/U, BTTS, multigol, parity, exact, DC, AH0, CARD*, CORN*.
 
 ---
 
 ## 5. Advisor (value + voto + filtri)
+
+### 5.0 Selezione pick primario
+Ordine in `advise.py`: se esiste almeno un mercato `CORN*` con **quota reale** (preferenza **Kambi**) e **EV ≥ `min_ev_play`** → quello è `play` (focus value-bet corner). Altrimenti fallback 1X2 / O/U / tiri (`SHOT*`). Output anche `play_corner` e `play_shot`. `bet_rec` bonus alto corner (+ tiri).
+
+Quote book: **Kambi primario** (1X2/O/U se non Asian; **corner/tiri overwrite**); Pinnacle/Betfair solo gap-fill. Asian resta per steam / sharp.
 
 ### 5.1 Value / EV (`value.py`)
 De-vig, EV cons vs sharp, Kelly ¼; `calibrated_prob` = p × reliability bin (n≥30) × `online_p_factor` **solo 1X2** (cap ±6%, da bias live ricche se n≥30). Soft Kelly se residual in produzione. IC 1X2 fragile → Kelly ×0.70, non no_bet.
@@ -466,7 +476,8 @@ Gambe value/kelly/asian/workflow/history/combos + Δ; quadro da fonti ortogonali
 Ridge WF + cluster; gate **n≥80** settled con EV; `adj_ev`, soft Kelly, primary no_bet.
 
 ### 5.7 Paper trading
-Flat, ROI @ quota, Kelly equity, max DD, Sharpe, WF ROI, breakdown.
+Flat, ROI @ quota, Kelly equity, max DD, Sharpe, WF ROI, breakdown.  
+**Filtro fisso:** solo partite con **voto unificato ≥ 8** (`ROI_MIN_SCORE` in `learn_policy.py`).
 
 ### 5.8 Online learning (`online_learn.py` + `learn_policy.py`)
 Dopo settle / bottone **Apprendi da partite chiuse**: fit **solo su righe trainable** (live ricche + backfill synthetic); live incomplete escluse. Aggiorna reliability bins (blend fino 68% se aggressive), `online_p_factor`, `min_ev_play`, residual fit, pesi data_signal.  
@@ -505,6 +516,7 @@ Senza refresh pre-match con quote, residual/paper Kelly restano poveri (volume �
 | The Odds API (Pinnacle), Betfair, AsianBetSoccer | Quote sharp / exchange / Asian |
 | ClubElo, FBref **Big 5** (team + player + match logs opz.), Understat (team + **player xG**), StatsBomb, Sofascore | Contesto |
 | WhoScored | Assenze (lento) |
+| **soccerdata** locale (`soccerdata-master/`, `-e` in `requirements.txt`) | Scraper FBref / Understat / Sofascore / WhoScored; patchabile se i siti cambiano |
 | Open-Meteo | Meteo + geocode |
 | FotMob `/api/data` | Classifiche, match, rolling xG, details + **lineup XI** top picks (cache 6h) |
 
@@ -512,6 +524,7 @@ Senza refresh pre-match con quote, residual/paper Kelly restano poveri (volume �
 
 **AsianBetSoccer (GHA):** timeout/404 su un giorno → skip + retry HTTP; `notify_cloud` non fallisce più se Asian è lento/vuoto (tiene la cache precedente).
 
+**Vendor OK:** `soccerdata-master/` (fork locale patchabile; non usare PyPI se il tree è presente).  
 **Non vendorizzare:** Sportly SDK, Public-FotMob Django, bypass WAF aggressivi.
 
 ---
@@ -560,7 +573,7 @@ Oggi il **codice** è al massimo (residual, pesi, online learn, pro_scores, GHA)
 | Limite | Impatto |
 |--------|---------|
 | **Live ricche pre-match ridotte** | **51 / 80+** target — paper Kelly e ROI restano parzialmente legati al backfill synthetic |
-| **Settle mercati esplorativi** | Cards/corner via FD (`HY/HC/…`); marcatori via FotMob `matchDetails` + fuzzy name — **codice ✅**, copertura dati 🟡 |
+| **Settle mercati esplorativi** | Cards/corner: Sofascore statistics → FD (`HY/HC/…`); marcatori: Sofascore incidents → FotMob — **codice ✅**, copertura dati 🟡 |
 | **Connettori fragili** | API non ufficiali / scraping (403 Betfair in CI, rotazioni hash Asian, cambi FotMob/FBref) → soft-fail, cache, skip giorno |
 | **Backfill synthetic ancora nel fit** | Bootstrap utile; **auto-escluso dal fit quando live ricche ≥ 150** (`learn_policy.backfill_excluded`) |
 
@@ -581,9 +594,10 @@ Ordine consigliato (solo dati/operatività — il codice core è chiuso):
 
 ### 2) Settle mercati secondari (`history.py`) — ✅ implementato
 
-- **Cartellini / corner:** `settle_from_results` legge `HY/AY/HR/AR/HC/AC` da football-data (`parse.py`); hit su pick `CARD*` / `CORN*`.
-- **Marcatori:** `settle_scorer_pending()` — FotMob `matchDetails` + `scorer_hit()` (fuzzy nome da `scorers.py`); salva `fotmob_match_id` + `pick_label` in archivio.
-- Resta operativo: far crescere pick scorer archiviati pre-match su Big 5 con match_id FotMob.
+- **Primario Big 5:** `sofascore_postmatch.fetch_sofascore_results` + enrich stats (`sofascore_match_id`, `sofascore_stats` JSON / `sofascore_match_stats.json`).
+- **Cartellini / corner / tiri:** Sofascore statistics se presenti; altrimenti FD `HY/HC` (corner/cards). Tiri solo Sofascore.
+- **Marcatori:** `settle_scorer_pending()` — Sofascore `incidents` prima, poi FotMob `matchDetails` + `scorer_hit()` (fuzzy).
+- Resta operativo: far crescere pick scorer archiviati pre-match su Big 5.
 
 ### 3) Stabilizzazione connettori dati — 🟡 migliorato
 

@@ -4,7 +4,8 @@ scikit-learn>=1.3.0
 xgboost>=2.0.0
 joblib>=1.3.0
 streamlit>=1.32.0
-soccerdata>=1.9.1
+# soccerdata locale (patchabile): FBref, Understat, Sofascore, WhoScored
+-e ./soccerdata-master
 mplsoccer>=1.8.0
 statsbombpy>=1.14.0
 curl_cffi>=0.6.0

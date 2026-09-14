@@ -1,953 +1,21 @@
 {
-  "fetched_at": "2026-08-26T09:20:03.651953+00:00",
-  "n": 257,
+  "fetched_at": "2026-09-14T07:19:21.936244+00:00",
+  "n": 168,
   "counts": {
-    "Forebet": 84,
+    "Forebet": 0,
     "PredictZ": 0,
-    "Vitibet": 173
+    "Vitibet": 168
   },
-  "errors": [],
+  "errors": [
+    "Forebet: HTTP Error 403: Forbidden",
+    "Forebet: HTTP Error 403: Forbidden",
+    "PredictZ: HTTP Error 403: Forbidden"
+  ],
   "matches": [
     {
-      "source": "Forebet",
-      "home": "Hradec Kralove U19",
-      "away": "Slavia Prague U19",
-      "pick": "1",
-      "p_home": 0.44,
-      "p_draw": 0.3,
-      "p_away": 0.26
-    },
-    {
-      "source": "Forebet",
-      "home": "Teplice U19",
-      "away": "Slovacko U19",
-      "pick": "1",
-      "p_home": 0.74,
-      "p_draw": 0.08,
-      "p_away": 0.18
-    },
-    {
-      "source": "Forebet",
-      "home": "Duisburg U19",
-      "away": "Borussia Dortmund U19",
-      "pick": "2",
-      "p_home": 0.23,
-      "p_draw": 0.17,
-      "p_away": 0.6
-    },
-    {
-      "source": "Forebet",
-      "home": "MTK Hungaria W",
-      "away": "Astra Hungary W",
-      "pick": "1",
-      "p_home": 0.73,
-      "p_draw": 0.16,
-      "p_away": 0.1
-    },
-    {
-      "source": "Forebet",
-      "home": "Yokohama FC",
-      "away": "Criacao Shinjuku",
-      "pick": "1",
-      "p_home": 0.53,
-      "p_draw": 0.34,
-      "p_away": 0.13
-    },
-    {
-      "source": "Forebet",
-      "home": "Sanfrecce",
-      "away": "Okinawa SV",
-      "pick": "1",
-      "p_home": 0.54,
-      "p_draw": 0.32,
-      "p_away": 0.14
-    },
-    {
-      "source": "Forebet",
-      "home": "Tokushima Vortis",
-      "away": "FC Tokushima",
-      "pick": "1",
-      "p_home": 0.5,
-      "p_draw": 0.3,
-      "p_away": 0.2
-    },
-    {
-      "source": "Forebet",
-      "home": "Tokyo Verdy",
-      "away": "Thespakusatsu",
-      "pick": "1",
-      "p_home": 0.4,
-      "p_draw": 0.35,
-      "p_away": 0.25
-    },
-    {
-      "source": "Forebet",
-      "home": "Nagoya Grampus",
-      "away": "Gainare Tottori",
-      "pick": "1",
-      "p_home": 0.4,
-      "p_draw": 0.36,
-      "p_away": 0.24
-    },
-    {
-      "source": "Forebet",
-      "home": "Machida Zelvia",
-      "away": "Grulla Morioka",
-      "pick": "1",
-      "p_home": 0.41,
-      "p_draw": 0.37,
-      "p_away": 0.22
-    },
-    {
-      "source": "Forebet",
-      "home": "Cerezo Osaka",
-      "away": "FC Gifu",
-      "pick": "1",
-      "p_home": 0.46,
-      "p_draw": 0.31,
-      "p_away": 0.23
-    },
-    {
-      "source": "Forebet",
-      "home": "Preston Lions",
-      "away": "South Melbourne",
-      "pick": "2",
-      "p_home": 0.28,
-      "p_draw": 0.34,
-      "p_away": 0.38
-    },
-    {
-      "source": "Forebet",
-      "home": "Bidhannagar",
-      "away": "Bhawanipore",
-      "pick": "2",
-      "p_home": 0.25,
-      "p_draw": 0.32,
-      "p_away": 0.44
-    },
-    {
-      "source": "Forebet",
-      "home": "Calcutta Customs",
-      "away": "United Kolkata",
-      "pick": "2",
-      "p_home": 0.18,
-      "p_draw": 0.27,
-      "p_away": 0.56
-    },
-    {
-      "source": "Forebet",
-      "home": "George Telegraph",
-      "away": "Mohun Bagan U23",
-      "pick": "2",
-      "p_home": 0.31,
-      "p_draw": 0.27,
-      "p_away": 0.42
-    },
-    {
-      "source": "Forebet",
-      "home": "Patha Chakra",
-      "away": "BSS Sporting",
-      "pick": "2",
-      "p_home": 0.31,
-      "p_draw": 0.21,
-      "p_away": 0.49
-    },
-    {
-      "source": "Forebet",
-      "home": "Shonan Bellmare",
-      "away": "Reinmeer Aomori FC",
-      "pick": "1",
-      "p_home": 0.39,
-      "p_draw": 0.3,
-      "p_away": 0.31
-    },
-    {
-      "source": "Forebet",
-      "home": "FC Tokyo",
-      "away": "Nagano Parceiro",
-      "pick": "X",
-      "p_home": 0.36,
-      "p_draw": 0.42,
-      "p_away": 0.22
-    },
-    {
-      "source": "Forebet",
-      "home": "V-Varen Nagasaki",
-      "away": "Ehime FC",
-      "pick": "2",
-      "p_home": 0.38,
-      "p_draw": 0.21,
-      "p_away": 0.41
-    },
-    {
-      "source": "Forebet",
-      "home": "Shimizu S-Pulse",
-      "away": "FC Osaka",
-      "pick": "X",
-      "p_home": 0.25,
-      "p_draw": 0.39,
-      "p_away": 0.36
-    },
-    {
-      "source": "Forebet",
-      "home": "Kyoto Sanga",
-      "away": "Maruyasu Okazaki",
-      "pick": "2",
-      "p_home": 0.35,
-      "p_draw": 0.28,
-      "p_away": 0.37
-    },
-    {
-      "source": "Forebet",
-      "home": "Albirex Niigata",
-      "away": "Kagoshima United",
-      "pick": "X",
-      "p_home": 0.31,
-      "p_draw": 0.41,
-      "p_away": 0.28
-    },
-    {
-      "source": "Forebet",
-      "home": "Urawa Red Diamonds",
-      "away": "Yamanashi University",
-      "pick": "X",
-      "p_home": 0.35,
-      "p_draw": 0.38,
-      "p_away": 0.27
-    },
-    {
-      "source": "Forebet",
-      "home": "Mito HollyHock",
-      "away": "Kyoto University",
-      "pick": "2",
-      "p_home": 0.37,
-      "p_draw": 0.2,
-      "p_away": 0.43
-    },
-    {
-      "source": "Forebet",
-      "home": "Yokohama Marinos",
-      "away": "Fukushima United",
-      "pick": "1",
-      "p_home": 0.55,
-      "p_draw": 0.16,
-      "p_away": 0.29
-    },
-    {
-      "source": "Forebet",
-      "home": "Kashiwa Reysol",
-      "away": "Senshu University",
-      "pick": "1",
-      "p_home": 0.56,
-      "p_draw": 0.21,
-      "p_away": 0.23
-    },
-    {
-      "source": "Forebet",
-      "home": "Sagan Tosu",
-      "away": "Kataller Toyama",
-      "pick": "2",
-      "p_home": 0.33,
-      "p_draw": 0.31,
-      "p_away": 0.36
-    },
-    {
-      "source": "Forebet",
-      "home": "Iwaki FC",
-      "away": "Oita Trinita",
-      "pick": "2",
-      "p_home": 0.2,
-      "p_draw": 0.34,
-      "p_away": 0.46
-    },
-    {
-      "source": "Forebet",
-      "home": "Jubilo Iwata",
-      "away": "Tegevajaro Miyazaki",
-      "pick": "2",
-      "p_home": 0.25,
-      "p_draw": 0.3,
-      "p_away": 0.45
-    },
-    {
-      "source": "Forebet",
-      "home": "Consadole Sapporo",
-      "away": "Ventforet Kofu",
-      "pick": "X",
-      "p_home": 0.25,
-      "p_draw": 0.48,
-      "p_away": 0.27
-    },
-    {
-      "source": "Forebet",
-      "home": "Vegalta Sendai",
-      "away": "Tochigi Uva",
-      "pick": "1",
-      "p_home": 0.38,
-      "p_draw": 0.25,
-      "p_away": 0.37
-    },
-    {
-      "source": "Forebet",
-      "home": "Montedio Yamagata",
-      "away": "Fujieda MYFC",
-      "pick": "1",
-      "p_home": 0.39,
-      "p_draw": 0.34,
-      "p_away": 0.27
-    },
-    {
-      "source": "Forebet",
-      "home": "Omiya Ardija",
-      "away": "Vanraure Hachinohe",
-      "pick": "1",
-      "p_home": 0.52,
-      "p_draw": 0.23,
-      "p_away": 0.25
-    },
-    {
-      "source": "Forebet",
-      "home": "FC Imabari",
-      "away": "Blaublitz Akita",
-      "pick": "2",
-      "p_home": 0.16,
-      "p_draw": 0.29,
-      "p_away": 0.55
-    },
-    {
-      "source": "Forebet",
-      "home": "Gamba Osaka",
-      "away": "MIO Biwako Kusatsu",
-      "pick": "1",
-      "p_home": 0.42,
-      "p_draw": 0.38,
-      "p_away": 0.2
-    },
-    {
-      "source": "Forebet",
-      "home": "Avispa Fukuoka",
-      "away": "Verspah Oita",
-      "pick": "1",
-      "p_home": 0.4,
-      "p_draw": 0.39,
-      "p_away": 0.21
-    },
-    {
-      "source": "Forebet",
-      "home": "Vissel Kobe",
-      "away": "Veroskronos Tsuno",
-      "pick": "1",
-      "p_home": 0.59,
-      "p_draw": 0.26,
-      "p_away": 0.15
-    },
-    {
-      "source": "Forebet",
-      "home": "JEF United Chiba",
-      "away": "Azul Claro Numazu",
-      "pick": "2",
-      "p_home": 0.25,
-      "p_draw": 0.21,
-      "p_away": 0.54
-    },
-    {
-      "source": "Forebet",
-      "home": "Fagiano Okayama",
-      "away": "Beluga Rosso Hamada",
-      "pick": "1",
-      "p_home": 0.42,
-      "p_draw": 0.22,
-      "p_away": 0.36
-    },
-    {
-      "source": "Forebet",
-      "home": "Kawasaki Frontale",
-      "away": "Tochigi SC",
-      "pick": "X",
-      "p_home": 0.35,
-      "p_draw": 0.39,
-      "p_away": 0.26
-    },
-    {
-      "source": "Forebet",
-      "home": "Kashima Antlers",
-      "away": "Suzuka Unlimited",
-      "pick": "1",
-      "p_home": 0.59,
-      "p_draw": 0.25,
-      "p_away": 0.16
-    },
-    {
-      "source": "Forebet",
-      "home": "Daejeon Citizen",
-      "away": "Ulsan Hyundai",
-      "pick": "2",
-      "p_home": 0.22,
-      "p_draw": 0.25,
-      "p_away": 0.53
-    },
-    {
-      "source": "Forebet",
-      "home": "Coquimbo Unido",
-      "away": "Universidad Católica",
-      "pick": "2",
-      "p_home": 0.32,
-      "p_draw": 0.31,
-      "p_away": 0.37
-    },
-    {
-      "source": "Forebet",
-      "home": "Deportivo Merlo",
-      "away": "Sportivo Dock Sud",
-      "pick": "X",
-      "p_home": 0.29,
-      "p_draw": 0.5,
-      "p_away": 0.21
-    },
-    {
-      "source": "Forebet",
-      "home": "EC São José",
-      "away": "Goiatuba EC",
-      "pick": "2",
-      "p_home": 0.2,
-      "p_draw": 0.39,
-      "p_away": 0.41
-    },
-    {
-      "source": "Forebet",
-      "home": "Caracas",
-      "away": "Fundación Lara",
-      "pick": "X",
-      "p_home": 0.31,
-      "p_draw": 0.44,
-      "p_away": 0.25
-    },
-    {
-      "source": "Forebet",
-      "home": "CA Aldosivi",
-      "away": "Independiente Rivadavia",
-      "pick": "X",
-      "p_home": 0.22,
-      "p_draw": 0.4,
-      "p_away": 0.38
-    },
-    {
-      "source": "Forebet",
-      "home": "Real Potosí",
-      "away": "Real Tomayapo",
-      "pick": "1",
-      "p_home": 0.53,
-      "p_draw": 0.36,
-      "p_away": 0.1
-    },
-    {
-      "source": "Forebet",
-      "home": "Bage",
-      "away": "Guarani RS",
-      "pick": "X",
-      "p_home": 0.28,
-      "p_draw": 0.57,
-      "p_away": 0.15
-    },
-    {
-      "source": "Forebet",
-      "home": "EC Pelotas RS",
-      "away": "Glória RS",
-      "pick": "1",
-      "p_home": 0.43,
-      "p_draw": 0.38,
-      "p_away": 0.19
-    },
-    {
-      "source": "Forebet",
-      "home": "Moca",
-      "away": "Salcedo",
-      "pick": "2",
-      "p_home": 0.18,
-      "p_draw": 0.34,
-      "p_away": 0.48
-    },
-    {
-      "source": "Forebet",
-      "home": "Deportivo Petare",
-      "away": "Academia Anzoátegui",
-      "pick": "1",
-      "p_home": 0.45,
-      "p_draw": 0.28,
-      "p_away": 0.27
-    },
-    {
-      "source": "Forebet",
-      "home": "América de Cali",
-      "away": "Junior Barranquilla",
-      "pick": "1",
-      "p_home": 0.55,
-      "p_draw": 0.29,
-      "p_away": 0.17
-    },
-    {
-      "source": "Forebet",
-      "home": "Naples",
-      "away": "Union Omaha",
-      "pick": "2",
-      "p_home": 0.23,
-      "p_draw": 0.21,
-      "p_away": 0.56
-    },
-    {
-      "source": "Forebet",
-      "home": "Central Norte Salta",
-      "away": "Deportivo Morón",
-      "pick": "2",
-      "p_home": 0.25,
-      "p_draw": 0.31,
-      "p_away": 0.45
-    },
-    {
-      "source": "Forebet",
-      "home": "Blooming",
-      "away": "CDT Real Oruro",
-      "pick": "1",
-      "p_home": 0.49,
-      "p_draw": 0.31,
-      "p_away": 0.19
-    },
-    {
-      "source": "Forebet",
-      "home": "River Plate",
-      "away": "Ind Santa Fe",
-      "pick": "X",
-      "p_home": 0.35,
-      "p_draw": 0.4,
-      "p_away": 0.25
-    },
-    {
-      "source": "Forebet",
-      "home": "Palmeiras",
-      "away": "Santos",
-      "pick": "1",
-      "p_home": 0.41,
-      "p_draw": 0.34,
-      "p_away": 0.25
-    },
-    {
-      "source": "Forebet",
-      "home": "Vasco da Gama",
-      "away": "Vitória",
-      "pick": "1",
-      "p_home": 0.38,
-      "p_draw": 0.35,
-      "p_away": 0.27
-    },
-    {
-      "source": "Forebet",
-      "home": "Deportes Recoleta",
-      "away": "O Higgins",
-      "pick": "X",
-      "p_home": 0.26,
-      "p_draw": 0.47,
-      "p_away": 0.27
-    },
-    {
-      "source": "Forebet",
-      "home": "Colo Colo",
-      "away": "Unión Española",
-      "pick": "1",
-      "p_home": 0.48,
-      "p_draw": 0.32,
-      "p_away": 0.2
-    },
-    {
-      "source": "Forebet",
-      "home": "Deportivo Toluca",
-      "away": "Austin FC",
-      "pick": "1",
-      "p_home": 0.55,
-      "p_draw": 0.24,
-      "p_away": 0.21
-    },
-    {
-      "source": "Forebet",
-      "home": "El Paso Locomotive",
-      "away": "Pittsburgh Riverhounds",
-      "pick": "2",
-      "p_home": 0.37,
-      "p_draw": 0.18,
-      "p_away": 0.45
-    },
-    {
-      "source": "Forebet",
-      "home": "Atlético Nacional",
-      "away": "Deportivo Cali",
-      "pick": "1",
-      "p_home": 0.43,
-      "p_draw": 0.34,
-      "p_away": 0.22
-    },
-    {
-      "source": "Forebet",
-      "home": "New Mexico United",
-      "away": "Lexington",
-      "pick": "1",
-      "p_home": 0.48,
-      "p_draw": 0.23,
-      "p_away": 0.3
-    },
-    {
-      "source": "Forebet",
-      "home": "Club América",
-      "away": "Columbus Crew",
-      "pick": "1",
-      "p_home": 0.41,
-      "p_draw": 0.29,
-      "p_away": 0.3
-    },
-    {
-      "source": "Forebet",
-      "home": "Kidderpore SC",
-      "away": "East Bengal",
-      "pick": "2",
-      "p_home": 0.11,
-      "p_draw": 0.42,
-      "p_away": 0.47
-    },
-    {
-      "source": "Forebet",
-      "home": "Rainbow",
-      "away": "Peerless",
-      "pick": "X",
-      "p_home": 0.37,
-      "p_draw": 0.39,
-      "p_away": 0.25
-    },
-    {
-      "source": "Forebet",
-      "home": "NA Suruchi Sangha",
-      "away": "Wari",
-      "pick": "X",
-      "p_home": 0.33,
-      "p_draw": 0.55,
-      "p_away": 0.13
-    },
-    {
-      "source": "Forebet",
-      "home": "FK Ekibastuz",
-      "away": "FC Turan",
-      "pick": "2",
-      "p_home": 0.18,
-      "p_draw": 0.38,
-      "p_away": 0.44
-    },
-    {
-      "source": "Forebet",
-      "home": "Dynamo Barnaul",
-      "away": "Irtysh Omsk",
-      "pick": "X",
-      "p_home": 0.33,
-      "p_draw": 0.46,
-      "p_away": 0.21
-    },
-    {
-      "source": "Forebet",
-      "home": "Yelimay II",
-      "away": "FC Shakhter",
-      "pick": "2",
-      "p_home": 0.08,
-      "p_draw": 0.06,
-      "p_away": 0.86
-    },
-    {
-      "source": "Forebet",
-      "home": "Sardarapat",
-      "away": "Syunik",
-      "pick": "1",
-      "p_home": 0.55,
-      "p_draw": 0.2,
-      "p_away": 0.25
-    },
-    {
-      "source": "Forebet",
-      "home": "Kairat Almaty Akademiya",
-      "away": "Arys",
-      "pick": "1",
-      "p_home": 0.7,
-      "p_draw": 0.19,
-      "p_away": 0.1
-    },
-    {
-      "source": "Forebet",
-      "home": "Luki-Energiya",
-      "away": "Cherepovets",
-      "pick": "1",
-      "p_home": 0.38,
-      "p_draw": 0.32,
-      "p_away": 0.3
-    },
-    {
-      "source": "Forebet",
-      "home": "Mashujaa",
-      "away": "Kagera Sugar",
-      "pick": "1",
-      "p_home": 0.43,
-      "p_draw": 0.4,
-      "p_away": 0.17
-    },
-    {
-      "source": "Forebet",
-      "home": "Kaspiy II",
-      "away": "Akademiya Ontustik",
-      "pick": "2",
-      "p_home": 0.24,
-      "p_draw": 0.23,
-      "p_away": 0.53
-    },
-    {
-      "source": "Forebet",
-      "home": "Kahraba Ismailia",
-      "away": "Proxy",
-      "pick": "1",
-      "p_home": 0.47,
-      "p_draw": 0.27,
-      "p_away": 0.26
-    },
-    {
-      "source": "Forebet",
-      "home": "Maleyeit Kafr El Zayiat",
-      "away": "Tanta FC",
-      "pick": "2",
-      "p_home": 0.27,
-      "p_draw": 0.32,
-      "p_away": 0.41
-    },
-    {
-      "source": "Forebet",
-      "home": "Mega Sport",
-      "away": "Al Intagh Al Harbi",
-      "pick": "X",
-      "p_home": 0.26,
-      "p_draw": 0.44,
-      "p_away": 0.3
-    },
-    {
-      "source": "Forebet",
-      "home": "Tersana Giza",
-      "away": "La Viena",
-      "pick": "X",
-      "p_home": 0.25,
-      "p_draw": 0.55,
-      "p_away": 0.19
-    },
-    {
-      "source": "Forebet",
-      "home": "Team",
-      "away": "Sekka Al Hadid",
-      "pick": "1",
-      "p_home": 0.38,
-      "p_draw": 0.33,
-      "p_away": 0.29
-    },
-    {
-      "source": "Forebet",
-      "home": "Future FC",
-      "away": "Ghazl Al Mahalla",
-      "pick": "1",
-      "p_home": 0.51,
-      "p_draw": 0.36,
-      "p_away": 0.13
-    },
-    {
-      "source": "Forebet",
-      "home": "Gharrafa SC",
-      "away": "Shamal SC",
-      "pick": "X",
-      "p_home": 0.38,
-      "p_draw": 0.42,
-      "p_away": 0.2
-    },
-    {
       "source": "Vitibet",
-      "home": "Celje",
-      "away": "Slovan Bratislava",
-      "pick": "1",
-      "p_home": 0.62,
-      "p_draw": 0.24,
-      "p_away": 0.14
-    },
-    {
-      "source": "Vitibet",
-      "home": "Lyon",
-      "away": "Fenerbahçe",
-      "pick": "1",
-      "p_home": 0.49,
-      "p_draw": 0.27,
-      "p_away": 0.24
-    },
-    {
-      "source": "Vitibet",
-      "home": "Viking",
-      "away": "Dinamo Zagreb",
-      "pick": "1",
-      "p_home": 0.76,
-      "p_draw": 0.17,
-      "p_away": 0.07
-    },
-    {
-      "source": "Vitibet",
-      "home": "Rapid Vienna",
-      "away": "Heart Of Midlothian",
-      "pick": "1",
-      "p_home": 0.56,
-      "p_draw": 0.26,
-      "p_away": 0.18
-    },
-    {
-      "source": "Vitibet",
-      "home": "Al-Faisaly FC",
-      "away": "Al-Fateh",
-      "pick": "1",
-      "p_home": 0.47,
-      "p_draw": 0.28,
-      "p_away": 0.25
-    },
-    {
-      "source": "Vitibet",
-      "home": "Al Diriyah",
-      "away": "Al-Kholood",
-      "pick": "1",
-      "p_home": 0.61,
-      "p_draw": 0.24,
-      "p_away": 0.15
-    },
-    {
-      "source": "Vitibet",
-      "home": "Universitario de Vinto",
-      "away": "Nacional Potosí",
-      "pick": "2",
-      "p_home": 0.1,
-      "p_draw": 0.21,
-      "p_away": 0.69
-    },
-    {
-      "source": "Vitibet",
-      "home": "San Antonio Bulo Bulo",
-      "away": "The Strongest",
-      "pick": "2",
-      "p_home": 0.25,
-      "p_draw": 0.28,
-      "p_away": 0.47
-    },
-    {
-      "source": "Vitibet",
-      "home": "Atletico Goianiense",
-      "away": "Botafogo-SP",
-      "pick": "1",
-      "p_home": 0.59,
-      "p_draw": 0.25,
-      "p_away": 0.16
-    },
-    {
-      "source": "Vitibet",
-      "home": "Acassuso",
-      "away": "San Telmo",
-      "pick": "1",
-      "p_home": 0.54,
-      "p_draw": 0.26,
-      "p_away": 0.2
-    },
-    {
-      "source": "Vitibet",
-      "home": "Patronato",
-      "away": "Atlanta",
-      "pick": "1",
-      "p_home": 0.6,
-      "p_draw": 0.25,
-      "p_away": 0.15
-    },
-    {
-      "source": "Vitibet",
-      "home": "National Bank of Egypt",
-      "away": "Zamalek SC",
-      "pick": "1",
-      "p_home": 0.47,
-      "p_draw": 0.28,
-      "p_away": 0.25
-    },
-    {
-      "source": "Vitibet",
-      "home": "Cucuta",
-      "away": "Alianza Valledupar",
-      "pick": "1",
-      "p_home": 0.48,
-      "p_draw": 0.28,
-      "p_away": 0.24
-    },
-    {
-      "source": "Vitibet",
-      "home": "Independiente Santa Fe",
-      "away": "Jaguares",
-      "pick": "1",
-      "p_home": 0.67,
-      "p_draw": 0.22,
-      "p_away": 0.11
-    },
-    {
-      "source": "Vitibet",
-      "home": "Chico",
-      "away": "Fortaleza CEIF",
-      "pick": "2",
-      "p_home": 0.17,
-      "p_draw": 0.25,
-      "p_away": 0.58
-    },
-    {
-      "source": "Vitibet",
-      "home": "Lamontville Golden Arrows FC",
-      "away": "Stellenbosch",
-      "pick": "1",
-      "p_home": 0.68,
-      "p_draw": 0.21,
-      "p_away": 0.11
-    },
-    {
-      "source": "Vitibet",
-      "home": "Polokwane City FC",
-      "away": "Milford FC",
-      "pick": "2",
-      "p_home": 0.05,
-      "p_draw": 0.16,
-      "p_away": 0.79
-    },
-    {
-      "source": "Vitibet",
-      "home": "Daejeon Hana Citizen",
-      "away": "Ulsan Hyundai FC",
-      "pick": "1",
-      "p_home": 0.48,
-      "p_draw": 0.27,
-      "p_away": 0.25
-    },
-    {
-      "source": "Vitibet",
-      "home": "Gangwon FC",
-      "away": "Gwangju FC",
-      "pick": "1",
-      "p_home": 0.64,
-      "p_draw": 0.23,
-      "p_away": 0.13
-    },
-    {
-      "source": "Vitibet",
-      "home": "FC Anyang",
-      "away": "Incheon United",
-      "pick": "2",
-      "p_home": 0.14,
-      "p_draw": 0.24,
-      "p_away": 0.62
-    },
-    {
-      "source": "Vitibet",
-      "home": "Tammeka",
-      "away": "Flora Tallinn",
+      "home": "Leeds",
+      "away": "Newcastle",
       "pick": "2",
       "p_home": 0.21,
       "p_draw": 0.27,
@@ -955,80 +23,26 @@
     },
     {
       "source": "Vitibet",
-      "home": "Naft",
-      "away": "Duhok SC",
+      "home": "Villarreal",
+      "away": "Real Betis",
       "pick": "2",
-      "p_home": 0.25,
+      "p_home": 0.26,
       "p_draw": 0.28,
-      "p_away": 0.47
+      "p_away": 0.46
     },
     {
       "source": "Vitibet",
-      "home": "Al Minaa Basra",
-      "away": "Gharraf",
-      "pick": "1",
-      "p_home": 0.5,
-      "p_draw": 0.27,
-      "p_away": 0.23
-    },
-    {
-      "source": "Vitibet",
-      "home": "Schöningen",
-      "away": "St. Pauli II",
-      "pick": "1",
-      "p_home": 0.5,
-      "p_draw": 0.27,
-      "p_away": 0.23
-    },
-    {
-      "source": "Vitibet",
-      "home": "SSV Jeddeloh II",
-      "away": "Hannover 96 II",
-      "pick": "1",
-      "p_home": 0.47,
-      "p_draw": 0.28,
-      "p_away": 0.25
-    },
-    {
-      "source": "Vitibet",
-      "home": "RSV Eintracht",
-      "away": "FSV Zwickau",
-      "pick": "1",
-      "p_home": 0.73,
-      "p_draw": 0.19,
-      "p_away": 0.08
-    },
-    {
-      "source": "Vitibet",
-      "home": "Greifswalder FC",
-      "away": "SV Babelsberg 03",
-      "pick": "1",
-      "p_home": 0.6,
-      "p_draw": 0.24,
-      "p_away": 0.16
-    },
-    {
-      "source": "Vitibet",
-      "home": "Strommen",
-      "away": "Raufoss",
-      "pick": "1",
-      "p_home": 0.58,
-      "p_draw": 0.25,
-      "p_away": 0.17
-    },
-    {
-      "source": "Vitibet",
-      "home": "Moss",
-      "away": "Sogndal",
+      "home": "Torino",
+      "away": "AS Roma",
       "pick": "2",
-      "p_home": 0.16,
-      "p_draw": 0.25,
-      "p_away": 0.59
+      "p_home": 0.06,
+      "p_draw": 0.17,
+      "p_away": 0.77
     },
     {
       "source": "Vitibet",
-      "home": "Stabaek",
-      "away": "Ranheim",
+      "home": "Como",
+      "away": "Parma",
       "pick": "1",
       "p_home": 0.8,
       "p_draw": 0.16,
@@ -1036,8 +50,35 @@
     },
     {
       "source": "Vitibet",
-      "home": "Stromsgodset",
-      "away": "hodd",
+      "home": "Inter",
+      "away": "Udinese",
+      "pick": "1",
+      "p_home": 0.8,
+      "p_draw": 0.16,
+      "p_away": 0.04
+    },
+    {
+      "source": "Vitibet",
+      "home": "Rio Ave",
+      "away": "Estrela",
+      "pick": "2",
+      "p_home": 0.1,
+      "p_draw": 0.21,
+      "p_away": 0.69
+    },
+    {
+      "source": "Vitibet",
+      "home": "Moreirense",
+      "away": "Maritimo",
+      "pick": "2",
+      "p_home": 0.26,
+      "p_draw": 0.28,
+      "p_away": 0.46
+    },
+    {
+      "source": "Vitibet",
+      "home": "SC Braga",
+      "away": "Estoril",
       "pick": "1",
       "p_home": 0.63,
       "p_draw": 0.23,
@@ -1045,44 +86,17 @@
     },
     {
       "source": "Vitibet",
-      "home": "Asane",
-      "away": "Lyn",
+      "home": "Gaziantep FK",
+      "away": "Fenerbahçe",
       "pick": "2",
-      "p_home": 0.16,
-      "p_draw": 0.25,
-      "p_away": 0.59
+      "p_home": 0.06,
+      "p_draw": 0.17,
+      "p_away": 0.77
     },
     {
       "source": "Vitibet",
-      "home": "Haugesund",
-      "away": "Egersund",
-      "pick": "1",
-      "p_home": 0.69,
-      "p_draw": 0.21,
-      "p_away": 0.1
-    },
-    {
-      "source": "Vitibet",
-      "home": "Excursionistas",
-      "away": "Argentino de Merlo",
-      "pick": "1",
-      "p_home": 0.65,
-      "p_draw": 0.23,
-      "p_away": 0.12
-    },
-    {
-      "source": "Vitibet",
-      "home": "Deportivo Camioneros",
-      "away": "Comunicaciones",
-      "pick": "1",
-      "p_home": 0.53,
-      "p_draw": 0.27,
-      "p_away": 0.2
-    },
-    {
-      "source": "Vitibet",
-      "home": "Liniers",
-      "away": "Deportivo Armenio",
+      "home": "Bodo/Glimt",
+      "away": "Sandefjord",
       "pick": "1",
       "p_home": 0.8,
       "p_draw": 0.16,
@@ -1090,242 +104,8 @@
     },
     {
       "source": "Vitibet",
-      "home": "Kuala Lumpur FA",
-      "away": "Kuching FA",
-      "pick": "2",
-      "p_home": 0.25,
-      "p_draw": 0.28,
-      "p_away": 0.47
-    },
-    {
-      "source": "Vitibet",
-      "home": "Lokomotiv",
-      "away": "Bunyodkor Tashkent",
-      "pick": "1",
-      "p_home": 0.65,
-      "p_draw": 0.23,
-      "p_away": 0.12
-    },
-    {
-      "source": "Vitibet",
-      "home": "Mash'al",
-      "away": "Navbahor",
-      "pick": "2",
-      "p_home": 0.05,
-      "p_draw": 0.16,
-      "p_away": 0.79
-    },
-    {
-      "source": "Vitibet",
-      "home": "Qizilqum Zarafshon",
-      "away": "Nasaf",
-      "pick": "2",
-      "p_home": 0.26,
-      "p_draw": 0.28,
-      "p_away": 0.46
-    },
-    {
-      "source": "Vitibet",
-      "home": "Al Shabab",
-      "away": "Al Jahra",
-      "pick": "1",
-      "p_home": 0.48,
-      "p_draw": 0.27,
-      "p_away": 0.25
-    },
-    {
-      "source": "Vitibet",
-      "home": "Club Atletico Platense",
-      "away": "Alianza",
-      "pick": "1",
-      "p_home": 0.78,
-      "p_draw": 0.16,
-      "p_away": 0.06
-    },
-    {
-      "source": "Vitibet",
-      "home": "Hradec Králové U19",
-      "away": "Slavia Praha U19",
-      "pick": "1",
-      "p_home": 0.56,
-      "p_draw": 0.26,
-      "p_away": 0.18
-    },
-    {
-      "source": "Vitibet",
-      "home": "Teplice U19",
-      "away": "Slovácko U19",
-      "pick": "1",
-      "p_home": 0.46,
-      "p_draw": 0.28,
-      "p_away": 0.26
-    },
-    {
-      "source": "Vitibet",
-      "home": "Mosul",
-      "away": "Karbala",
-      "pick": "2",
-      "p_home": 0.26,
-      "p_draw": 0.28,
-      "p_away": 0.46
-    },
-    {
-      "source": "Vitibet",
-      "home": "Kauno Žalgiris",
-      "away": "Beşiktaş",
-      "pick": "2",
-      "p_home": 0.13,
-      "p_draw": 0.23,
-      "p_away": 0.64
-    },
-    {
-      "source": "Vitibet",
-      "home": "Plzen",
-      "away": "Red Star Belgrade",
-      "pick": "1",
-      "p_home": 0.46,
-      "p_draw": 0.28,
-      "p_away": 0.26
-    },
-    {
-      "source": "Vitibet",
-      "home": "Lillestrom",
-      "away": "Egnatia Rrogozhinë",
-      "pick": "1",
-      "p_home": 0.61,
-      "p_draw": 0.24,
-      "p_away": 0.15
-    },
-    {
-      "source": "Vitibet",
-      "home": "AC Omonia Nicosia",
-      "away": "St. Truiden",
-      "pick": "1",
-      "p_home": 0.48,
-      "p_draw": 0.27,
-      "p_away": 0.25
-    },
-    {
-      "source": "Vitibet",
-      "home": "Red Bull Salzburg",
-      "away": "Mjallby AIF",
-      "pick": "1",
-      "p_home": 0.76,
-      "p_draw": 0.18,
-      "p_away": 0.06
-    },
-    {
-      "source": "Vitibet",
-      "home": "Aarhus",
-      "away": "Benfica",
-      "pick": "2",
-      "p_home": 0.15,
-      "p_draw": 0.24,
-      "p_away": 0.61
-    },
-    {
-      "source": "Vitibet",
-      "home": "CSKA Sofia",
-      "away": "OFI",
-      "pick": "1",
-      "p_home": 0.64,
-      "p_draw": 0.23,
-      "p_away": 0.13
-    },
-    {
-      "source": "Vitibet",
-      "home": "FC Thun",
-      "away": "Lech Poznan",
-      "pick": "1",
-      "p_home": 0.64,
-      "p_draw": 0.23,
-      "p_away": 0.13
-    },
-    {
-      "source": "Vitibet",
-      "home": "Ferencvarosi TC",
-      "away": "Trabzonspor",
-      "pick": "1",
-      "p_home": 0.54,
-      "p_draw": 0.26,
-      "p_away": 0.2
-    },
-    {
-      "source": "Vitibet",
-      "home": "Barcelona",
-      "away": "Athletic Club MG",
-      "pick": "1",
-      "p_home": 0.8,
-      "p_draw": 0.16,
-      "p_away": 0.04
-    },
-    {
-      "source": "Vitibet",
-      "home": "KuPS",
-      "away": "Shamrock Rovers FC",
-      "pick": "1",
-      "p_home": 0.49,
-      "p_draw": 0.27,
-      "p_away": 0.24
-    },
-    {
-      "source": "Vitibet",
-      "home": "FK Jablonec",
-      "away": "Rangers",
-      "pick": "1",
-      "p_home": 0.67,
-      "p_draw": 0.22,
-      "p_away": 0.11
-    },
-    {
-      "source": "Vitibet",
-      "home": "SC Freiburg",
-      "away": "Motherwell",
-      "pick": "1",
-      "p_home": 0.73,
-      "p_draw": 0.19,
-      "p_away": 0.08
-    },
-    {
-      "source": "Vitibet",
-      "home": "Pafos",
-      "away": "Dinamo Tirana",
-      "pick": "1",
-      "p_home": 0.69,
-      "p_draw": 0.21,
-      "p_away": 0.1
-    },
-    {
-      "source": "Vitibet",
-      "home": "Raków Częstochowa",
-      "away": "HNK Hajduk Split",
-      "pick": "1",
-      "p_home": 0.56,
-      "p_draw": 0.26,
-      "p_away": 0.18
-    },
-    {
-      "source": "Vitibet",
-      "home": "Hradec Králové",
-      "away": "Panathinaikos",
-      "pick": "2",
-      "p_home": 0.26,
-      "p_draw": 0.28,
-      "p_away": 0.46
-    },
-    {
-      "source": "Vitibet",
-      "home": "Riga",
-      "away": "KI Klaksvik",
-      "pick": "1",
-      "p_home": 0.64,
-      "p_draw": 0.23,
-      "p_away": 0.13
-    },
-    {
-      "source": "Vitibet",
-      "home": "Hapoel Tel Aviv FC",
-      "away": "Atalanta",
+      "home": "Radomiak Radom",
+      "away": "Piast Gliwice",
       "pick": "2",
       "p_home": 0.17,
       "p_draw": 0.25,
@@ -1333,116 +113,26 @@
     },
     {
       "source": "Vitibet",
-      "home": "Ajax",
-      "away": "FC Sion",
+      "home": "Djurgårdens IF",
+      "away": "Gais",
       "pick": "1",
-      "p_home": 0.68,
-      "p_draw": 0.21,
-      "p_away": 0.11
+      "p_home": 0.65,
+      "p_draw": 0.23,
+      "p_away": 0.12
     },
     {
       "source": "Vitibet",
-      "home": "FC ST. Gallen",
-      "away": "FC Nordsjaelland",
-      "pick": "2",
-      "p_home": 0.24,
-      "p_draw": 0.27,
-      "p_away": 0.49
-    },
-    {
-      "source": "Vitibet",
-      "home": "Borac Banja Luka",
-      "away": "Vikingur Reykjavik",
+      "home": "Sirius",
+      "away": "Degerfors IF",
       "pick": "1",
-      "p_home": 0.79,
-      "p_draw": 0.16,
-      "p_away": 0.05
-    },
-    {
-      "source": "Vitibet",
-      "home": "HNK Rijeka",
-      "away": "FC Midtjylland",
-      "pick": "1",
-      "p_home": 0.58,
+      "p_home": 0.57,
       "p_draw": 0.25,
-      "p_away": 0.17
+      "p_away": 0.18
     },
     {
       "source": "Vitibet",
-      "home": "Larne",
-      "away": "Lincoln Red Imps FC",
-      "pick": "1",
-      "p_home": 0.79,
-      "p_draw": 0.16,
-      "p_away": 0.05
-    },
-    {
-      "source": "Vitibet",
-      "home": "Blooming",
-      "away": "Real Oruro",
-      "pick": "1",
-      "p_home": 0.74,
-      "p_draw": 0.18,
-      "p_away": 0.08
-    },
-    {
-      "source": "Vitibet",
-      "home": "Always Ready",
-      "away": "Aurora",
-      "pick": "1",
-      "p_home": 0.68,
-      "p_draw": 0.21,
-      "p_away": 0.11
-    },
-    {
-      "source": "Vitibet",
-      "home": "Boreham Wood",
-      "away": "Boston United",
-      "pick": "1",
-      "p_home": 0.8,
-      "p_draw": 0.16,
-      "p_away": 0.04
-    },
-    {
-      "source": "Vitibet",
-      "home": "Central Norte",
-      "away": "Deportivo Moron",
-      "pick": "2",
-      "p_home": 0.24,
-      "p_draw": 0.27,
-      "p_away": 0.49
-    },
-    {
-      "source": "Vitibet",
-      "home": "ES Setif",
-      "away": "Ben Aknoun",
-      "pick": "1",
-      "p_home": 0.53,
-      "p_draw": 0.26,
-      "p_away": 0.21
-    },
-    {
-      "source": "Vitibet",
-      "home": "MC Alger",
-      "away": "MC Oran",
-      "pick": "1",
-      "p_home": 0.6,
-      "p_draw": 0.25,
-      "p_away": 0.15
-    },
-    {
-      "source": "Vitibet",
-      "home": "Future FC",
-      "away": "Ghazl El Mehalla",
-      "pick": "1",
-      "p_home": 0.74,
-      "p_draw": 0.19,
-      "p_away": 0.07
-    },
-    {
-      "source": "Vitibet",
-      "home": "America de Cali",
-      "away": "Junior",
+      "home": "FC Midtjylland",
+      "away": "Brondby",
       "pick": "1",
       "p_home": 0.66,
       "p_draw": 0.22,
@@ -1450,53 +140,26 @@
     },
     {
       "source": "Vitibet",
-      "home": "Atletico Nacional",
-      "away": "Deportivo Cali",
+      "home": "Independiente",
+      "away": "San Lorenzo de Almagro",
       "pick": "1",
-      "p_home": 0.57,
-      "p_draw": 0.25,
+      "p_home": 0.56,
+      "p_draw": 0.26,
       "p_away": 0.18
     },
     {
       "source": "Vitibet",
-      "home": "Deportivo Merlo",
-      "away": "Dock Sud",
-      "pick": "2",
-      "p_home": 0.15,
-      "p_draw": 0.24,
-      "p_away": 0.61
-    },
-    {
-      "source": "Vitibet",
-      "home": "San Antonio",
-      "away": "Ind. Juniors",
+      "home": "Ludogorets",
+      "away": "Septemvri Sofia",
       "pick": "1",
-      "p_home": 0.5,
-      "p_draw": 0.27,
-      "p_away": 0.23
+      "p_home": 0.7,
+      "p_draw": 0.2,
+      "p_away": 0.1
     },
     {
       "source": "Vitibet",
-      "home": "El Paso Locomotive FC",
-      "away": "Pittsburgh Riverhounds",
-      "pick": "1",
-      "p_home": 0.5,
-      "p_draw": 0.27,
-      "p_away": 0.23
-    },
-    {
-      "source": "Vitibet",
-      "home": "New Mexico United",
-      "away": "Lexington",
-      "pick": "1",
-      "p_home": 0.52,
-      "p_draw": 0.27,
-      "p_away": 0.21
-    },
-    {
-      "source": "Vitibet",
-      "home": "Al-Najma",
-      "away": "Khalidiya",
+      "home": "HNK Gorica",
+      "away": "NK Varazdin",
       "pick": "2",
       "p_home": 0.11,
       "p_draw": 0.22,
@@ -1504,116 +167,17 @@
     },
     {
       "source": "Vitibet",
-      "home": "Sitra",
-      "away": "Malkiya",
-      "pick": "2",
-      "p_home": 0.16,
-      "p_draw": 0.25,
-      "p_away": 0.59
-    },
-    {
-      "source": "Vitibet",
-      "home": "Al Tadhamon",
-      "away": "Kazma",
-      "pick": "2",
-      "p_home": 0.13,
-      "p_draw": 0.23,
-      "p_away": 0.64
-    },
-    {
-      "source": "Vitibet",
-      "home": "Ekibastuz",
-      "away": "Turan Turkistan",
-      "pick": "2",
-      "p_home": 0.24,
-      "p_draw": 0.27,
-      "p_away": 0.49
-    },
-    {
-      "source": "Vitibet",
-      "home": "Yelimay Semey 2",
-      "away": "Shakhter Karagandy",
-      "pick": "2",
-      "p_home": 0.05,
-      "p_draw": 0.16,
-      "p_away": 0.79
-    },
-    {
-      "source": "Vitibet",
-      "home": "Sport Academy Kairat",
-      "away": "Arys",
+      "home": "Inter Turku",
+      "away": "VPS",
       "pick": "1",
-      "p_home": 0.8,
-      "p_draw": 0.16,
-      "p_away": 0.04
-    },
-    {
-      "source": "Vitibet",
-      "home": "Kaspij Aktau 2",
-      "away": "Akademiya Ontustik",
-      "pick": "2",
-      "p_home": 0.18,
+      "p_home": 0.54,
       "p_draw": 0.26,
-      "p_away": 0.56
+      "p_away": 0.2
     },
     {
       "source": "Vitibet",
-      "home": "Inter Club d'Escaldes",
-      "away": "Drita",
-      "pick": "2",
-      "p_home": 0.07,
-      "p_draw": 0.18,
-      "p_away": 0.75
-    },
-    {
-      "source": "Vitibet",
-      "home": "Racing Santander",
-      "away": "Elche",
-      "pick": "1",
-      "p_home": 0.49,
-      "p_draw": 0.27,
-      "p_away": 0.24
-    },
-    {
-      "source": "Vitibet",
-      "home": "Alaves",
-      "away": "Villarreal",
-      "pick": "1",
-      "p_home": 0.8,
-      "p_draw": 0.16,
-      "p_away": 0.04
-    },
-    {
-      "source": "Vitibet",
-      "home": "Lille",
-      "away": "Paris Saint Germain",
-      "pick": "2",
-      "p_home": 0.23,
-      "p_draw": 0.27,
-      "p_away": 0.5
-    },
-    {
-      "source": "Vitibet",
-      "home": "Rio Ave",
-      "away": "Sporting CP",
-      "pick": "2",
-      "p_home": 0.17,
-      "p_draw": 0.25,
-      "p_away": 0.58
-    },
-    {
-      "source": "Vitibet",
-      "home": "Groningen",
-      "away": "Fortuna Sittard",
-      "pick": "1",
-      "p_home": 0.61,
-      "p_draw": 0.24,
-      "p_away": 0.15
-    },
-    {
-      "source": "Vitibet",
-      "home": "Gençlerbirliği S.K.",
-      "away": "Erzurumspor FK",
+      "home": "Santos Laguna",
+      "away": "FC Juarez",
       "pick": "1",
       "p_home": 0.73,
       "p_draw": 0.19,
@@ -1621,26 +185,17 @@
     },
     {
       "source": "Vitibet",
-      "home": "Austria Lustenau",
-      "away": "WSG Wattens",
-      "pick": "2",
-      "p_home": 0.23,
-      "p_draw": 0.27,
-      "p_away": 0.5
-    },
-    {
-      "source": "Vitibet",
-      "home": "Legia Warsaw",
-      "away": "Slask Wroclaw",
+      "home": "Guadalajara Chivas",
+      "away": "U.N.A.M. - Pumas",
       "pick": "1",
-      "p_home": 0.76,
-      "p_draw": 0.17,
-      "p_away": 0.07
+      "p_home": 0.64,
+      "p_draw": 0.23,
+      "p_away": 0.13
     },
     {
       "source": "Vitibet",
-      "home": "AC Horsens",
-      "away": "Viborg",
+      "home": "Universitatea Cluj",
+      "away": "Oţelul",
       "pick": "2",
       "p_home": 0.18,
       "p_draw": 0.26,
@@ -1648,89 +203,17 @@
     },
     {
       "source": "Vitibet",
-      "home": "Genk",
-      "away": "SK Beveren",
+      "home": "Dynamo Kyiv",
+      "away": "Epitsentr Dunayivtsi",
       "pick": "1",
-      "p_home": 0.7,
-      "p_draw": 0.21,
-      "p_away": 0.09
-    },
-    {
-      "source": "Vitibet",
-      "home": "Slavia Sofia",
-      "away": "Septemvri Sofia",
-      "pick": "1",
-      "p_home": 0.64,
-      "p_draw": 0.23,
-      "p_away": 0.13
-    },
-    {
-      "source": "Vitibet",
-      "home": "CSKA 1948",
-      "away": "Lokomotiv Plovdiv",
-      "pick": "1",
-      "p_home": 0.75,
-      "p_draw": 0.18,
-      "p_away": 0.07
-    },
-    {
-      "source": "Vitibet",
-      "home": "Akron",
-      "away": "CSKA Moscow",
-      "pick": "2",
-      "p_home": 0.08,
-      "p_draw": 0.19,
-      "p_away": 0.73
-    },
-    {
-      "source": "Vitibet",
-      "home": "Debreceni VSC",
-      "away": "MTK Budapest",
-      "pick": "2",
-      "p_home": 0.09,
-      "p_draw": 0.2,
-      "p_away": 0.71
-    },
-    {
-      "source": "Vitibet",
-      "home": "Universitatea Cluj",
-      "away": "Petrolul Ploiești",
-      "pick": "1",
-      "p_home": 0.65,
-      "p_draw": 0.22,
-      "p_away": 0.13
-    },
-    {
-      "source": "Vitibet",
-      "home": "Al Riyadh",
-      "away": "NEOM",
-      "pick": "2",
-      "p_home": 0.16,
-      "p_draw": 0.25,
-      "p_away": 0.59
-    },
-    {
-      "source": "Vitibet",
-      "home": "Al-Fayha",
-      "away": "Abha",
-      "pick": "1",
-      "p_home": 0.61,
+      "p_home": 0.62,
       "p_draw": 0.24,
-      "p_away": 0.15
+      "p_away": 0.14
     },
     {
       "source": "Vitibet",
-      "home": "Al Khaleej Saihat",
-      "away": "Al-Hilal Saudi FC",
-      "pick": "2",
-      "p_home": 0.05,
-      "p_draw": 0.16,
-      "p_away": 0.79
-    },
-    {
-      "source": "Vitibet",
-      "home": "Al-Nassr",
-      "away": "Al Taawon",
+      "home": "Shakhtar Donetsk",
+      "away": "Chornomorets",
       "pick": "1",
       "p_home": 0.8,
       "p_draw": 0.16,
@@ -1738,98 +221,71 @@
     },
     {
       "source": "Vitibet",
-      "home": "Bohemians",
-      "away": "Sligo Rovers FC",
-      "pick": "1",
-      "p_home": 0.72,
-      "p_draw": 0.2,
-      "p_away": 0.08
-    },
-    {
-      "source": "Vitibet",
-      "home": "Galway United FC",
-      "away": "Shelbourne",
-      "pick": "1",
-      "p_home": 0.51,
-      "p_draw": 0.27,
-      "p_away": 0.22
-    },
-    {
-      "source": "Vitibet",
-      "home": "St Patrick's Athl.",
-      "away": "Waterford",
-      "pick": "1",
-      "p_home": 0.59,
-      "p_draw": 0.25,
-      "p_away": 0.16
-    },
-    {
-      "source": "Vitibet",
-      "home": "Drogheda United FC",
-      "away": "Dundalk",
-      "pick": "1",
-      "p_home": 0.57,
-      "p_draw": 0.25,
-      "p_away": 0.18
-    },
-    {
-      "source": "Vitibet",
-      "home": "Wrexham",
-      "away": "Birmingham",
-      "pick": "1",
-      "p_home": 0.68,
-      "p_draw": 0.21,
-      "p_away": 0.11
-    },
-    {
-      "source": "Vitibet",
-      "home": "Nancy",
-      "away": "Dunkerque",
-      "pick": "1",
-      "p_home": 0.68,
-      "p_draw": 0.21,
-      "p_away": 0.11
-    },
-    {
-      "source": "Vitibet",
-      "home": "Clermont Foot",
-      "away": "Sochaux",
-      "pick": "1",
-      "p_home": 0.64,
-      "p_draw": 0.23,
-      "p_away": 0.13
-    },
-    {
-      "source": "Vitibet",
-      "home": "VfL Bochum",
-      "away": "VfL Osnabrück",
-      "pick": "1",
-      "p_home": 0.72,
-      "p_draw": 0.19,
-      "p_away": 0.09
-    },
-    {
-      "source": "Vitibet",
-      "home": "Eintracht Braunschweig",
-      "away": "Hertha BSC",
+      "home": "Sligo Rovers FC",
+      "away": "Galway United FC",
       "pick": "2",
-      "p_home": 0.15,
-      "p_draw": 0.24,
-      "p_away": 0.61
+      "p_home": 0.22,
+      "p_draw": 0.27,
+      "p_away": 0.51
     },
     {
       "source": "Vitibet",
-      "home": "Cardiff MET",
-      "away": "Briton Ferry",
+      "home": "Dundalk",
+      "away": "St Patrick's Athl.",
       "pick": "1",
-      "p_home": 0.77,
-      "p_draw": 0.17,
-      "p_away": 0.06
+      "p_home": 0.49,
+      "p_draw": 0.27,
+      "p_away": 0.24
     },
     {
       "source": "Vitibet",
-      "home": "Holywell",
-      "away": "Caernarfon Town",
+      "home": "Waterford",
+      "away": "Derry City FC",
+      "pick": "1",
+      "p_home": 0.47,
+      "p_draw": 0.28,
+      "p_away": 0.25
+    },
+    {
+      "source": "Vitibet",
+      "home": "RED Star FC 93",
+      "away": "Metz",
+      "pick": "2",
+      "p_home": 0.21,
+      "p_draw": 0.27,
+      "p_away": 0.52
+    },
+    {
+      "source": "Vitibet",
+      "home": "Celta de Vigo II",
+      "away": "Eibar",
+      "pick": "1",
+      "p_home": 0.75,
+      "p_draw": 0.18,
+      "p_away": 0.07
+    },
+    {
+      "source": "Vitibet",
+      "home": "San Diego",
+      "away": "Philadelphia Union",
+      "pick": "2",
+      "p_home": 0.24,
+      "p_draw": 0.27,
+      "p_away": 0.49
+    },
+    {
+      "source": "Vitibet",
+      "home": "A. Italiano",
+      "away": "O'Higgins",
+      "pick": "1",
+      "p_home": 0.79,
+      "p_draw": 0.16,
+      "p_away": 0.05
+    },
+    {
+      "source": "Vitibet",
+      "home": "Real Tomayapo",
+      "away": "Bolívar",
       "pick": "2",
       "p_home": 0.05,
       "p_draw": 0.16,
@@ -1837,8 +293,278 @@
     },
     {
       "source": "Vitibet",
-      "home": "Llandudno",
-      "away": "Haverfordwest County AFC",
+      "home": "Jong PSV U21",
+      "away": "Jong AZ",
+      "pick": "2",
+      "p_home": 0.25,
+      "p_draw": 0.27,
+      "p_away": 0.48
+    },
+    {
+      "source": "Vitibet",
+      "home": "Defensores De Belgrano",
+      "away": "Deportivo Madryn",
+      "pick": "2",
+      "p_home": 0.22,
+      "p_draw": 0.27,
+      "p_away": 0.51
+    },
+    {
+      "source": "Vitibet",
+      "home": "Vikingur Reykjavik",
+      "away": "Keflavik",
+      "pick": "1",
+      "p_home": 0.8,
+      "p_draw": 0.16,
+      "p_away": 0.04
+    },
+    {
+      "source": "Vitibet",
+      "home": "El Geish",
+      "away": "Smouha SC",
+      "pick": "1",
+      "p_home": 0.61,
+      "p_draw": 0.24,
+      "p_away": 0.15
+    },
+    {
+      "source": "Vitibet",
+      "home": "Libertad",
+      "away": "Independiente del Valle",
+      "pick": "2",
+      "p_home": 0.22,
+      "p_draw": 0.27,
+      "p_away": 0.51
+    },
+    {
+      "source": "Vitibet",
+      "home": "Krasava Ypsonas",
+      "away": "Aris",
+      "pick": "2",
+      "p_home": 0.06,
+      "p_draw": 0.17,
+      "p_away": 0.77
+    },
+    {
+      "source": "Vitibet",
+      "home": "Meshakhte",
+      "away": "Rustavi",
+      "pick": "2",
+      "p_home": 0.26,
+      "p_draw": 0.28,
+      "p_away": 0.46
+    },
+    {
+      "source": "Vitibet",
+      "home": "FC Torpedo Kutaisi",
+      "away": "Samgurali",
+      "pick": "1",
+      "p_home": 0.59,
+      "p_draw": 0.25,
+      "p_away": 0.16
+    },
+    {
+      "source": "Vitibet",
+      "home": "FC Dinamo Tbilisi",
+      "away": "Gagra",
+      "pick": "1",
+      "p_home": 0.5,
+      "p_draw": 0.27,
+      "p_away": 0.23
+    },
+    {
+      "source": "Vitibet",
+      "home": "Mladost DG",
+      "away": "Buducnost Podgorica",
+      "pick": "1",
+      "p_home": 0.74,
+      "p_draw": 0.19,
+      "p_away": 0.07
+    },
+    {
+      "source": "Vitibet",
+      "home": "Mornar",
+      "away": "Otrant-Olympic",
+      "pick": "1",
+      "p_home": 0.51,
+      "p_draw": 0.27,
+      "p_away": 0.22
+    },
+    {
+      "source": "Vitibet",
+      "home": "Banga",
+      "away": "FK TransINVEST",
+      "pick": "1",
+      "p_home": 0.56,
+      "p_draw": 0.26,
+      "p_away": 0.18
+    },
+    {
+      "source": "Vitibet",
+      "home": "Shkëndija Haraçinë",
+      "away": "Skopje",
+      "pick": "1",
+      "p_home": 0.65,
+      "p_draw": 0.23,
+      "p_away": 0.12
+    },
+    {
+      "source": "Vitibet",
+      "home": "Hapoel Haifa FC",
+      "away": "Bnei Sakhnin",
+      "pick": "1",
+      "p_home": 0.5,
+      "p_draw": 0.27,
+      "p_away": 0.23
+    },
+    {
+      "source": "Vitibet",
+      "home": "Hapoel Ramat Gan",
+      "away": "Maccabi Netanya FC",
+      "pick": "2",
+      "p_home": 0.2,
+      "p_draw": 0.26,
+      "p_away": 0.54
+    },
+    {
+      "source": "Vitibet",
+      "home": "Hapoel Ironi Kiryat Shmona FC",
+      "away": "Maccabi Haifa FC",
+      "pick": "2",
+      "p_home": 0.24,
+      "p_draw": 0.27,
+      "p_away": 0.49
+    },
+    {
+      "source": "Vitibet",
+      "home": "Maccabi Tel Aviv FC",
+      "away": "Hapoel Tel Aviv FC",
+      "pick": "2",
+      "p_home": 0.09,
+      "p_draw": 0.2,
+      "p_away": 0.71
+    },
+    {
+      "source": "Vitibet",
+      "home": "Pacific FC",
+      "away": "Cavalry FC",
+      "pick": "2",
+      "p_home": 0.09,
+      "p_draw": 0.2,
+      "p_away": 0.71
+    },
+    {
+      "source": "Vitibet",
+      "home": "Zlaté Moravce",
+      "away": "Lokomotíva Zvolen",
+      "pick": "1",
+      "p_home": 0.69,
+      "p_draw": 0.21,
+      "p_away": 0.1
+    },
+    {
+      "source": "Vitibet",
+      "home": "Al-Jolan SC",
+      "away": "Newroz SC",
+      "pick": "2",
+      "p_home": 0.11,
+      "p_draw": 0.21,
+      "p_away": 0.68
+    },
+    {
+      "source": "Vitibet",
+      "home": "Bayer Leverkusen W",
+      "away": "Bayern Munich W",
+      "pick": "2",
+      "p_home": 0.14,
+      "p_draw": 0.24,
+      "p_away": 0.62
+    },
+    {
+      "source": "Vitibet",
+      "home": "FC Porto B",
+      "away": "Vizela",
+      "pick": "2",
+      "p_home": 0.07,
+      "p_draw": 0.18,
+      "p_away": 0.75
+    },
+    {
+      "source": "Vitibet",
+      "home": "Sporting CP B",
+      "away": "Lusitânia Lourosa",
+      "pick": "1",
+      "p_home": 0.49,
+      "p_draw": 0.27,
+      "p_away": 0.24
+    },
+    {
+      "source": "Vitibet",
+      "home": "Norrby IF",
+      "away": "Varbergs BoIS FC",
+      "pick": "2",
+      "p_home": 0.25,
+      "p_draw": 0.28,
+      "p_away": 0.47
+    },
+    {
+      "source": "Vitibet",
+      "home": "Ostersunds FK",
+      "away": "Helsingborg",
+      "pick": "1",
+      "p_home": 0.59,
+      "p_draw": 0.25,
+      "p_away": 0.16
+    },
+    {
+      "source": "Vitibet",
+      "home": "Sporting San Jose",
+      "away": "Deportivo Saprissa",
+      "pick": "1",
+      "p_home": 0.67,
+      "p_draw": 0.22,
+      "p_away": 0.11
+    },
+    {
+      "source": "Vitibet",
+      "home": "Kayserispor",
+      "away": "İstanbulspor",
+      "pick": "1",
+      "p_home": 0.8,
+      "p_draw": 0.16,
+      "p_away": 0.04
+    },
+    {
+      "source": "Vitibet",
+      "home": "CD Marathon",
+      "away": "CD Olimpia",
+      "pick": "1",
+      "p_home": 0.55,
+      "p_draw": 0.26,
+      "p_away": 0.19
+    },
+    {
+      "source": "Vitibet",
+      "home": "Atletico Independiente",
+      "away": "Juticalpa",
+      "pick": "1",
+      "p_home": 0.77,
+      "p_draw": 0.17,
+      "p_away": 0.06
+    },
+    {
+      "source": "Vitibet",
+      "home": "KAMAZ",
+      "away": "Chelyabinsk",
+      "pick": "1",
+      "p_home": 0.47,
+      "p_draw": 0.28,
+      "p_away": 0.25
+    },
+    {
+      "source": "Vitibet",
+      "home": "Spartak Kostroma",
+      "away": "FK Neftekhimik",
       "pick": "1",
       "p_home": 0.58,
       "p_draw": 0.25,
@@ -1846,8 +572,260 @@
     },
     {
       "source": "Vitibet",
+      "home": "Shinnik Yaroslavl",
+      "away": "Ural",
+      "pick": "1",
+      "p_home": 0.53,
+      "p_draw": 0.26,
+      "p_away": 0.21
+    },
+    {
+      "source": "Vitibet",
+      "home": "Tigres FC",
+      "away": "Bogota FC",
+      "pick": "1",
+      "p_home": 0.74,
+      "p_draw": 0.19,
+      "p_away": 0.07
+    },
+    {
+      "source": "Vitibet",
+      "home": "Benjamín Aceval",
+      "away": "Paraguari AC",
+      "pick": "1",
+      "p_home": 0.8,
+      "p_draw": 0.16,
+      "p_away": 0.04
+    },
+    {
+      "source": "Vitibet",
+      "home": "Deportes Santa Cruz",
+      "away": "Deportivo Recoleta",
+      "pick": "2",
+      "p_home": 0.26,
+      "p_draw": 0.28,
+      "p_away": 0.46
+    },
+    {
+      "source": "Vitibet",
+      "home": "Tartu Welco",
+      "away": "Nõmme Kalju II",
+      "pick": "1",
+      "p_home": 0.8,
+      "p_draw": 0.16,
+      "p_away": 0.04
+    },
+    {
+      "source": "Vitibet",
+      "home": "Polissya II",
+      "away": "Ahrobiznes Volochysk",
+      "pick": "1",
+      "p_home": 0.46,
+      "p_draw": 0.28,
+      "p_away": 0.26
+    },
+    {
+      "source": "Vitibet",
+      "home": "Guastatoya",
+      "away": "Xelajú",
+      "pick": "2",
+      "p_home": 0.21,
+      "p_draw": 0.26,
+      "p_away": 0.53
+    },
+    {
+      "source": "Vitibet",
+      "home": "Municipal",
+      "away": "Malacateco",
+      "pick": "1",
+      "p_home": 0.72,
+      "p_draw": 0.19,
+      "p_away": 0.09
+    },
+    {
+      "source": "Vitibet",
+      "home": "Maccabi Herzliya",
+      "away": "Kafr Qasim",
+      "pick": "1",
+      "p_home": 0.54,
+      "p_draw": 0.26,
+      "p_away": 0.2
+    },
+    {
+      "source": "Vitibet",
+      "home": "West Ham United U21",
+      "away": "Liverpool U21",
+      "pick": "2",
+      "p_home": 0.16,
+      "p_draw": 0.25,
+      "p_away": 0.59
+    },
+    {
+      "source": "Vitibet",
+      "home": "Firpo",
+      "away": "Isidro Metapán",
+      "pick": "1",
+      "p_home": 0.68,
+      "p_draw": 0.21,
+      "p_away": 0.11
+    },
+    {
+      "source": "Vitibet",
+      "home": "Portland Hearts of Pine",
+      "away": "Alta",
+      "pick": "1",
+      "p_home": 0.54,
+      "p_draw": 0.26,
+      "p_away": 0.2
+    },
+    {
+      "source": "Vitibet",
+      "home": "Drukpa",
+      "away": "RTC",
+      "pick": "1",
+      "p_home": 0.57,
+      "p_draw": 0.25,
+      "p_away": 0.18
+    },
+    {
+      "source": "Vitibet",
+      "home": "Masr",
+      "away": "Olympic El Qanah",
+      "pick": "2",
+      "p_home": 0.21,
+      "p_draw": 0.26,
+      "p_away": 0.53
+    },
+    {
+      "source": "Vitibet",
+      "home": "Alaves",
+      "away": "Valencia",
+      "pick": "1",
+      "p_home": 0.8,
+      "p_draw": 0.16,
+      "p_away": 0.04
+    },
+    {
+      "source": "Vitibet",
+      "home": "Elche",
+      "away": "Real Madrid",
+      "pick": "2",
+      "p_home": 0.05,
+      "p_draw": 0.16,
+      "p_away": 0.79
+    },
+    {
+      "source": "Vitibet",
+      "home": "Ajax",
+      "away": "Willem II",
+      "pick": "1",
+      "p_home": 0.8,
+      "p_draw": 0.16,
+      "p_away": 0.04
+    },
+    {
+      "source": "Vitibet",
+      "home": "Grasshoppers",
+      "away": "FC Sion",
+      "pick": "2",
+      "p_home": 0.12,
+      "p_draw": 0.23,
+      "p_away": 0.65
+    },
+    {
+      "source": "Vitibet",
+      "home": "Falkirk",
+      "away": "Heart Of Midlothian",
+      "pick": "2",
+      "p_home": 0.11,
+      "p_draw": 0.22,
+      "p_away": 0.67
+    },
+    {
+      "source": "Vitibet",
+      "home": "Hibernian",
+      "away": "Kilmarnock",
+      "pick": "1",
+      "p_home": 0.79,
+      "p_draw": 0.16,
+      "p_away": 0.05
+    },
+    {
+      "source": "Vitibet",
+      "home": "Motherwell",
+      "away": "Aberdeen",
+      "pick": "1",
+      "p_home": 0.76,
+      "p_draw": 0.17,
+      "p_away": 0.07
+    },
+    {
+      "source": "Vitibet",
+      "home": "Bahia",
+      "away": "Remo",
+      "pick": "1",
+      "p_home": 0.67,
+      "p_draw": 0.22,
+      "p_away": 0.11
+    },
+    {
+      "source": "Vitibet",
+      "home": "Raków Częstochowa",
+      "away": "Zaglebie Lubin",
+      "pick": "2",
+      "p_home": 0.21,
+      "p_draw": 0.27,
+      "p_away": 0.52
+    },
+    {
+      "source": "Vitibet",
+      "home": "Korona Kielce",
+      "away": "Gornik Zabrze",
+      "pick": "1",
+      "p_home": 0.7,
+      "p_draw": 0.21,
+      "p_away": 0.09
+    },
+    {
+      "source": "Vitibet",
+      "home": "Leon",
+      "away": "Atletico San Luis",
+      "pick": "1",
+      "p_home": 0.56,
+      "p_draw": 0.26,
+      "p_away": 0.18
+    },
+    {
+      "source": "Vitibet",
+      "home": "Bristol City FC",
+      "away": "Lincoln",
+      "pick": "1",
+      "p_home": 0.65,
+      "p_draw": 0.23,
+      "p_away": 0.12
+    },
+    {
+      "source": "Vitibet",
+      "home": "Holywell",
+      "away": "Colwyn Bay",
+      "pick": "2",
+      "p_home": 0.06,
+      "p_draw": 0.17,
+      "p_away": 0.77
+    },
+    {
+      "source": "Vitibet",
+      "home": "Llandudno",
+      "away": "Caernarfon Town",
+      "pick": "2",
+      "p_home": 0.11,
+      "p_draw": 0.22,
+      "p_away": 0.67
+    },
+    {
+      "source": "Vitibet",
       "home": "Penybont",
-      "away": "Flint Town United",
+      "away": "Briton Ferry",
       "pick": "1",
       "p_home": 0.8,
       "p_draw": 0.16,
@@ -1856,7 +834,7 @@
     {
       "source": "Vitibet",
       "home": "The New Saints",
-      "away": "Colwyn Bay",
+      "away": "Flint Town United",
       "pick": "1",
       "p_home": 0.8,
       "p_draw": 0.16,
@@ -1865,70 +843,7 @@
     {
       "source": "Vitibet",
       "home": "Trefelin",
-      "away": "Ammanford AFC",
-      "pick": "1",
-      "p_home": 0.6,
-      "p_draw": 0.24,
-      "p_away": 0.16
-    },
-    {
-      "source": "Vitibet",
-      "home": "Cremonese",
-      "away": "Modena",
-      "pick": "1",
-      "p_home": 0.56,
-      "p_draw": 0.26,
-      "p_away": 0.18
-    },
-    {
-      "source": "Vitibet",
-      "home": "Tenerife",
-      "away": "Sporting Gijon",
-      "pick": "1",
-      "p_home": 0.5,
-      "p_draw": 0.27,
-      "p_away": 0.23
-    },
-    {
-      "source": "Vitibet",
-      "home": "Club Deportivo Comerciantes Unidos",
-      "away": "FC Cajamarca",
-      "pick": "1",
-      "p_home": 0.64,
-      "p_draw": 0.23,
-      "p_away": 0.13
-    },
-    {
-      "source": "Vitibet",
-      "home": "Independiente Petrolero",
-      "away": "Guabirá",
-      "pick": "1",
-      "p_home": 0.8,
-      "p_draw": 0.16,
-      "p_away": 0.04
-    },
-    {
-      "source": "Vitibet",
-      "home": "Portadown",
-      "away": "Coleraine FC",
-      "pick": "2",
-      "p_home": 0.05,
-      "p_draw": 0.16,
-      "p_away": 0.79
-    },
-    {
-      "source": "Vitibet",
-      "home": "Southend",
-      "away": "Kidderminster Harriers",
-      "pick": "1",
-      "p_home": 0.8,
-      "p_draw": 0.16,
-      "p_away": 0.04
-    },
-    {
-      "source": "Vitibet",
-      "home": "Aldershot Town",
-      "away": "Harrogate Town FC",
+      "away": "Cambrian & Clydach",
       "pick": "2",
       "p_home": 0.1,
       "p_draw": 0.21,
@@ -1936,116 +851,8 @@
     },
     {
       "source": "Vitibet",
-      "home": "Tamworth",
-      "away": "Worthing",
-      "pick": "2",
-      "p_home": 0.23,
-      "p_draw": 0.27,
-      "p_away": 0.5
-    },
-    {
-      "source": "Vitibet",
-      "home": "Altrincham",
-      "away": "FC Halifax Town",
-      "pick": "2",
-      "p_home": 0.25,
-      "p_draw": 0.27,
-      "p_away": 0.48
-    },
-    {
-      "source": "Vitibet",
-      "home": "Wealdstone",
-      "away": "Carlisle",
-      "pick": "2",
-      "p_home": 0.07,
-      "p_draw": 0.18,
-      "p_away": 0.75
-    },
-    {
-      "source": "Vitibet",
-      "home": "Barrow",
-      "away": "Yeovil Town",
-      "pick": "2",
-      "p_home": 0.15,
-      "p_draw": 0.24,
-      "p_away": 0.61
-    },
-    {
-      "source": "Vitibet",
-      "home": "Hartlepool",
-      "away": "Eastleigh",
-      "pick": "1",
-      "p_home": 0.77,
-      "p_draw": 0.17,
-      "p_away": 0.06
-    },
-    {
-      "source": "Vitibet",
-      "home": "AFC Hornchurch",
-      "away": "Woking",
-      "pick": "1",
-      "p_home": 0.59,
-      "p_draw": 0.25,
-      "p_away": 0.16
-    },
-    {
-      "source": "Vitibet",
-      "home": "Scunthorpe",
-      "away": "Solihull Moors",
-      "pick": "1",
-      "p_home": 0.73,
-      "p_draw": 0.19,
-      "p_away": 0.08
-    },
-    {
-      "source": "Vitibet",
-      "home": "AFC Fylde",
-      "away": "Forest Green",
-      "pick": "2",
-      "p_home": 0.22,
-      "p_draw": 0.27,
-      "p_away": 0.51
-    },
-    {
-      "source": "Vitibet",
-      "home": "Jong Ajax",
-      "away": "Helmond Sport",
-      "pick": "1",
-      "p_home": 0.62,
-      "p_draw": 0.24,
-      "p_away": 0.14
-    },
-    {
-      "source": "Vitibet",
-      "home": "Roda",
-      "away": "NAC Breda",
-      "pick": "1",
-      "p_home": 0.66,
-      "p_draw": 0.22,
-      "p_away": 0.12
-    },
-    {
-      "source": "Vitibet",
-      "home": "Den Bosch",
-      "away": "Vitesse",
-      "pick": "1",
-      "p_home": 0.53,
-      "p_draw": 0.27,
-      "p_away": 0.2
-    },
-    {
-      "source": "Vitibet",
-      "home": "FC Volendam",
-      "away": "Dordrecht",
-      "pick": "1",
-      "p_home": 0.47,
-      "p_draw": 0.28,
-      "p_away": 0.25
-    },
-    {
-      "source": "Vitibet",
-      "home": "FC Vitebsk",
-      "away": "Naftan",
+      "home": "Barry Town",
+      "away": "Ammanford AFC",
       "pick": "1",
       "p_home": 0.8,
       "p_draw": 0.16,
@@ -2053,53 +860,62 @@
     },
     {
       "source": "Vitibet",
-      "home": "FK Gomel",
-      "away": "Belshina",
+      "home": "GAP Connah S Quay FC",
+      "away": "Airbus UK",
       "pick": "1",
-      "p_home": 0.76,
-      "p_draw": 0.18,
-      "p_away": 0.06
+      "p_home": 0.56,
+      "p_draw": 0.26,
+      "p_away": 0.18
     },
     {
       "source": "Vitibet",
-      "home": "Shanghai Shenhua",
-      "away": "Shandong Luneng",
-      "pick": "1",
-      "p_home": 0.5,
-      "p_draw": 0.27,
-      "p_away": 0.23
-    },
-    {
-      "source": "Vitibet",
-      "home": "Dalian Zhixing",
-      "away": "Beijing Guoan",
+      "home": "Unión La Calera SADP",
+      "away": "CD Limache",
       "pick": "2",
-      "p_home": 0.18,
-      "p_draw": 0.26,
-      "p_away": 0.56
+      "p_home": 0.17,
+      "p_draw": 0.25,
+      "p_away": 0.58
     },
     {
       "source": "Vitibet",
-      "home": "Sichuan Jiuniu",
-      "away": "SHANGHAI SIPG",
+      "home": "Atletico Torque",
+      "away": "Liverpool Montevideo",
+      "pick": "2",
+      "p_home": 0.17,
+      "p_draw": 0.25,
+      "p_away": 0.58
+    },
+    {
+      "source": "Vitibet",
+      "home": "ABB",
+      "away": "The Strongest",
+      "pick": "2",
+      "p_home": 0.07,
+      "p_draw": 0.17,
+      "p_away": 0.76
+    },
+    {
+      "source": "Vitibet",
+      "home": "Glentoran",
+      "away": "Coleraine FC",
+      "pick": "2",
+      "p_home": 0.1,
+      "p_draw": 0.21,
+      "p_away": 0.69
+    },
+    {
+      "source": "Vitibet",
+      "home": "Larne",
+      "away": "Cliftonville FC",
       "pick": "1",
-      "p_home": 0.51,
-      "p_draw": 0.27,
-      "p_away": 0.22
+      "p_home": 0.68,
+      "p_draw": 0.21,
+      "p_away": 0.11
     },
     {
       "source": "Vitibet",
-      "home": "Llaneros",
-      "away": "Millonarios",
-      "pick": "1",
-      "p_home": 0.55,
-      "p_draw": 0.26,
-      "p_away": 0.19
-    },
-    {
-      "source": "Vitibet",
-      "home": "Once Caldas",
-      "away": "Deportes Tolima",
+      "home": "Limavady United",
+      "away": "Bangor",
       "pick": "1",
       "p_home": 0.48,
       "p_draw": 0.27,
@@ -2107,107 +923,62 @@
     },
     {
       "source": "Vitibet",
-      "home": "Mushuc Runa SC",
-      "away": "Delfin SC",
-      "pick": "1",
-      "p_home": 0.58,
-      "p_draw": 0.25,
-      "p_away": 0.17
-    },
-    {
-      "source": "Vitibet",
-      "home": "Dukla Praha",
-      "away": "Vysočina Jihlava",
-      "pick": "1",
-      "p_home": 0.8,
-      "p_draw": 0.16,
-      "p_away": 0.04
-    },
-    {
-      "source": "Vitibet",
-      "home": "Athlone Town",
-      "away": "Bray Wanderers",
-      "pick": "1",
-      "p_home": 0.46,
-      "p_draw": 0.28,
-      "p_away": 0.26
-    },
-    {
-      "source": "Vitibet",
-      "home": "Cobh Ramblers",
-      "away": "Longford Town",
-      "pick": "1",
-      "p_home": 0.76,
-      "p_draw": 0.18,
-      "p_away": 0.06
-    },
-    {
-      "source": "Vitibet",
-      "home": "Kerry",
-      "away": "Treaty United",
-      "pick": "1",
-      "p_home": 0.61,
-      "p_draw": 0.24,
-      "p_away": 0.15
-    },
-    {
-      "source": "Vitibet",
-      "home": "Vikingur Gota",
-      "away": "HB Torshavn",
+      "home": "Portadown",
+      "away": "Linfield",
       "pick": "2",
-      "p_home": 0.22,
-      "p_draw": 0.27,
-      "p_away": 0.51
+      "p_home": 0.07,
+      "p_draw": 0.18,
+      "p_away": 0.75
     },
     {
       "source": "Vitibet",
-      "home": "Fortuna Düsseldorf",
-      "away": "Stuttgart II",
-      "pick": "1",
-      "p_home": 0.65,
-      "p_draw": 0.23,
-      "p_away": 0.12
-    },
-    {
-      "source": "Vitibet",
-      "home": "FC Schweinfurt 05",
-      "away": "Greuther Furth II",
-      "pick": "1",
-      "p_home": 0.55,
+      "home": "Ballymena United",
+      "away": "Carrick Rangers FC",
+      "pick": "2",
+      "p_home": 0.19,
       "p_draw": 0.26,
-      "p_away": 0.19
+      "p_away": 0.55
     },
     {
       "source": "Vitibet",
-      "home": "Altglienicke",
-      "away": "BSG Chemie Leipzig",
+      "home": "Harrogate Town FC",
+      "away": "AFC Fylde",
+      "pick": "2",
+      "p_home": 0.1,
+      "p_draw": 0.21,
+      "p_away": 0.69
+    },
+    {
+      "source": "Vitibet",
+      "home": "Southend",
+      "away": "Tamworth",
       "pick": "1",
-      "p_home": 0.79,
-      "p_draw": 0.16,
-      "p_away": 0.05
+      "p_home": 0.69,
+      "p_draw": 0.21,
+      "p_away": 0.1
     },
     {
       "source": "Vitibet",
-      "home": "Chemnitzer FC",
-      "away": "FC Carl Zeiss Jena",
+      "home": "Sutton Utd",
+      "away": "Eastleigh",
+      "pick": "2",
+      "p_home": 0.19,
+      "p_draw": 0.26,
+      "p_away": 0.55
+    },
+    {
+      "source": "Vitibet",
+      "home": "Wealdstone",
+      "away": "FC Halifax Town",
       "pick": "1",
-      "p_home": 0.66,
-      "p_draw": 0.22,
-      "p_away": 0.12
+      "p_home": 0.53,
+      "p_draw": 0.26,
+      "p_away": 0.21
     },
     {
       "source": "Vitibet",
-      "home": "Unia Skierniewice",
-      "away": "Stal Rzeszów",
-      "pick": "1",
-      "p_home": 0.66,
-      "p_draw": 0.22,
-      "p_away": 0.12
-    },
-    {
-      "source": "Vitibet",
-      "home": "Pogoń Grod. Mazowiecki",
-      "away": "Nieciecza",
+      "home": "Aldershot Town",
+      "away": "Yeovil Town",
       "pick": "1",
       "p_home": 0.61,
       "p_draw": 0.24,
@@ -2215,17 +986,26 @@
     },
     {
       "source": "Vitibet",
-      "home": "Odra Opole",
-      "away": "ŁKS Łódź",
+      "home": "Boston United",
+      "away": "Woking",
       "pick": "2",
       "p_home": 0.25,
-      "p_draw": 0.27,
-      "p_away": 0.48
+      "p_draw": 0.28,
+      "p_away": 0.47
     },
     {
       "source": "Vitibet",
-      "home": "Fylkir",
-      "away": "Grotta",
+      "home": "Carlisle",
+      "away": "Forest Green",
+      "pick": "1",
+      "p_home": 0.51,
+      "p_draw": 0.27,
+      "p_away": 0.22
+    },
+    {
+      "source": "Vitibet",
+      "home": "America Mineiro",
+      "away": "São Bernardo",
       "pick": "1",
       "p_home": 0.71,
       "p_draw": 0.2,
@@ -2233,53 +1013,98 @@
     },
     {
       "source": "Vitibet",
-      "home": "Throttur Reykjavik",
-      "away": "Ægir",
+      "home": "Stenhousemuir",
+      "away": "Partick",
       "pick": "1",
-      "p_home": 0.8,
-      "p_draw": 0.16,
-      "p_away": 0.04
+      "p_home": 0.65,
+      "p_draw": 0.23,
+      "p_away": 0.12
     },
     {
       "source": "Vitibet",
-      "home": "Edinburgh City FC",
-      "away": "Forfar Athletic FC",
+      "home": "Asyut Petrol",
+      "away": "Future FC",
       "pick": "2",
-      "p_home": 0.23,
+      "p_home": 0.24,
       "p_draw": 0.27,
-      "p_away": 0.5
+      "p_away": 0.49
     },
     {
       "source": "Vitibet",
-      "home": "Ind. Yumbo",
-      "away": "Leones FC",
+      "home": "Wadi Degla",
+      "away": "El Mokawloon",
       "pick": "1",
-      "p_home": 0.72,
-      "p_draw": 0.19,
-      "p_away": 0.09
-    },
-    {
-      "source": "Vitibet",
-      "home": "Deportivo Cuenca Juniors",
-      "away": "9 de Octubre",
-      "pick": "2",
-      "p_home": 0.26,
+      "p_home": 0.46,
       "p_draw": 0.28,
-      "p_away": 0.46
+      "p_away": 0.26
     },
     {
       "source": "Vitibet",
-      "home": "3 de Noviembre",
-      "away": "Independiente F.b.c.",
+      "home": "Al Ahly",
+      "away": "Abu Qair Semad",
       "pick": "1",
-      "p_home": 0.78,
-      "p_draw": 0.16,
+      "p_home": 0.75,
+      "p_draw": 0.18,
+      "p_away": 0.07
+    },
+    {
+      "source": "Vitibet",
+      "home": "AL Masry",
+      "away": "Al Ittihad",
+      "pick": "1",
+      "p_home": 0.48,
+      "p_draw": 0.27,
+      "p_away": 0.25
+    },
+    {
+      "source": "Vitibet",
+      "home": "America de Cali",
+      "away": "Deportivo Pasto",
+      "pick": "1",
+      "p_home": 0.77,
+      "p_draw": 0.17,
       "p_away": 0.06
     },
     {
       "source": "Vitibet",
-      "home": "Ansan Greeners FC",
-      "away": "Daegu FC",
+      "home": "Deportivo Pereira",
+      "away": "Independiente Santa Fe",
+      "pick": "2",
+      "p_home": 0.15,
+      "p_draw": 0.24,
+      "p_away": 0.61
+    },
+    {
+      "source": "Vitibet",
+      "home": "Universidad Catolica",
+      "away": "Orense SC",
+      "pick": "1",
+      "p_home": 0.71,
+      "p_draw": 0.2,
+      "p_away": 0.09
+    },
+    {
+      "source": "Vitibet",
+      "home": "Jezero",
+      "away": "Bokelj",
+      "pick": "2",
+      "p_home": 0.19,
+      "p_draw": 0.26,
+      "p_away": 0.55
+    },
+    {
+      "source": "Vitibet",
+      "home": "Ironi Tiberias FC",
+      "away": "Hapoel Katamon",
+      "pick": "1",
+      "p_home": 0.57,
+      "p_draw": 0.25,
+      "p_away": 0.18
+    },
+    {
+      "source": "Vitibet",
+      "home": "Jahn Regensburg",
+      "away": "Fortuna Düsseldorf",
       "pick": "2",
       "p_home": 0.18,
       "p_draw": 0.25,
@@ -2287,8 +1112,98 @@
     },
     {
       "source": "Vitibet",
-      "home": "Jeonnam Dragons",
-      "away": "Cheonan City FC",
+      "home": "MSV Duisburg",
+      "away": "Havelse",
+      "pick": "1",
+      "p_home": 0.76,
+      "p_draw": 0.18,
+      "p_away": 0.06
+    },
+    {
+      "source": "Vitibet",
+      "home": "SG Sonnenhof Grossaspach",
+      "away": "Verl",
+      "pick": "1",
+      "p_home": 0.47,
+      "p_draw": 0.28,
+      "p_away": 0.25
+    },
+    {
+      "source": "Vitibet",
+      "home": "SV Meppen",
+      "away": "FC Viktoria Köln",
+      "pick": "2",
+      "p_home": 0.09,
+      "p_draw": 0.2,
+      "p_away": 0.71
+    },
+    {
+      "source": "Vitibet",
+      "home": "Nürnberg II",
+      "away": "Schwaben Augsburg",
+      "pick": "1",
+      "p_home": 0.69,
+      "p_draw": 0.21,
+      "p_away": 0.1
+    },
+    {
+      "source": "Vitibet",
+      "home": "SpVgg Unterhaching",
+      "away": "Buchbach",
+      "pick": "1",
+      "p_home": 0.71,
+      "p_draw": 0.2,
+      "p_away": 0.09
+    },
+    {
+      "source": "Vitibet",
+      "home": "Vilzing",
+      "away": "Ansbach",
+      "pick": "1",
+      "p_home": 0.79,
+      "p_draw": 0.16,
+      "p_away": 0.05
+    },
+    {
+      "source": "Vitibet",
+      "home": "Bayreuth",
+      "away": "Aubstadt",
+      "pick": "1",
+      "p_home": 0.67,
+      "p_draw": 0.22,
+      "p_away": 0.11
+    },
+    {
+      "source": "Vitibet",
+      "home": "Greuther Furth II",
+      "away": "1860 Munich",
+      "pick": "2",
+      "p_home": 0.18,
+      "p_draw": 0.25,
+      "p_away": 0.57
+    },
+    {
+      "source": "Vitibet",
+      "home": "Memmingen",
+      "away": "Wacker Burghausen",
+      "pick": "1",
+      "p_home": 0.57,
+      "p_draw": 0.25,
+      "p_away": 0.18
+    },
+    {
+      "source": "Vitibet",
+      "home": "FC Schweinfurt 05",
+      "away": "Illertissen",
+      "pick": "1",
+      "p_home": 0.75,
+      "p_draw": 0.18,
+      "p_away": 0.07
+    },
+    {
+      "source": "Vitibet",
+      "home": "Hertha BSC II",
+      "away": "FC Rot-Weiß Erfurt",
       "pick": "2",
       "p_home": 0.05,
       "p_draw": 0.16,
@@ -2296,8 +1211,152 @@
     },
     {
       "source": "Vitibet",
-      "home": "Lund",
-      "away": "Olympic",
+      "home": "Luckenwalde",
+      "away": "BFC Preussen",
+      "pick": "2",
+      "p_home": 0.09,
+      "p_draw": 0.2,
+      "p_away": 0.71
+    },
+    {
+      "source": "Vitibet",
+      "home": "FSV Zwickau",
+      "away": "Altglienicke",
+      "pick": "2",
+      "p_home": 0.26,
+      "p_draw": 0.28,
+      "p_away": 0.46
+    },
+    {
+      "source": "Vitibet",
+      "home": "IFK Varnamo",
+      "away": "Osters IF",
+      "pick": "1",
+      "p_home": 0.53,
+      "p_draw": 0.26,
+      "p_away": 0.21
+    },
+    {
+      "source": "Vitibet",
+      "home": "IK brage",
+      "away": "Sandviken",
+      "pick": "2",
+      "p_home": 0.25,
+      "p_draw": 0.28,
+      "p_away": 0.47
+    },
+    {
+      "source": "Vitibet",
+      "home": "Landskrona BoIS",
+      "away": "GIF Sundsvall",
+      "pick": "1",
+      "p_home": 0.72,
+      "p_draw": 0.2,
+      "p_away": 0.08
+    },
+    {
+      "source": "Vitibet",
+      "home": "Ross County",
+      "away": "Queen of the South",
+      "pick": "1",
+      "p_home": 0.8,
+      "p_draw": 0.16,
+      "p_away": 0.04
+    },
+    {
+      "source": "Vitibet",
+      "home": "Orsomarso",
+      "away": "Depor FC",
+      "pick": "1",
+      "p_home": 0.49,
+      "p_draw": 0.27,
+      "p_away": 0.24
+    },
+    {
+      "source": "Vitibet",
+      "home": "Atlético Tembetary",
+      "away": "Sportivo Carapeguá",
+      "pick": "2",
+      "p_home": 0.17,
+      "p_draw": 0.25,
+      "p_away": 0.58
+    },
+    {
+      "source": "Vitibet",
+      "home": "Molynes United",
+      "away": "Treasure Beach",
+      "pick": "1",
+      "p_home": 0.5,
+      "p_draw": 0.27,
+      "p_away": 0.23
+    },
+    {
+      "source": "Vitibet",
+      "home": "Racing United",
+      "away": "Arnett Gardens",
+      "pick": "1",
+      "p_home": 0.8,
+      "p_draw": 0.16,
+      "p_away": 0.04
+    },
+    {
+      "source": "Vitibet",
+      "home": "Young Africans",
+      "away": "Geita Gold",
+      "pick": "1",
+      "p_home": 0.77,
+      "p_draw": 0.17,
+      "p_away": 0.06
+    },
+    {
+      "source": "Vitibet",
+      "home": "Casertana",
+      "away": "Team Altamura",
+      "pick": "1",
+      "p_home": 0.51,
+      "p_draw": 0.27,
+      "p_away": 0.22
+    },
+    {
+      "source": "Vitibet",
+      "home": "Crotone",
+      "away": "Inter U23",
+      "pick": "1",
+      "p_home": 0.5,
+      "p_draw": 0.27,
+      "p_away": 0.23
+    },
+    {
+      "source": "Vitibet",
+      "home": "Barletta",
+      "away": "Salernitana",
+      "pick": "1",
+      "p_home": 0.64,
+      "p_draw": 0.23,
+      "p_away": 0.13
+    },
+    {
+      "source": "Vitibet",
+      "home": "Truro City",
+      "away": "Salisbury",
+      "pick": "2",
+      "p_home": 0.24,
+      "p_draw": 0.27,
+      "p_away": 0.49
+    },
+    {
+      "source": "Vitibet",
+      "home": "AC Milan",
+      "away": "Benfica",
+      "pick": "1",
+      "p_home": 0.57,
+      "p_draw": 0.26,
+      "p_away": 0.17
+    },
+    {
+      "source": "Vitibet",
+      "home": "Bayer Leverkusen",
+      "away": "Celje",
       "pick": "1",
       "p_home": 0.63,
       "p_draw": 0.23,
@@ -2305,21 +1364,165 @@
     },
     {
       "source": "Vitibet",
-      "home": "JaPS Jarvenpaa",
-      "away": "KaPa Helsinki",
+      "home": "Hapoel Beer Sheva FC",
+      "away": "Dinamo Zagreb",
       "pick": "1",
-      "p_home": 0.55,
-      "p_draw": 0.26,
-      "p_away": 0.19
+      "p_home": 0.49,
+      "p_draw": 0.27,
+      "p_away": 0.24
     },
     {
       "source": "Vitibet",
-      "home": "Kooteepee",
-      "away": "Haka",
+      "home": "Atletico Madrid",
+      "away": "Osasuna",
+      "pick": "1",
+      "p_home": 0.73,
+      "p_draw": 0.19,
+      "p_away": 0.08
+    },
+    {
+      "source": "Vitibet",
+      "home": "Deportivo La Coruna",
+      "away": "Sevilla",
+      "pick": "1",
+      "p_home": 0.8,
+      "p_draw": 0.16,
+      "p_away": 0.04
+    },
+    {
+      "source": "Vitibet",
+      "home": "FC Thun",
+      "away": "Servette FC",
+      "pick": "1",
+      "p_home": 0.8,
+      "p_draw": 0.16,
+      "p_away": 0.04
+    },
+    {
+      "source": "Vitibet",
+      "home": "AIK Stockholm",
+      "away": "Mjallby AIF",
+      "pick": "1",
+      "p_home": 0.6,
+      "p_draw": 0.25,
+      "p_away": 0.15
+    },
+    {
+      "source": "Vitibet",
+      "home": "Lokomotiv Sofia",
+      "away": "CSKA Sofia",
       "pick": "2",
-      "p_home": 0.26,
-      "p_draw": 0.28,
-      "p_away": 0.46
+      "p_home": 0.05,
+      "p_draw": 0.16,
+      "p_away": 0.79
+    },
+    {
+      "source": "Vitibet",
+      "home": "Rodina Moskva",
+      "away": "Rubin",
+      "pick": "2",
+      "p_home": 0.1,
+      "p_draw": 0.21,
+      "p_away": 0.69
+    },
+    {
+      "source": "Vitibet",
+      "home": "HC Spartak Moscow",
+      "away": "Fakel",
+      "pick": "1",
+      "p_home": 0.78,
+      "p_draw": 0.16,
+      "p_away": 0.06
+    },
+    {
+      "source": "Vitibet",
+      "home": "Baltika",
+      "away": "Zenit",
+      "pick": "2",
+      "p_home": 0.19,
+      "p_draw": 0.26,
+      "p_away": 0.55
+    },
+    {
+      "source": "Vitibet",
+      "home": "Club Atletico Platense",
+      "away": "Fluminense",
+      "pick": "2",
+      "p_home": 0.14,
+      "p_draw": 0.24,
+      "p_away": 0.62
+    },
+    {
+      "source": "Vitibet",
+      "home": "Vasco DA Gama",
+      "away": "Independiente Santa Fe",
+      "pick": "1",
+      "p_home": 0.8,
+      "p_draw": 0.16,
+      "p_away": 0.04
+    },
+    {
+      "source": "Vitibet",
+      "home": "Scunthorpe",
+      "away": "Boreham Wood",
+      "pick": "2",
+      "p_home": 0.17,
+      "p_draw": 0.25,
+      "p_away": 0.58
+    },
+    {
+      "source": "Vitibet",
+      "home": "Londrina",
+      "away": "Ponte Preta",
+      "pick": "1",
+      "p_home": 0.79,
+      "p_draw": 0.16,
+      "p_away": 0.05
+    },
+    {
+      "source": "Vitibet",
+      "home": "Nautico Recife",
+      "away": "Operario-PR",
+      "pick": "1",
+      "p_home": 0.62,
+      "p_draw": 0.24,
+      "p_away": 0.14
+    },
+    {
+      "source": "Vitibet",
+      "home": "Atert Bissen",
+      "away": "Wiltz",
+      "pick": "1",
+      "p_home": 0.8,
+      "p_draw": 0.16,
+      "p_away": 0.04
+    },
+    {
+      "source": "Vitibet",
+      "home": "FC Differdange 03",
+      "away": "Swift Hesperange",
+      "pick": "1",
+      "p_home": 0.8,
+      "p_draw": 0.16,
+      "p_away": 0.04
+    },
+    {
+      "source": "Vitibet",
+      "home": "F91 Dudelange",
+      "away": "UN Kaerjeng 97",
+      "pick": "2",
+      "p_home": 0.16,
+      "p_draw": 0.25,
+      "p_away": 0.59
+    },
+    {
+      "source": "Vitibet",
+      "home": "US Hostert",
+      "away": "AS Jeunesse Esch",
+      "pick": "1",
+      "p_home": 0.49,
+      "p_draw": 0.27,
+      "p_away": 0.24
     }
   ]
 }

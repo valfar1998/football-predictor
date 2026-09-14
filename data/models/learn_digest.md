@@ -1,20 +1,20 @@
-# Digest apprendimento — 2026-09-01 05:08 UTC
+# Digest apprendimento — 2026-09-14 05:08 UTC
 
 - Esito fit: **OK**
-- Momento: `2026-09-01T05:08:02.621770+00:00`
-- Partite chiuse totali: **335**
-- Usabili per imparare (ricche): **322** (live 202 + backfill 120)
-- Escluse (storico incompleto): **13**
+- Momento: `2026-09-14T05:08:06.971743+00:00`
+- Partite chiuse totali: **616**
+- Usabili per imparare (ricche): **560** (live 440 + backfill 120)
+- Escluse (storico incompleto): **56**
 
 ## In cosa sta migliorando / correggendo
 
-- **ROI recente** (ultime 60 giocate): -4.7% (PnL -2.83 u)
-- **CLV medio:** -0.0040 · beat close +0.0%
-- **Soglia EV minima:** da `0.0305` a `0.036` (più severa, usa anche CLV)
+- **ROI recente:** non ancora calcolabile (pochi esiti live con voto ≥8).
+- **CLV medio:** 0.0007 · beat close +0.0%
+- **Soglia EV minima:** da `0.0272` a `0.0294` (più severa, usa anche CLV)
 - **Calibrazione probabilità:** aggiornata (8 bin, blend max 0.72).
-- **Fattore p online:** `0.9968` (errore medio p−hit 0.0042)
-- **Residual EV:** ok su 1692 sample (RMSE 0.469, WF 0.487)
-- **Pesi data-signal:** aggiornati (hit rate +41.4%, ROI -7.3%, metodo `walk_forward_brier_roi`).
+- **Fattore p online:** `0.9629` (errore medio p−hit 0.0476)
+- **Residual EV:** ok su 2249 sample (RMSE 0.478, WF 0.486)
+- **Pesi data-signal:** aggiornati (hit rate +39.9%, ROI -15.8%, metodo `walk_forward_brier_roi`).
 
 ## Come leggerlo in pratica
 

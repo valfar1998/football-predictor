@@ -1,6 +1,6 @@
 # Roadmap — stato e prossimi passi
 
-Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-30** (settle secondari, phasing-out backfill, GHA odds-prefresh).
+Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-09-14** (Kambi primario corner/tiri; ROI voto≥8).
 
 **Regola d’oro:** live/contesto fragile → quadro/voto/no_bet; EV/Kelly solo da modelli/calibrazione su OOF o settled.
 
@@ -54,8 +54,10 @@ Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-30** (settle secondari, ph
 
 ### 2) Settle mercati secondari — ✅ FATTO (codice)
 
-- Cards/corners: FD `HY/AY/HR/AR/HC/AC` in `settle_from_results`.
-- Scorer: `settle_scorer_pending()` + FotMob `extract_goal_scorers` + fuzzy match.
+- **Sofascore primo** in `settle_pending` (schedule Big 5 + statistics/incidents).
+- Cards/corners: Sofascore stats → fallback FD `HY/AY/HC/AC`.
+- Scorer: Sofascore incidents → FotMob `extract_goal_scorers` + fuzzy match.
+- Persistenza: `sofascore_match_id`, `sofascore_stats`, `sofascore_match_stats.json`.
 
 ### 3) Connettori dati — 🟡 migliorato
 
@@ -79,6 +81,8 @@ Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-30** (settle secondari, ph
 
 ## Chiusi (codice / recenti)
 
+- **Kambi primario + tiri:** quote corner/tiri da Kambi betoffers (overwrite); λ/MC `shots_*`; pick focus `CORN*`; settle `SHOT*` via Sofascore. ROI paper già gated a voto unificato ≥8.
+- **Sofascore post-match primario:** `sofascore_postmatch.py` + hook in `settle_pending` (prima di FD/mondo); stats JSON per analisi; scorer Sofascore→FotMob.
 - Progresso `calendario N/M` durante **Aggiorna dati + modello** (95→99%, non più barra ferma).
 - **Bottoni quote leggeri:** `refresh_upcoming_odds` (EV/Kelly senza ML/MC); **Solo quote** = fd + Asian + Pinnacle/Betfair cache, niente mondiale/coppe/tipster/FBref; notify-refresh light.
 - Progresso % + log live sui bottoni lunghi (UI + echo terminale).
@@ -91,7 +95,7 @@ Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-08-30** (settle secondari, ph
 - **Solo quote fermo a 0%:** progresso in-process + `python -u` sugli CLI figli.
 - **Score pro:** pesi fonti, Unified+Confidence+Risk 0–100, Priorità calendario, override meteo/assenze, Bet Type Recommender (`pro_scores.py`).
 - **GHA Asian timeout:** `TimeoutError` su un giorno → skip (retry HTTP); `notify_cloud` non crasha se Asian è lento.
-- **Settle secondari:** cards/corners FD + scorer FotMob in `history.settle_pending`.
+- **Settle secondari:** Sofascore primario + cards/corners FD fallback + scorer Sofascore/FotMob in `history.settle_pending`.
 - **Phasing-out backfill:** fit solo live quando `n_rich_live ≥ 150`.
 - **GHA pre-match:** workflow `odds-prefresh.yml` (2×/giorno `--odds-update`).
 - **Connettori:** `http_client` UA rotation; Betfair cache stale su errori CI.

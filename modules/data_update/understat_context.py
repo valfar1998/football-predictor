@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from modules.data_update.sd_compat import quiet_soccerdata, season_codes
+from modules.data_update.sd_compat import assert_soccerdata_available, quiet_soccerdata, season_codes
 
 ROOT = Path(__file__).resolve().parents[2]
 PROCESSED = ROOT / "data" / "processed"
@@ -49,7 +49,7 @@ def download_understat_context(
     seasons = season_codes(seasons)
     emit(on_progress, 0.05, "Understat: avvio…")
     try:
-        import soccerdata as sd
+        sd = assert_soccerdata_available()
     except Exception as exc:
         return {"ok": False, "n_teams": 0, "error": f"soccerdata non disponibile: {exc}"}
 
@@ -141,7 +141,7 @@ def download_understat_players(
     seasons = season_codes(seasons)
     emit(on_progress, 0.78, "Player season stats…")
     try:
-        import soccerdata as sd
+        sd = assert_soccerdata_available()
     except Exception as exc:
         return {"ok": False, "n_players": 0, "error": str(exc)}
     if us is None:

@@ -102,22 +102,37 @@ def _fill_book_odds(
     odds_source: str,
     match: dict | None,
     source_name: str,
+    *,
+    prefer_prefixes: tuple[str, ...] = (),
+    prefer_core: bool = False,
 ) -> tuple[dict, str]:
+    """Riempie quote mancanti. ``prefer_prefixes``/``prefer_core`` sovrascrivono valori già presenti."""
     if not match:
         return odds, odds_source
     filled = False
+
+    def _set(dst_k: str, val: Any, *, force: bool) -> None:
+        nonlocal filled
+        if val is None or isinstance(val, (dict, list)):
+            return
+        if force or odds.get(dst_k) is None:
+            odds[dst_k] = val
+            filled = True
+
     for src_k, dst_k in _BOOK_FILL:
-        if odds.get(dst_k) is None and match.get(src_k) is not None:
-            odds[dst_k] = match[src_k]
-            filled = True
+        _set(dst_k, match.get(src_k), force=prefer_core)
     for k, v in match.items():
-        if not str(k).startswith("corners_"):
-            continue
-        if odds.get(k) is None and v is not None and not isinstance(v, (dict, list)):
-            odds[k] = v
-            filled = True
+        sk = str(k)
+        if sk.startswith("corners_") or sk.startswith("shots_"):
+            force = any(sk.startswith(p) for p in prefer_prefixes)
+            _set(sk, v, force=force)
     if filled and odds_source not in {"asianbetsoccer"}:
         odds_source = source_name
+    # Corner/tiri Kambi: etichetta dedicata anche se 1X2 resta asian
+    if prefer_prefixes and any(
+        str(k).startswith(p) and match.get(k) is not None for k in match for p in prefer_prefixes
+    ):
+        odds["side_odds_source"] = source_name
     return odds, odds_source
 
 
@@ -161,6 +176,30 @@ def _collect_match_odds(
                 odds[key] = val
         odds_source = "asianbetsoccer"
         market_move = summarize_moves(asian)
+    # Kambi = fonte book primaria (1X2/O/U gap-fill; corner/tiri overwrite)
+    kb_match = None
+    if kambi_events:
+        try:
+            from modules.data_update.kambi_football import lookup_kambi_football
+
+            kb_match = lookup_kambi_football(
+                home,
+                away,
+                events=kambi_events,
+                kickoff_date=day,
+                include_corners=True,
+                include_shots=True,
+            )
+        except Exception:
+            pass
+    odds, odds_source = _fill_book_odds(
+        odds,
+        odds_source,
+        kb_match,
+        "kambi_unibet",
+        prefer_prefixes=("corners_", "shots_"),
+        prefer_core=odds_source not in {"asianbetsoccer"},
+    )
     pinnacle_match = None
     if pinnacle_events:
         try:
@@ -190,17 +229,6 @@ def _collect_match_odds(
         except Exception:
             pass
     odds, odds_source = _fill_book_odds(odds, odds_source, bf_match, "betfair")
-    kb_match = None
-    if kambi_events:
-        try:
-            from modules.data_update.kambi_football import lookup_kambi_football
-
-            kb_match = lookup_kambi_football(
-                home, away, events=kambi_events, kickoff_date=day, include_corners=False
-            )
-        except Exception:
-            pass
-    odds, odds_source = _fill_book_odds(odds, odds_source, kb_match, "kambi_unibet")
     return odds, odds_source, market_move
 
 

@@ -12,7 +12,7 @@ from typing import Any
 import pandas as pd
 from lxml import html
 
-from modules.data_update.sd_compat import quiet_soccerdata, season_codes
+from modules.data_update.sd_compat import assert_soccerdata_available, quiet_soccerdata, season_codes
 
 ROOT = Path(__file__).resolve().parents[2]
 PROCESSED = ROOT / "data" / "processed"
@@ -76,7 +76,7 @@ def _parse_preview_style(path: Path, home: str, away: str) -> list[dict[str, Any
 def download_whoscored_context(*, seasons: list[int] | None = None) -> dict[str, Any]:
     seasons = season_codes(seasons)
     try:
-        import soccerdata as sd
+        sd = assert_soccerdata_available()
         from soccerdata._config import DATA_DIR
     except Exception as exc:
         return {"ok": False, "n_missing": 0, "error": f"soccerdata non disponibile: {exc}"}

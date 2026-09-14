@@ -646,8 +646,11 @@ def _l_market(league: str | None, play: dict[str, Any]) -> tuple[float, str]:
         "latam": 0.85,
         "global": 0.82,
     }.get(cid, 0.82)
-    # mercati esotici un filo meno urgenti a parità di EV
+    # mercati esotici un filo meno urgenti a parità di EV;
+    # corner con quota reale = mercato primario (niente declassamento)
     g = str(play.get("group") or "1x2").lower()
+    if g == "corners" and play.get("odds_real"):
+        return round(_clip(base, 0.75, 1.15), 3), f"{cid} · corner"
     if g in {"cards", "corners", "scorer", "exact", "parity"}:
         base *= 0.90
         return round(_clip(base, 0.75, 1.15), 3), f"{cid} · mercato {g}"
@@ -796,6 +799,11 @@ def bet_type_recommender(
         elif p_over <= 0.42 and code.startswith("U"):
             b = 0.35
         add("ou", "Over / Under", m, bonus=b)
+    # Corner = mercato preferito in ranking Rec (allinea pick primario)
+    for m in grouped.get("corners") or []:
+        add("corners", "Corner O/U", m, bonus=0.85)
+    for m in grouped.get("shots") or []:
+        add("shots", "Tiri O/U", m, bonus=0.45)
     for m in grouped.get("btts") or []:
         add("btts", "Gol / No gol", m, bonus=0.3 if abs(p_btts - 0.5) >= 0.08 else 0.05)
     for m in grouped.get("multigol") or []:

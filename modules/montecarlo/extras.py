@@ -1,4 +1,4 @@
-"""λ cartellini / corner: FD match rates → FBref match logs → season/crosses → proxy λ."""
+"""λ cartellini / corner / tiri: FD match rates → FBref → proxy λ."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def match_side_extras(
     fb_match_home: dict[str, Any] | None = None,
     fb_match_away: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Ritorna λ cartellini e corner (somma delle due squadre) con priorità fonti."""
+    """Ritorna λ cartellini, corner e tiri (somma squadre) con priorità fonti."""
     # --- Cards ---
     cards_src = "proxy_lambda"
     hy = _avg(fd_home, "cards_y_avg")
@@ -102,9 +102,6 @@ def match_side_extras(
             cx_a = _p90(fb_away, "crosses_p90")
             cc_h = _p90(fb_home, "crosses_conc_p90")
             cc_a = _p90(fb_away, "crosses_conc_p90")
-            poss_h = _p90(fb_home, "poss") if fb_home and fb_home.get("poss") is not None else None
-            poss_a = _p90(fb_away, "poss") if fb_away and fb_away.get("poss") is not None else None
-            # poss is already %, not p90 — fix
             try:
                 poss_h = float(fb_home["poss"]) if fb_home and fb_home.get("poss") is not None else None
                 poss_a = float(fb_away["poss"]) if fb_away and fb_away.get("poss") is not None else None
@@ -123,9 +120,36 @@ def match_side_extras(
                 corners_src = "proxy_lambda"
     lam_corners = max(6.5, min(14.5, float(lam_corners)))
 
+    # --- Shots (totali partita) ---
+    shots_src = "proxy_lambda"
+    sh = _avg(fb_home, "shots", "sh", "shots_avg")
+    sa = _avg(fb_away, "shots", "sh", "shots_avg")
+    sh_p90 = _rate(fb_home, "shots") or _p90(fb_home, "shots_p90")
+    sa_p90 = _rate(fb_away, "shots") or _p90(fb_away, "shots_p90")
+    if sh_p90 is not None and sa_p90 is not None:
+        lam_shots = sh_p90 + sa_p90
+        shots_src = "fbref_p90"
+    elif sh is not None and sa is not None:
+        n_h = float((fb_home or {}).get("n90") or (fb_home or {}).get("mp") or 0)
+        n_a = float((fb_away or {}).get("n90") or (fb_away or {}).get("mp") or 0)
+        if n_h >= 3 and n_a >= 3 and sh > 40 and sa > 40:
+            lam_shots = sh / n_h + sa / n_a
+            shots_src = "fbref_season"
+        else:
+            lam_shots = sh + sa
+            shots_src = "fbref_avg"
+    else:
+        lam_shots = 22.0 + 3.2 * (float(lambda_home) + float(lambda_away) - 2.4)
+        shots_src = "proxy_lambda"
+    # Blend soft con corner (tattica: più corner ↔ più tiri periferici)
+    lam_shots = 0.85 * float(lam_shots) + 0.15 * (float(lam_corners) * 1.85)
+    lam_shots = max(16.0, min(34.0, float(lam_shots)))
+
     return {
         "lambda_cards": round(lam_cards, 3),
         "lambda_corners": round(lam_corners, 3),
+        "lambda_shots": round(lam_shots, 3),
         "cards_source": cards_src,
         "corners_source": corners_src,
+        "shots_source": shots_src,
     }
