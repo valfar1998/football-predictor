@@ -1,12 +1,14 @@
 # Roadmap — stato e prossimi passi
 
-Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-09-14** (Kambi primario corner/tiri; ROI voto≥8).
+Allineato a `PROJECT_BRIEF_football.md`. **Aggiornato: 2026-09-14** (freeze voto Telegram per ROI).
 
 **Regola d’oro:** live/contesto fragile → quadro/voto/no_bet; EV/Kelly solo da modelli/calibrazione su OOF o settled.
 
 **Apprendimento online:** fit solo su righe **trainable** (riche). Le ~679 live vecchie senza quota/EV/fattori sono **ignorate**. Live ricche ×5 + backfill synthetic ×4 nel fit.
 
-**Convenzione:** dopo ogni modifica al codice, aggiornare **questo file** e `PROJECT_BRIEF.md`.
+**Freeze alert:** notifica Telegram voto ≥8 → `score_locked` su storico; ROI usa voto/quota della notifica, non il ricalcolo pre-KO.
+
+**Convenzione:** dopo ogni modifica al codice, aggiornare **questo file** e `PROJECT_BRIEF_football.md`.
 
 ---
 
@@ -81,6 +83,8 @@ Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-09-14** (Kambi primario corne
 
 ## Chiusi (codice / recenti)
 
+- **UI nascondi non giocabili:** default nasconde no-bet **e** N/D/invalidi (non solo no-bet).
+- **Tipo consiglio allineato:** finish-early su tutti i gruppi (scorer lazy); pick primario = corner o miglior playable; `advice_groups`/`best_by_group` in calendario; filtro UI su pick o gruppi secondari; no_bet soft sugli esplorativi.
 - **Fix corner Solo quote:** `ensure_side_markets_on_prediction` (p MC corner/tiri sul reuse); no_bet non applica steam/residual 1X2 ai corner; linee 6.5–13.5.
 - **Kambi primario + tiri:** quote corner/tiri da Kambi betoffers (overwrite); λ/MC `shots_*`; pick focus `CORN*`; settle `SHOT*` via Sofascore. ROI paper già gated a voto unificato ≥8.
 - **Sofascore post-match primario:** `sofascore_postmatch.py` + hook in `settle_pending` (prima di FD/mondo); stats JSON per analisi; scorer Sofascore→FotMob.
@@ -96,6 +100,7 @@ Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-09-14** (Kambi primario corne
 - **Solo quote fermo a 0%:** progresso in-process + `python -u` sugli CLI figli.
 - **Score pro:** pesi fonti, Unified+Confidence+Risk 0–100, Priorità calendario, override meteo/assenze, Bet Type Recommender (`pro_scores.py`).
 - **GHA Asian timeout:** `TimeoutError` su un giorno → skip (retry HTTP); `notify_cloud` non crasha se Asian è lento.
+- **Freeze voto Telegram:** `score_locked` + `score_live`/`quota_live`; ROI allineato alla notifica.
 - **Settle secondari:** Sofascore primario + cards/corners FD fallback + scorer Sofascore/FotMob in `history.settle_pending`.
 - **Phasing-out backfill:** fit solo live quando `n_rich_live ≥ 150`.
 - **GHA pre-match:** workflow `odds-prefresh.yml` (2×/giorno `--odds-update`).

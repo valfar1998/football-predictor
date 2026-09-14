@@ -2,7 +2,7 @@
 
 Sintesi aggiornata del progetto **football-predictor**  
 Repo: [github.com/valfar1998/football-predictor](https://github.com/valfar1998/football-predictor) · branch `main`  
-Ultimo aggiornamento: **2026-09-14** — fix Solo quote: inietta p MC corner/tiri sul reuse + no_bet side-market; Kambi primario; ROI voto≥8.
+Ultimo aggiornamento: **2026-09-14** — freeze voto Telegram → ROI; fix Solo quote side-market; Kambi; ROI voto≥8.
 
 Scopo di questo file: dare a un altro modello / analista contesto sufficiente per suggerire miglioramenti **senza** dover leggere tutto il codice.
 
@@ -455,7 +455,7 @@ Settle (`history.settle_pending`): **Sofascore Big 5 primo** (gol + HY/HC se sta
 ## 5. Advisor (value + voto + filtri)
 
 ### 5.0 Selezione pick primario
-Ordine in `advise.py`: se esiste almeno un mercato `CORN*` con **quota reale** (preferenza **Kambi**) e **EV ≥ `min_ev_play`** → quello è `play` (focus value-bet corner). Altrimenti fallback 1X2 / O/U / tiri (`SHOT*`). Output anche `play_corner` e `play_shot`. `bet_rec` bonus alto corner (+ tiri).
+Ordine in `advise.py`: priorità **corner** (`CORN*` + quota reale, preferenza **Kambi**, EV ≥ `min_ev_play`); altrimenti il miglior mercato giocabile tra **tutti i Tipo consiglio** (1X2, DC, AH, O/U, BTTS, team, multigol, parity, exact, cards, shots, combo; scorer lazy). Output anche `play_corner` / `play_shot` / `play_cards`, `best_by_group`, `advice_groups`, `playable_groups`. UI filtro Tipo consiglio usa `pick_group` **o** `advice_groups`. Mercati esplorativi (corner/tiri/cards/scorer/multigol/parity/exact/combo): `no_bet` solo su EV/quota (no steam/residual/sharp 1X2). `bet_rec` bonus alto corner (+ tiri/cards).
 
 Quote book: **Kambi primario** (1X2/O/U se non Asian; **corner/tiri overwrite**); Pinnacle/Betfair solo gap-fill. Asian resta per steam / sharp.
 
@@ -463,7 +463,8 @@ Quote book: **Kambi primario** (1X2/O/U se non Asian; **corner/tiri overwrite**)
 De-vig, EV cons vs sharp, Kelly ¼; `calibrated_prob` = p × reliability bin (n≥30) × `online_p_factor` **solo 1X2** (cap ±6%, da bias live ricche se n≥30). Soft Kelly se residual in produzione. IC 1X2 fragile → Kelly ×0.70, non no_bet.
 
 ### 5.2 Filtri `no_bet`
-**Veto:** EV/sharp sotto `min_ev_play`, quota ipotetica, steam contrario, **pick fuori dal set conformal del suo mercato**, 1X2 con p_cons < 32%, accordo spezzato, residual primary (solo se produzione).  
+**Veto (core 1X2/O/U/AH/BTTS/DC/team):** EV/sharp sotto `min_ev_play`, quota ipotetica, steam contrario, **pick fuori dal set conformal del suo mercato**, 1X2 con p_cons < 32%, accordo spezzato, residual primary (solo se produzione).  
+**Esplorativi (corners/shots/cards/scorer/multigol/parity/exact/combo):** solo EV/quota/probabilità — niente steam/sharp/residual/conformal O-U.  
 **Non veto:** IC largo, set 1X2 a 3 esiti, O/U/AH conformal su un pick di un altro mercato. Quelli vanno su voto/Kelly.
 
 ### 5.3–5.4 Voto e quadro
@@ -477,7 +478,8 @@ Ridge WF + cluster; gate **n≥80** settled con EV; `adj_ev`, soft Kelly, primar
 
 ### 5.7 Paper trading
 Flat, ROI @ quota, Kelly equity, max DD, Sharpe, WF ROI, breakdown.  
-**Filtro fisso:** solo partite con **voto unificato ≥ 8** (`ROI_MIN_SCORE` in `learn_policy.py`).
+**Filtro fisso:** solo partite con **voto unificato ≥ 8** (`ROI_MIN_SCORE` in `learn_policy.py`).  
+**Freeze Telegram:** al primo alert voto (GIOCA / da guardare) si congelano `score_unified`, pick, action e `quota_pick` (`score_locked=1`). I refresh successivi aggiornano solo `score_live` / `quota_live`; il ROI resta allineato alla notifica.
 
 ### 5.8 Online learning (`online_learn.py` + `learn_policy.py`)
 Dopo settle / bottone **Apprendi da partite chiuse**: fit **solo su righe trainable** (live ricche + backfill synthetic); live incomplete escluse. Aggiorna reliability bins (blend fino 68% se aggressive), `online_p_factor`, `min_ev_play`, residual fit, pesi data_signal.  

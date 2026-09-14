@@ -1,4 +1,8 @@
-"""Avvisi Telegram: GIOCA (voto ≥8 + action gioca), da guardare (voto ≥8 + no bet), spread Raro (giocabilità >8)."""
+"""Avvisi Telegram: GIOCA (voto ≥8 + action gioca), da guardare (voto ≥8 + no bet), spread Raro (giocabilità >8).
+
+Al primo invio di un alert voto (gioca/watch) il score_unified e la quota vengono
+congelati in our_history: i refresh successivi non li sovrascrivono (ROI = notifica).
+"""
 
 from __future__ import annotations
 
@@ -285,7 +289,16 @@ def _score_alerts(rows: list[dict]) -> dict[str, list[dict]]:
             hist = _hist_phrase(score)
             if hist:
                 body.append(f"Storico voto {score}: {hist}")
-            gioca.append({"id": key, "kind": "gioca", "text": "\n".join(body), "sort": -score})
+            gioca.append(
+                {
+                    "id": key,
+                    "kind": "gioca",
+                    "text": "\n".join(body),
+                    "sort": -score,
+                    "score": score,
+                    "row": row,
+                }
+            )
             continue
 
         if action not in {"no_bet", "invalido", "n/d"}:
@@ -303,7 +316,16 @@ def _score_alerts(rows: list[dict]) -> dict[str, list[dict]]:
             body.append(f"Stato: {action}")
         if note:
             body.append(note[:220])
-        watch.append({"id": key, "kind": "watch", "text": "\n".join(body), "sort": -score})
+        watch.append(
+            {
+                "id": key,
+                "kind": "watch",
+                "text": "\n".join(body),
+                "sort": -score,
+                "score": score,
+                "row": row,
+            }
+        )
     return {"gioca": gioca, "watch": watch}
 
 
@@ -445,6 +467,7 @@ def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False
     )
 
     sent_n = 0
+    freeze_info: dict = {}
     if dry_run:
         for msg, _ids in messages:
             print(msg)
@@ -455,14 +478,34 @@ def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False
         else:
             now = _now().isoformat()
             changed = False
+            sent_alert_ids: list[str] = []
             for msg, ids in messages:
                 if send_message(msg):
                     sent_n += 1
                     for key in ids:
                         sent_ids[key] = now
+                        sent_alert_ids.append(key)
                     changed = True
             if changed:
                 _save_sent(sent_ids)
+            # Congela voto/quota delle sole notifiche voto effettivamente inviate
+            to_freeze = [
+                a
+                for a in (fresh_gioca + fresh_watch)
+                if a.get("id") in set(sent_alert_ids)
+            ]
+            if to_freeze:
+                try:
+                    from modules.data_update.history import freeze_alerts_batch
+
+                    freeze_info = freeze_alerts_batch(to_freeze)
+                    print(
+                        f"telegram freeze voto: {freeze_info.get('frozen', 0)} nuovi, "
+                        f"{freeze_info.get('skipped', 0)} già bloccati"
+                    )
+                except Exception as exc:
+                    freeze_info = {"ok": False, "error": str(exc)}
+                    print(f"telegram freeze voto skip: {exc}")
 
     info = {
         "n_gioca": found["n_gioca"],
@@ -475,6 +518,7 @@ def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False
         "n_new_spread": len(fresh_spread),
         "n_messages": len(messages),
         "n_sent": sent_n,
+        "score_freeze": freeze_info,
         "dry_run": dry_run,
         "status": telegram_status(),
     }

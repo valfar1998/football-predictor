@@ -92,6 +92,12 @@ _EXTRA_COLS = {
     "pick_label": "TEXT",
     "sofascore_match_id": "INTEGER",
     "sofascore_stats": "TEXT",
+    # Congelamento voto/quota al primo alert Telegram (ROI allineato alla notifica)
+    "score_locked": "INTEGER",
+    "score_live": "INTEGER",
+    "quota_live": "REAL",
+    "alert_frozen_at": "TEXT",
+    "alert_kind": "TEXT",
 }
 
 
@@ -249,6 +255,11 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
         ("pick_label", None),
         ("sofascore_match_id", None),
         ("sofascore_stats", None),
+        ("score_locked", 0),
+        ("score_live", None),
+        ("quota_live", None),
+        ("alert_frozen_at", None),
+        ("alert_kind", None),
     ):
         rec.setdefault(k, default)
     rec["data_factors"] = _json_dump(rec.get("data_factors"))
@@ -261,6 +272,30 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
         rec["away_goals"] = prev["away_goals"]
         rec["hit"] = prev["hit"]
         rec["settled_at"] = prev["settled_at"]
+    # Se già congelato da Telegram, l'archivio aggiorna solo lo snapshot "live"
+    if prev and int(prev["score_locked"] or 0) == 1:
+        rec["score_live"] = rec.get("score_unified")
+        rec["quota_live"] = rec.get("quota_pick")
+        rec["score_locked"] = 1
+        rec["alert_frozen_at"] = prev["alert_frozen_at"]
+        rec["alert_kind"] = prev["alert_kind"]
+        for keep in (
+            "score_unified",
+            "score",
+            "pick",
+            "action",
+            "quota_pick",
+            "ev_cons",
+            "probability",
+            "pick_group",
+            "pick_label",
+        ):
+            if prev[keep] is not None:
+                rec[keep] = prev[keep]
+    elif rec.get("score_live") is None:
+        rec["score_live"] = rec.get("score_unified")
+    if rec.get("quota_live") is None:
+        rec["quota_live"] = rec.get("quota_pick")
     conn.execute(
         """
         INSERT INTO matches (
@@ -269,27 +304,42 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
             covered, home_goals, away_goals, result, hit, saved_at, settled_at,
             quota_pick, agree_share, data_edge, move_rank, residual, adj_ev,
             data_factors, no_bet_reasons, pick_group, model_cluster, ev_sharp,
-            context_partial, synthetic_backfill,             clv, quota_close, beat_close,
+            context_partial, synthetic_backfill, clv, quota_close, beat_close,
             quadro_agree_n, quadro_votes_n,
-            fotmob_match_id, pick_label, sofascore_match_id, sofascore_stats
+            fotmob_match_id, pick_label, sofascore_match_id, sofascore_stats,
+            score_locked, score_live, quota_live, alert_frozen_at, alert_kind
         ) VALUES (
             :match_key, :date, :time, :home, :away, :league, :country, :pick, :action,
             :score, :score_unified, :ev_cons, :probability, :odds_source, :skip_reason,
             :covered, :home_goals, :away_goals, :result, :hit, :saved_at, :settled_at,
             :quota_pick, :agree_share, :data_edge, :move_rank, :residual, :adj_ev,
             :data_factors, :no_bet_reasons, :pick_group, :model_cluster, :ev_sharp,
-            :context_partial, :synthetic_backfill,             :clv, :quota_close, :beat_close,
+            :context_partial, :synthetic_backfill, :clv, :quota_close, :beat_close,
             :quadro_agree_n, :quadro_votes_n,
-            :fotmob_match_id, :pick_label, :sofascore_match_id, :sofascore_stats
+            :fotmob_match_id, :pick_label, :sofascore_match_id, :sofascore_stats,
+            :score_locked, :score_live, :quota_live, :alert_frozen_at, :alert_kind
         )
         ON CONFLICT(match_key) DO UPDATE SET
             time=excluded.time, league=excluded.league, country=excluded.country,
-            pick=excluded.pick, action=excluded.action, score=excluded.score,
-            score_unified=excluded.score_unified, ev_cons=excluded.ev_cons,
-            probability=excluded.probability, odds_source=excluded.odds_source,
+            pick=CASE WHEN matches.score_locked=1 THEN matches.pick ELSE excluded.pick END,
+            action=CASE WHEN matches.score_locked=1 THEN matches.action ELSE excluded.action END,
+            score=CASE WHEN matches.score_locked=1 THEN matches.score ELSE excluded.score END,
+            score_unified=CASE
+                WHEN matches.score_locked=1 THEN matches.score_unified
+                ELSE excluded.score_unified
+            END,
+            ev_cons=CASE WHEN matches.score_locked=1 THEN matches.ev_cons ELSE excluded.ev_cons END,
+            probability=CASE
+                WHEN matches.score_locked=1 THEN matches.probability
+                ELSE excluded.probability
+            END,
+            odds_source=excluded.odds_source,
             skip_reason=excluded.skip_reason, covered=excluded.covered,
             saved_at=excluded.saved_at,
-            quota_pick=COALESCE(excluded.quota_pick, matches.quota_pick),
+            quota_pick=CASE
+                WHEN matches.score_locked=1 THEN matches.quota_pick
+                ELSE COALESCE(excluded.quota_pick, matches.quota_pick)
+            END,
             agree_share=COALESCE(excluded.agree_share, matches.agree_share),
             data_edge=COALESCE(excluded.data_edge, matches.data_edge),
             move_rank=COALESCE(excluded.move_rank, matches.move_rank),
@@ -297,7 +347,10 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
             adj_ev=COALESCE(excluded.adj_ev, matches.adj_ev),
             data_factors=COALESCE(excluded.data_factors, matches.data_factors),
             no_bet_reasons=COALESCE(excluded.no_bet_reasons, matches.no_bet_reasons),
-            pick_group=COALESCE(excluded.pick_group, matches.pick_group),
+            pick_group=CASE
+                WHEN matches.score_locked=1 THEN COALESCE(matches.pick_group, excluded.pick_group)
+                ELSE COALESCE(excluded.pick_group, matches.pick_group)
+            END,
             model_cluster=COALESCE(excluded.model_cluster, matches.model_cluster),
             ev_sharp=COALESCE(excluded.ev_sharp, matches.ev_sharp),
             clv=COALESCE(excluded.clv, matches.clv),
@@ -306,9 +359,20 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
             quadro_agree_n=COALESCE(excluded.quadro_agree_n, matches.quadro_agree_n),
             quadro_votes_n=COALESCE(excluded.quadro_votes_n, matches.quadro_votes_n),
             fotmob_match_id=COALESCE(excluded.fotmob_match_id, matches.fotmob_match_id),
-            pick_label=COALESCE(excluded.pick_label, matches.pick_label),
+            pick_label=CASE
+                WHEN matches.score_locked=1 THEN COALESCE(matches.pick_label, excluded.pick_label)
+                ELSE COALESCE(excluded.pick_label, matches.pick_label)
+            END,
             sofascore_match_id=COALESCE(excluded.sofascore_match_id, matches.sofascore_match_id),
             sofascore_stats=COALESCE(excluded.sofascore_stats, matches.sofascore_stats),
+            score_live=COALESCE(excluded.score_live, excluded.score_unified, matches.score_live),
+            quota_live=COALESCE(excluded.quota_live, excluded.quota_pick, matches.quota_live),
+            score_locked=CASE
+                WHEN matches.score_locked=1 THEN 1
+                ELSE COALESCE(excluded.score_locked, 0)
+            END,
+            alert_frozen_at=COALESCE(matches.alert_frozen_at, excluded.alert_frozen_at),
+            alert_kind=COALESCE(matches.alert_kind, excluded.alert_kind),
             context_partial=CASE
                 WHEN matches.synthetic_backfill=0 AND excluded.synthetic_backfill=1 THEN matches.context_partial
                 ELSE COALESCE(excluded.context_partial, matches.context_partial)
@@ -835,6 +899,193 @@ def archive_upcoming(rows: list[dict[str, Any]]) -> dict[str, Any]:
         }
     finally:
         conn.close()
+
+
+def freeze_score_at_alert(
+    row: dict[str, Any],
+    *,
+    kind: str,
+    score: int | None = None,
+) -> dict[str, Any]:
+    """Congela voto/pick/quota al momento della notifica Telegram (una sola volta).
+
+    I refresh successivi aggiornano solo score_live/quota_live; ROI e apprendimento
+    restano sul voto della notifica.
+    """
+    from modules.data_update.team_names import resolve_known_team
+
+    home = resolve_known_team(row.get("home") or "") or row.get("home")
+    away = resolve_known_team(row.get("away") or "") or row.get("away")
+    day = str(row.get("date") or "")[:10]
+    if not day or not home or not away:
+        return {"ok": False, "error": "match incompleto"}
+    try:
+        su = int(score if score is not None else (row.get("score_unified") or row.get("score")))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "voto assente"}
+    if su < 1 or su > 10:
+        return {"ok": False, "error": f"voto fuori range: {su}"}
+
+    quota = _quota_from_row(row, pick=row.get("pick"))
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    kind_s = str(kind or "gioca").strip().lower()
+    if kind_s not in {"gioca", "watch"}:
+        kind_s = "gioca"
+
+    conn = _connect()
+    try:
+        _migrate_jsonl(conn)
+        key = _key({"date": day, "home": home, "away": away})
+        prev = conn.execute("SELECT * FROM matches WHERE match_key=?", (key,)).fetchone()
+        if prev and int(prev["score_locked"] or 0) == 1:
+            return {
+                "ok": True,
+                "already_locked": True,
+                "match_key": key,
+                "score_unified": prev["score_unified"],
+                "alert_kind": prev["alert_kind"],
+            }
+
+        try:
+            sc_int = int(row.get("score")) if row.get("score") is not None else su
+        except (TypeError, ValueError):
+            sc_int = su
+
+        rec = {
+            "match_key": key,
+            "date": day,
+            "time": row.get("time") or (prev["time"] if prev else ""),
+            "home": home,
+            "away": away,
+            "league": row.get("league") or (prev["league"] if prev else ""),
+            "country": row.get("country") or (prev["country"] if prev else ""),
+            "pick": row.get("pick") or (prev["pick"] if prev else None),
+            "action": row.get("action") or (prev["action"] if prev else kind_s),
+            "score": sc_int,
+            "score_unified": su,
+            "ev_cons": row.get("ev_cons") if row.get("ev_cons") is not None else (prev["ev_cons"] if prev else None),
+            "probability": row.get("probability")
+            if row.get("probability") is not None
+            else (prev["probability"] if prev else None),
+            "odds_source": row.get("odds_source") or (prev["odds_source"] if prev else None),
+            "skip_reason": row.get("skip_reason"),
+            "covered": 1,
+            "home_goals": prev["home_goals"] if prev else None,
+            "away_goals": prev["away_goals"] if prev else None,
+            "result": prev["result"] if prev else None,
+            "hit": prev["hit"] if prev else None,
+            "saved_at": now,
+            "settled_at": prev["settled_at"] if prev else None,
+            "quota_pick": quota if quota is not None else (prev["quota_pick"] if prev else None),
+            "agree_share": row.get("agree_share")
+            if row.get("agree_share") is not None
+            else (prev["agree_share"] if prev else None),
+            "data_edge": row.get("data_edge") if row.get("data_edge") is not None else (prev["data_edge"] if prev else None),
+            "move_rank": row.get("move_rank") if row.get("move_rank") is not None else (prev["move_rank"] if prev else None),
+            "residual": row.get("residual") if row.get("residual") is not None else (prev["residual"] if prev else None),
+            "adj_ev": row.get("adj_ev") if row.get("adj_ev") is not None else (prev["adj_ev"] if prev else None),
+            "data_factors": row.get("data_factors") or (prev["data_factors"] if prev else None),
+            "no_bet_reasons": row.get("no_bet_reasons"),
+            "pick_group": row.get("pick_group") or (prev["pick_group"] if prev else None),
+            "model_cluster": row.get("model_cluster") or (prev["model_cluster"] if prev else None),
+            "ev_sharp": row.get("ev_sharp") if row.get("ev_sharp") is not None else (prev["ev_sharp"] if prev else None),
+            "context_partial": 0,
+            "synthetic_backfill": 0,
+            "clv": prev["clv"] if prev else row.get("clv"),
+            "quota_close": prev["quota_close"] if prev else row.get("quota_close"),
+            "beat_close": prev["beat_close"] if prev else row.get("beat_close"),
+            "quadro_agree_n": row.get("quadro_agree_n")
+            if row.get("quadro_agree_n") is not None
+            else (prev["quadro_agree_n"] if prev else None),
+            "quadro_votes_n": row.get("quadro_votes_n")
+            if row.get("quadro_votes_n") is not None
+            else (prev["quadro_votes_n"] if prev else None),
+            "fotmob_match_id": row.get("fotmob_match_id") or (prev["fotmob_match_id"] if prev else None),
+            "pick_label": row.get("pick_name") or row.get("pick_label") or (prev["pick_label"] if prev else None),
+            "sofascore_match_id": prev["sofascore_match_id"] if prev else None,
+            "sofascore_stats": prev["sofascore_stats"] if prev else None,
+            "score_locked": 1,
+            "score_live": su,
+            "quota_live": quota,
+            "alert_frozen_at": now,
+            "alert_kind": kind_s,
+        }
+        _upsert(conn, rec, now, keep_result=True)
+        # Forza lock anche se _upsert aveva già prev unlocked: UPDATE esplicito
+        conn.execute(
+            """
+            UPDATE matches SET
+                score_locked=1,
+                score_unified=?,
+                score=?,
+                pick=COALESCE(?, pick),
+                action=COALESCE(?, action),
+                quota_pick=COALESCE(?, quota_pick),
+                ev_cons=COALESCE(?, ev_cons),
+                probability=COALESCE(?, probability),
+                pick_group=COALESCE(?, pick_group),
+                pick_label=COALESCE(?, pick_label),
+                score_live=?,
+                quota_live=COALESCE(?, quota_live),
+                alert_frozen_at=?,
+                alert_kind=?,
+                synthetic_backfill=0
+            WHERE match_key=? AND COALESCE(score_locked, 0)=0
+            """,
+            (
+                su,
+                sc_int,
+                rec["pick"],
+                rec["action"],
+                rec["quota_pick"],
+                rec["ev_cons"],
+                rec["probability"],
+                rec["pick_group"],
+                rec["pick_label"],
+                su,
+                quota,
+                now,
+                kind_s,
+                key,
+            ),
+        )
+        conn.commit()
+        return {
+            "ok": True,
+            "already_locked": False,
+            "match_key": key,
+            "score_unified": su,
+            "quota_pick": rec["quota_pick"],
+            "alert_kind": kind_s,
+            "alert_frozen_at": now,
+        }
+    finally:
+        conn.close()
+
+
+def freeze_alerts_batch(alerts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Congela tutti gli alert voto (gioca/watch) appena inviati su Telegram."""
+    frozen = 0
+    skipped = 0
+    errors: list[str] = []
+    for item in alerts:
+        row = item.get("row")
+        if not isinstance(row, dict):
+            skipped += 1
+            continue
+        kind = str(item.get("kind") or "gioca")
+        try:
+            out = freeze_score_at_alert(row, kind=kind, score=item.get("score"))
+        except Exception as exc:
+            errors.append(str(exc))
+            continue
+        if out.get("ok") and not out.get("already_locked"):
+            frozen += 1
+        elif out.get("already_locked"):
+            skipped += 1
+        else:
+            errors.append(str(out.get("error") or "freeze fail"))
+    return {"ok": True, "frozen": frozen, "skipped": skipped, "errors": errors[:8]}
 
 
 def _float_or_none(v: Any) -> float | None:

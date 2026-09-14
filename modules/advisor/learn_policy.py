@@ -29,7 +29,8 @@ LIVE_1X2_MIN_AGGRESSIVE = 30
 TRAINABLE_1X2_MIN = 60
 LIVE_ROI_MIN = 8
 TRAINABLE_ROI_MIN = 15
-# ROI (paper + min_ev) solo su voto unificato ≥8 — le giocate che si seguono davvero
+# ROI (paper + min_ev) solo su voto unificato ≥8 — le giocate che si seguono davvero.
+# Se score_locked=1 (alert Telegram), score_unified resta quello della notifica.
 ROI_MIN_SCORE = 8
 
 
