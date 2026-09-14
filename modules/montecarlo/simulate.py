@@ -154,7 +154,7 @@ class MonteCarloSimulator:
                     extras_out[f"cards_under_{line}"] = float((cards < line).mean())
             if lam_corners > 1.0:
                 corners = rng.poisson(lam=lam_corners, size=n)
-                for line in (7.5, 8.5, 9.5, 10.5, 11.5, 12.5):
+                for line in (6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5):
                     extras_out[f"corners_over_{line}"] = float((corners > line).mean())
                     extras_out[f"corners_under_{line}"] = float((corners < line).mean())
             if lam_shots > 5.0:

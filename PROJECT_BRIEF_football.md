@@ -2,7 +2,7 @@
 
 Sintesi aggiornata del progetto **football-predictor**  
 Repo: [github.com/valfar1998/football-predictor](https://github.com/valfar1998/football-predictor) · branch `main`  
-Ultimo aggiornamento: **2026-09-14** — **Kambi primario** (corner/tiri); value-bet focus corner; ROI paper solo voto≥8; Sofascore post-match.
+Ultimo aggiornamento: **2026-09-14** — fix Solo quote: inietta p MC corner/tiri sul reuse + no_bet side-market; Kambi primario; ROI voto≥8.
 
 Scopo di questo file: dare a un altro modello / analista contesto sufficiente per suggerire miglioramenti **senza** dover leggere tutto il codice.
 

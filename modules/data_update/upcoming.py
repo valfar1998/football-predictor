@@ -113,7 +113,14 @@ def _fill_book_odds(
 
     def _set(dst_k: str, val: Any, *, force: bool) -> None:
         nonlocal filled
-        if val is None or isinstance(val, (dict, list)):
+        if val is None or isinstance(val, (dict, list, bool)):
+            return
+        sk = str(dst_k)
+        if sk.endswith("_fetched") or sk.endswith("_error") or sk in {"kambi_id", "event_id", "competition", "commence_time", "odds_source"}:
+            return
+        try:
+            float(val)
+        except (TypeError, ValueError):
             return
         if force or odds.get(dst_k) is None:
             odds[dst_k] = val
@@ -472,6 +479,8 @@ def _row_after_covered_advise(
             "alt_pick": None if not alt else alt["code"],
             "alt_name": None if not alt else alt["name"],
             "alt_score": None if not alt else alt["score"],
+            "play_corner": advice.get("play_corner"),
+            "play_shot": advice.get("play_shot"),
             "p_home": mc.get("home_win", row.get("p_home")),
             "p_draw": mc.get("draw", row.get("p_draw")),
             "p_away": mc.get("away_win", row.get("p_away")),
@@ -579,6 +588,12 @@ def refresh_upcoming_odds(*, on_progress=None, archive: bool = True) -> dict:
             continue
         fx = _fx_proxy_from_row(row)
         odds, odds_source, market_move = _collect_match_odds(fx, home, away, pinn, bf, kb)
+        try:
+            from modules.montecarlo.extras import ensure_side_markets_on_prediction
+
+            pred = ensure_side_markets_on_prediction(dict(pred))
+        except Exception:
+            pass
         wx = (pred.get("weather") if isinstance(pred.get("weather"), dict) else None) or (
             (row.get("validation") or {}).get("weather") if isinstance(row.get("validation"), dict) else None
         )
@@ -855,8 +870,11 @@ def build_upcoming(
             )
             if can_reuse:
                 try:
+                    from modules.montecarlo.extras import ensure_side_markets_on_prediction
+
+                    pred_use = ensure_side_markets_on_prediction(dict(prev_pred))
                     advice = advise(
-                        prev_pred,
+                        pred_use,
                         odds,
                         market_move=market_move,
                         odds_from_asian=(odds_source == "asianbetsoccer"),
@@ -881,7 +899,7 @@ def build_upcoming(
                             odds=odds,
                             odds_source=odds_source,
                             market_move=market_move,
-                            prediction=prev_pred,
+                            prediction=pred_use,
                             weather=wx,
                         )
                     )

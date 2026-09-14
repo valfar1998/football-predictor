@@ -930,7 +930,10 @@ def _actionable(m: dict[str, Any]) -> bool:
         return 0.12 <= p <= 0.55
     if m.get("group") in {"dc", "dnb"}:
         return 0.52 <= p <= 0.88
-    if m.get("group") in {"ou", "btts", "team", "cards", "corners"}:
+    # Corner/tiri: fascia più ampia (Under bassi spesso value con p~0.35–0.40)
+    if m.get("group") in {"corners", "shots"}:
+        return 0.32 <= p <= 0.82
+    if m.get("group") in {"ou", "btts", "team", "cards"}:
         return 0.42 <= p <= 0.80
     if m.get("group") in {"multigol", "parity"}:
         return 0.22 <= p <= 0.72
@@ -1213,7 +1216,7 @@ def advise(
 
     markets_corners = []
     corner_src = str(mc.get("corners_source") or "proxy")
-    for line in (7.5, 8.5, 9.5, 10.5, 11.5, 12.5):
+    for line in (6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5):
         ok, uk = f"corners_over_{line}", f"corners_under_{line}"
         if ok not in mc:
             continue

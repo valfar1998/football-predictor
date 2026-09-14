@@ -81,6 +81,7 @@ Allineato a `PROJECT_BRIEF.md`. **Aggiornato: 2026-09-14** (Kambi primario corne
 
 ## Chiusi (codice / recenti)
 
+- **Fix corner Solo quote:** `ensure_side_markets_on_prediction` (p MC corner/tiri sul reuse); no_bet non applica steam/residual 1X2 ai corner; linee 6.5–13.5.
 - **Kambi primario + tiri:** quote corner/tiri da Kambi betoffers (overwrite); λ/MC `shots_*`; pick focus `CORN*`; settle `SHOT*` via Sofascore. ROI paper già gated a voto unificato ≥8.
 - **Sofascore post-match primario:** `sofascore_postmatch.py` + hook in `settle_pending` (prima di FD/mondo); stats JSON per analisi; scorer Sofascore→FotMob.
 - Progresso `calendario N/M` durante **Aggiorna dati + modello** (95→99%, non più barra ferma).

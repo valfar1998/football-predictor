@@ -161,6 +161,8 @@ def no_bet_reasons(
     residual: dict[str, Any] | None = None,
 ) -> list[str]:
     reasons: list[str] = []
+    group = str(play.get("group") or "")
+    side_market = group in {"corners", "shots", "cards"}
     ev = play.get("ev_cons")
     if ev is None:
         ev = play.get("ev")
@@ -178,11 +180,13 @@ def no_bet_reasons(
             reasons.append(
                 f"probabilità 1X2 {float(p_play):.0%} sotto il minimo giocabile {MIN_PROB_1X2_PLAY:.0%}"
             )
-    if sharp_ev is not None and sharp_ev < min_edge:
-        reasons.append(f"Pinnacle/sharp non offre edge ({sharp_ev:+.1%})")
-    if market_too_liquid_against(play, market_move, alignment, min_rank=min_rank, min_pp=min_pp):
-        reasons.append("mercato troppo liquido contrario (steam forte, quota pick allungata)")
-    if agreement and agreement.get("block_no_bet"):
+    # Steam / sharp / residual sono calibrati su 1X2-O/U gol, non su corner/tiri Kambi
+    if not side_market:
+        if sharp_ev is not None and sharp_ev < min_edge:
+            reasons.append(f"Pinnacle/sharp non offre edge ({sharp_ev:+.1%})")
+        if market_too_liquid_against(play, market_move, alignment, min_rank=min_rank, min_pp=min_pp):
+            reasons.append("mercato troppo liquido contrario (steam forte, quota pick allungata)")
+    if agreement and agreement.get("block_no_bet") and not side_market:
         reasons.append(
             "fonti in disaccordo sul pick ("
             + (agreement.get("notes") or ["quadro spezzato"])[0]
@@ -190,26 +194,26 @@ def no_bet_reasons(
         )
     iv = prob_intervals or {}
     code = str(play.get("code") or "")
-    group = str(play.get("group") or "")
     # 1X2: veto solo se il pick è fuori dal set 90%. IC largo → voto/Kelly, non no_bet.
     if iv.get("ready") and iv.get("set") and code in {"1", "X", "2"}:
         if code not in (iv.get("set") or []):
             reasons.append(f"pick {code} fuori dal set conformal {iv.get('set')}")
-    ou_iv = play.get("conformal_ou25") or iv.get("conformal_ou25") or {}
-    ah_iv = play.get("conformal_ah0") or iv.get("conformal_ah0") or {}
-    blocked = _market_set_block(code, group, ou_iv, ah_iv)
-    if blocked:
-        reasons.append(blocked)
-    if residual and residual.get("primary_block"):
-        reasons.append(
-            f"residual EV filtro primario ({residual.get('residual'):+.3f} ≤ soglia)"
-        )
-    elif residual and residual.get("ready") and residual.get("adj_ev") is not None:
-        if float(residual["adj_ev"]) < min_edge and float(ev or 0) >= min_edge:
+    if not side_market:
+        ou_iv = play.get("conformal_ou25") or iv.get("conformal_ou25") or {}
+        ah_iv = play.get("conformal_ah0") or iv.get("conformal_ah0") or {}
+        blocked = _market_set_block(code, group, ou_iv, ah_iv)
+        if blocked:
+            reasons.append(blocked)
+        if residual and residual.get("primary_block"):
             reasons.append(
-                f"residual EV riduce l'edge a {float(residual['adj_ev']):+.1%} "
-                f"({residual.get('note') or 'second-stage'})"
+                f"residual EV filtro primario ({residual.get('residual'):+.3f} sotto soglia)"
             )
+        elif residual and residual.get("ready") and residual.get("adj_ev") is not None:
+            if float(residual["adj_ev"]) < min_edge and float(ev or 0) >= min_edge:
+                reasons.append(
+                    f"residual EV riduce l'edge a {float(residual['adj_ev']):+.1%} "
+                    f"({residual.get('note') or 'second-stage'})"
+                )
     return reasons
 
 

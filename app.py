@@ -1274,8 +1274,8 @@ with st.sidebar:
         except Exception as exc:
             st.error(f"Errore quote: {exc}")
     st.caption(
-        "Leggero: fd + Asian + Pinnacle/Betfair se cache scaduta. "
-        "Coppe, mondiale e tipster: expander sotto."
+        "Leggero: fd + Asian + **Kambi** (corner/tiri) + Pinnacle/Betfair se cache scaduta. "
+        "Dopo il click i pick `CORN*` possono diventare primari. Coppe/mondiale/tipster: expander sotto."
     )
     try:
         from modules.data_update.history import history_summary
