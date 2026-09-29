@@ -265,6 +265,19 @@ def _prefer_cloud_learn(cloud: dict | None, local: dict | None) -> bool:
 def _install_learn_file(name: str, src: Path) -> Path:
     dest = LEARN_DEST.get(name, MODELS / name)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    if name == "our_history.sqlite":
+        from modules.data_update.history import merge_cloud_history
+
+        info = merge_cloud_history(src, local_db=dest)
+        if not info.get("ok"):
+            raise SystemExit(f"merge storico fallito: {info.get('error')}")
+        print(
+            f"ok merge storico cloud->locale "
+            f"(preserved_settled={info.get('preserved_settled')}, "
+            f"mode={info.get('mode')})",
+            flush=True,
+        )
+        return dest
     shutil.copy2(src, dest)
     return dest
 
@@ -402,6 +415,40 @@ def pull_cloud_model(*, rebuild_calendar: bool = False, on_progress=None) -> dic
                     "«Apprendi da partite chiuse» userà lo storico locale.",
                     flush=True,
                 )
+            # Journal freeze Telegram + settle locali: merge + sync sul SQLite locale
+            try:
+                from modules.data_update.history import (
+                    FREEZE_JOURNAL,
+                    SETTLE_JOURNAL,
+                    apply_settle_journal,
+                    merge_freeze_journal_file,
+                    merge_settle_journal_file,
+                    sync_freeze_state,
+                )
+
+                for src in learn_tmp.rglob("telegram_score_freeze.json"):
+                    merge_freeze_journal_file(src)
+                    print(f"ok merge freeze journal da {src.name}", flush=True)
+                    break
+                for src in learn_tmp.rglob("local_settles.json"):
+                    merge_settle_journal_file(src)
+                    print(f"ok merge settle journal da {src.name}", flush=True)
+                    break
+                if FREEZE_JOURNAL.is_file() or (PROCESSED / "our_history.sqlite").is_file():
+                    fj = sync_freeze_state()
+                    print(f"ok sync freeze state: {fj}", flush=True)
+                try:
+                    from modules.data_update.history import apply_freeze_to_upcoming_file
+
+                    up_ov = apply_freeze_to_upcoming_file()
+                    print(f"ok freeze overlay upcoming: {up_ov}", flush=True)
+                except Exception as exc:
+                    print(f"avviso freeze overlay upcoming: {exc}", flush=True)
+                if SETTLE_JOURNAL.is_file():
+                    sj = apply_settle_journal()
+                    print(f"ok apply settle journal: {sj}", flush=True)
+            except Exception as exc:
+                print(f"avviso freeze/settle journal: {exc}", flush=True)
 
     info: dict = {
         "ok": True,

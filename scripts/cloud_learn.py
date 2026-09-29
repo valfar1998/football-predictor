@@ -151,6 +151,23 @@ def _full_build(*, n_sims: int = 400) -> dict:
 def _run_settle_and_learn(*, skip_learn: bool = False) -> dict:
     """Chiude esiti e aggiorna calibrazione/residual/pesi (apprendimento online)."""
     out: dict = {"learn_skipped_duplicate": skip_learn}
+    # Settle manuali / locali pushati via local_settles.json (prima dell'auto-settle)
+    try:
+        from modules.data_update.history import apply_settle_journal, merge_settle_journal_file, SETTLE_JOURNAL
+
+        if SETTLE_JOURNAL.is_file():
+            merge_settle_journal_file(SETTLE_JOURNAL)
+        sj = apply_settle_journal()
+        out["settle_journal"] = sj
+        if sj.get("applied"):
+            print(
+                f"settle journal: applied={sj.get('applied')} "
+                f"skipped={sj.get('skipped')} n={sj.get('n_journal')}",
+                flush=True,
+            )
+    except Exception as exc:
+        out["settle_journal_error"] = str(exc)
+        print(f"settle journal skip: {exc}", flush=True)
     try:
         from modules.data_update.history import settle_pending
 

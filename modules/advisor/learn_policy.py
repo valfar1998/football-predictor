@@ -33,6 +33,55 @@ TRAINABLE_ROI_MIN = 15
 # Se score_locked=1 (alert Telegram), score_unified resta quello della notifica.
 ROI_MIN_SCORE = 8
 
+# Obiettivi campione paper ROI (roadmap): sblocchi progressivi, non gate codice.
+ROI_SAMPLE_LEVELS: list[dict[str, Any]] = [
+    {"n": 15, "name": "Campione iniziale", "desc": "Segnale per filtri e min_ev adattivo"},
+    {"n": 30, "name": "Validazione economica", "desc": "ROI @ quote credibile (roadmap)"},
+    {"n": 40, "name": "ROI stabile", "desc": "Campione robusto n≥40 settled voto≥8"},
+]
+
+
+def roi_sample_progress(n: int) -> dict[str, Any]:
+    """Stato livello campione ROI: corrente, prossimo obiettivo, residuo."""
+    try:
+        n = max(0, int(n or 0))
+    except (TypeError, ValueError):
+        n = 0
+    levels = ROI_SAMPLE_LEVELS
+    current = None
+    nxt = levels[0]
+    for lv in levels:
+        if n >= int(lv["n"]):
+            current = lv
+            nxt = None
+        else:
+            nxt = lv
+            break
+    if nxt is None and levels:
+        # Oltre l'ultimo livello: mantieni l'ultimo come raggiunto
+        current = levels[-1]
+    target_n = int(nxt["n"]) if nxt else (int(levels[-1]["n"]) if levels else 40)
+    prev_n = int(current["n"]) if current and nxt else 0
+    span = max(1, target_n - prev_n)
+    done = min(1.0, max(0.0, (n - prev_n) / span)) if nxt else 1.0
+    return {
+        "n": n,
+        "current": current,
+        "next": nxt,
+        "target_n": target_n,
+        "remaining": max(0, target_n - n) if nxt else 0,
+        "progress": round(done, 3),
+        "label": (
+            f"Livello sbloccato: {current['name']}"
+            if current and not nxt
+            else (
+                f"Verso {nxt['name']} ({n}/{target_n})"
+                if nxt
+                else f"Campione n={n}"
+            )
+        ),
+    }
+
 
 def score_unified_of(rec: dict[str, Any]) -> int | None:
     for key in ("score_unified", "score"):
@@ -51,6 +100,38 @@ def score_unified_of(rec: dict[str, Any]) -> int | None:
 def meets_roi_score(rec: dict[str, Any], *, min_score: int = ROI_MIN_SCORE) -> bool:
     s = score_unified_of(rec)
     return s is not None and s >= min_score
+
+
+def _has_roi_quota(rec: dict[str, Any]) -> bool:
+    q = rec.get("quota_pick")
+    if isinstance(q, bool) or q is None:
+        return False
+    try:
+        return float(q) >= 1.01
+    except (TypeError, ValueError):
+        return False
+
+
+def is_roi_eligible(rec: dict[str, Any], *, min_score: int = ROI_MIN_SCORE) -> bool:
+    """Campione paper / ROI recente: settled + voto ≥8 + quota.
+
+    - Freeze Telegram (`score_locked=1`): entra sempre (è la giocata notificata).
+    - Altrimenti: serve riga *rich* (esclude storico live incompleto).
+    L'apprendimento ML (bins/residual/pesi) resta su `is_trainable` / `is_rich`.
+    """
+    if rec.get("hit") is None:
+        return False
+    if not meets_roi_score(rec, min_score=min_score):
+        return False
+    if not _has_roi_quota(rec):
+        return False
+    if int(rec.get("score_locked") or 0) == 1:
+        return True
+    return is_rich(rec)
+
+
+def roi_settled(rows: list[dict[str, Any]], *, min_score: int = ROI_MIN_SCORE) -> list[dict[str, Any]]:
+    return [r for r in rows if is_roi_eligible(r, min_score=min_score)]
 
 
 BIN_BLEND_MAX_CONSERVATIVE = 0.40

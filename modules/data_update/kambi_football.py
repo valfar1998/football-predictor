@@ -1,7 +1,8 @@
 """Palinsesto football Unibet via Kambi Guest API (1X2, O/U gol, corner/tiri su evento).
 
 Stesso schema del tennis-predictor (DoH + curl_cffi), sport=football.
-Corner/tiri: non sono nel listView — si arricchiscono on-demand da
+ListView generico + path Big 5 (PL/LaLiga/SerieA/Bundesliga/Ligue1).
+Corner/tiri: non nel listView — prefetch betoffers su Big 5 e/o on-demand
 `/betoffer/event/{id}.json` (Total Corners / Total Shots).
 """
 
@@ -21,7 +22,8 @@ from modules.data_update.cache_policy import is_fresh
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / "data" / "raw" / "kambi_football_odds.json"
 DEFAULT_CLIENT = "ub"
-DEFAULT_LANG = "it_IT"
+# en_GB: nomi squadre allineati a FD/Sofascore (it_IT → "Bayern Monaco" ecc.)
+DEFAULT_LANG = "en_GB"
 DEFAULT_MARKET = "IT"
 DEFAULT_MAX_AGE_MIN = 45.0
 UA = (
@@ -37,6 +39,19 @@ ENDPOINTS = (
         "url": "https://eu-offering.kambicdn.org/offering/v2018/{client}/listView/football.json",
         "doh": "eu-offering.kambicdn.org",
     },
+)
+# listView/football.json è una finestra corta (spesso minor/soon) e omette la maggior
+# parte dei match Big 5. I path per lega coprono l'intero round corrente.
+BIG5_LISTVIEW_PATHS = (
+    "football/england/premier_league/all/matches.json",
+    "football/spain/la_liga/all/matches.json",
+    "football/italy/serie_a/all/matches.json",
+    "football/germany/bundesliga/all/matches.json",
+    "football/france/ligue_1/all/matches.json",
+)
+BETOFFER_HOSTS = (
+    "eu1.offering-api.kambicdn.com",
+    "eu-offering.kambicdn.org",
 )
 SKIP_STATES = frozenset({"FINISHED", "CANCELLED", "ABANDONED", "POSTPONED", "SUSPENDED"})
 CORNER_LINES = (7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 10.5, 11.0, 11.5, 12.0, 12.5)
@@ -152,23 +167,149 @@ def _http_get_json(url: str, *, params: dict[str, str], host: str, ips: list[str
     return None, last_err
 
 
-def _fetch_payload() -> tuple[Any, str | None, str | None]:
+def _fetch_listview_url(url_template: str, *, doh: str) -> tuple[Any, str | None, str | None]:
     client = _client()
     params = _params()
+    url = url_template.format(client=client)
+    host = urlparse(url).hostname or doh
+    ips = _resolve_ips(doh)
+    payload, err = _http_get_json(url, params=params, host=host, ips=ips)
+    return payload, err, host
+
+
+def _fetch_payload() -> tuple[Any, str | None, str | None]:
     errors: list[str] = []
     used_host: str | None = None
     for endpoint in ENDPOINTS:
-        url = endpoint["url"].format(client=client)
-        host = urlparse(url).hostname or endpoint["doh"]
+        used_host = endpoint["doh"]
+        payload, err, host = _fetch_listview_url(endpoint["url"], doh=endpoint["doh"])
         used_host = host
-        ips = _resolve_ips(endpoint["doh"])
-        payload, err = _http_get_json(url, params=params, host=host, ips=ips)
         if payload is not None:
             return payload, None, host
         if err:
             errors.append(f"{host}: {err}")
         time.sleep(0.3)
     return None, "; ".join(errors) or "Kambi non raggiungibile", used_host
+
+
+def _is_big5_competition(competition: str) -> bool:
+    """Solo top-5 europee (no 'Premier League' di Rwanda/Iraq ecc.)."""
+    blob = (competition or "").lower()
+    if any(x in blob for x in ("serie b", "ligue 2", "2. bundes", "segunda", "championship")):
+        return False
+    rules = (
+        (("england", "inghilterra"), ("premier league",)),
+        (("italy", "italia"), ("serie a",)),
+        (("spain", "spagna"), ("la liga", "laliga")),
+        (("germany", "germania"), ("bundesliga",)),
+        (("france", "francia"), ("ligue 1",)),
+    )
+    for countries, leagues in rules:
+        if any(c in blob for c in countries) and any(lg in blob for lg in leagues):
+            return True
+    return False
+
+
+def _merge_events_by_id(*batches: list[dict]) -> list[dict]:
+    by_id: dict[Any, dict] = {}
+    orphans: list[dict] = []
+    for batch in batches:
+        for ev in batch:
+            kid = ev.get("kambi_id")
+            if kid is None:
+                orphans.append(ev)
+                continue
+            prev = by_id.get(kid)
+            if prev is None:
+                by_id[kid] = dict(ev)
+                continue
+            merged = dict(prev)
+            merged.update({k: v for k, v in ev.items() if v is not None})
+            # conserva corner/shot già prefetchati se il nuovo batch non li ha
+            for k, v in prev.items():
+                if (str(k).startswith("corners_") or str(k).startswith("shots_")) and k not in merged:
+                    merged[k] = v
+            by_id[kid] = merged
+    return list(by_id.values()) + orphans
+
+
+def _fetch_big5_payloads(primary_host: str | None) -> tuple[list[dict], list[str]]:
+    """Scarica listView per ogni Big 5; ritorna eventi normalizzati + errori soft."""
+    client = _client()
+    errors: list[str] = []
+    batches: list[dict] = []
+    hosts = []
+    if primary_host:
+        hosts.append(primary_host)
+    for h in BETOFFER_HOSTS:
+        if h not in hosts:
+            hosts.append(h)
+    for path in BIG5_LISTVIEW_PATHS:
+        got = False
+        last_err: str | None = None
+        for host in hosts:
+            url = f"https://{host}/offering/v2018/{client}/listView/{path}"
+            payload, err = _http_get_json(url, params=_params(), host=host, ips=_resolve_ips(host))
+            if payload is None:
+                last_err = err
+                continue
+            rows = _normalize_events(payload)
+            for r in rows:
+                r["listview_path"] = path
+            batches.extend(rows)
+            got = True
+            break
+        if not got:
+            errors.append(f"{path}: {last_err or 'fail'}")
+        time.sleep(0.15)
+    return batches, errors
+
+
+def _prefetch_side_markets(events: list[dict], *, corners: bool = True, shots: bool = False) -> int:
+    """Arricchisce in-place eventi Big 5 con betoffers corner (e opz. tiri)."""
+    if not corners and not shots:
+        return 0
+    try:
+        max_n = int((os.environ.get("KAMBI_PREFETCH_MAX") or "90").strip() or "90")
+    except ValueError:
+        max_n = 90
+    n_done = 0
+    for ev in events:
+        if n_done >= max_n:
+            break
+        if not _is_big5_competition(str(ev.get("competition") or "")):
+            continue
+        kid = ev.get("kambi_id")
+        if kid is None:
+            continue
+        already = any(str(k).startswith("corners_") for k in ev) if corners else True
+        if already and not shots:
+            continue
+        if already and shots and any(str(k).startswith("shots_") for k in ev):
+            continue
+        try:
+            offers = _fetch_event_betoffers(kid)
+            if not offers:
+                continue
+            got = False
+            if corners:
+                corn = _parse_total_corners(offers)
+                if corn:
+                    ev.update(corn)
+                    ev["corners_fetched"] = True
+                    got = True
+            if shots:
+                sh = _parse_total_shots(offers)
+                if sh:
+                    ev.update(sh)
+                    ev["shots_fetched"] = True
+                    got = True
+            if got:
+                n_done += 1
+        except Exception:
+            continue
+        time.sleep(0.12)
+    return n_done
 
 
 def _kambi_decimal(odds_raw: Any) -> float | None:
@@ -341,7 +482,7 @@ def fetch_kambi_football_odds(
     force: bool = False,
     max_age_minutes: float = DEFAULT_MAX_AGE_MIN,
 ) -> dict[str, Any]:
-    """Scarica listView football Unibet/Kambi (1X2 + O/U se presenti)."""
+    """Scarica listView football Unibet/Kambi (1X2 + O/U) + path Big 5 + opz. corners."""
     if not _enabled():
         return {"ok": False, "error": "KAMBI_FOOTBALL_ENABLED=0", "n_events": 0, "events": []}
 
@@ -370,7 +511,20 @@ def fetch_kambi_football_odds(
                 pass
         return {"ok": False, "error": err, "n_events": 0, "events": [], "from_cache": False}
 
-    events = _normalize_events(payload)
+    base_events = _normalize_events(payload)
+    big5_events, big5_errs = _fetch_big5_payloads(host)
+    events = _merge_events_by_id(base_events, big5_events)
+    n_big5 = sum(1 for e in events if _is_big5_competition(str(e.get("competition") or "")))
+
+    prefetch_on = (os.environ.get("KAMBI_PREFETCH_CORNERS") or "1").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    n_pref = 0
+    if prefetch_on and n_big5:
+        n_pref = _prefetch_side_markets(events, corners=True, shots=False)
+
     info = {
         "ok": bool(events),
         "source": "kambi_unibet",
@@ -379,13 +533,24 @@ def fetch_kambi_football_odds(
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "n_matches_raw": len(payload.get("events") or []) if isinstance(payload, dict) else 0,
         "n_events": len(events),
+        "n_big5": n_big5,
+        "n_big5_listview": len(big5_events),
+        "n_corners_prefetched": n_pref,
+        "big5_errors": big5_errs or None,
         "events": events,
         "from_cache": False,
         "error": None if events else "nessun evento football con 1X2",
     }
     CACHE.parent.mkdir(parents=True, exist_ok=True)
     CACHE.write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"  Kambi football OK: {info['n_events']} eventi (host {host})", flush=True)
+    print(
+        f"  Kambi football OK: {info['n_events']} eventi "
+        f"(Big5 listView {len(big5_events)}, in cache {n_big5}, "
+        f"corners prefetch {n_pref}) host {host}",
+        flush=True,
+    )
+    if big5_errs:
+        print(f"  Kambi Big5 soft errors: {'; '.join(big5_errs[:3])}", flush=True)
     return info
 
 
@@ -405,26 +570,98 @@ def _norm(s: str) -> str:
     return "".join(c for c in s if unicodedata.category(c) != "Mn").strip()
 
 
+# football-data.co.uk / FD.org abbreviazioni → forma allineata a Kambi en_GB
+_TEAM_ALIASES: dict[str, str] = {
+    "hsv": "hamburger sv",
+    "hamburger": "hamburger sv",
+    "fc koln": "1. fc koln",
+    "koln": "1. fc koln",
+    "cologne": "1. fc koln",
+    "m'gladbach": "borussia monchengladbach",
+    "mgladbach": "borussia monchengladbach",
+    "gladbach": "borussia monchengladbach",
+    "ein frankfurt": "eintracht frankfurt",
+    "ath bilbao": "athletic bilbao",
+    "athletic club": "athletic bilbao",
+    "nott'm forest": "nottingham forest",
+    "nottm forest": "nottingham forest",
+    "nott forest": "nottingham forest",
+    "man city": "manchester city",
+    "man united": "manchester united",
+    "man utd": "manchester united",
+    "manchester utd": "manchester united",
+    "ath madrid": "atletico madrid",
+    "atleti": "atletico madrid",
+    "paris sg": "psg",
+    "paris saint germain": "psg",
+    "paris saint-germain": "psg",
+    "stade rennais": "rennes",
+    "rennais": "rennes",
+    "olympique lyonnais": "lyon",
+    "olympique marseille": "marseille",
+    "bayern munchen": "bayern munich",
+    "bayern monaco": "bayern munich",
+    "inter milan": "inter",
+    "internazionale": "inter",
+    "fc barcelona": "barcelona",
+    "barca": "barcelona",
+    "spurs": "tottenham",
+    "wolves": "wolverhampton",
+    "wolverhampton wanderers": "wolverhampton",
+}
+
+
+def _canon_team(s: str) -> str:
+    n = _norm(s)
+    n = n.replace("'", "'").replace("`", "'")
+    if n in _TEAM_ALIASES:
+        return _TEAM_ALIASES[n]
+    # prova senza punti
+    compact = n.replace(".", "").replace("  ", " ").strip()
+    return _TEAM_ALIASES.get(compact, n)
+
+
+def _team_tokens(s: str) -> set[str]:
+    stop = {"fc", "cf", "afc", "sc", "ac", "as", "ssc", "calcio", "club", "de", "the", "1", "sv", "ud", "rcd"}
+    return {t for t in _canon_team(s).replace("-", " ").replace(".", " ").split() if len(t) >= 3 and t not in stop}
+
+
 def _team_match(a: str, b: str) -> bool:
-    a, b = _norm(a), _norm(b)
-    if not a or not b:
+    ca, cb = _canon_team(a), _canon_team(b)
+    if not ca or not cb:
         return False
-    if a == b:
+    if ca == cb:
         return True
-    if len(a) >= 4 and len(b) >= 4:
-        return a in b or b in a
+    if len(ca) >= 4 and len(cb) >= 4 and (ca in cb or cb in ca):
+        return True
+    ta, tb = _team_tokens(a), _team_tokens(b)
+    if not ta or not tb:
+        return False
+    inter = ta & tb
+    if len(inter) >= 2:
+        return True
+    if len(inter) == 1 and (len(ta) == 1 or len(tb) == 1):
+        tok = next(iter(inter))
+        # evita match deboli su token corti generici
+        if len(tok) >= 5:
+            return True
     return False
 
 
 def _fetch_event_betoffers(kambi_id: int | str) -> list[dict]:
     client = _client()
     params = _params()
-    url = f"https://eu1.offering-api.kambicdn.com/offering/v2018/{client}/betoffer/event/{kambi_id}.json"
-    host = urlparse(url).hostname or "eu1.offering-api.kambicdn.com"
-    payload, err = _http_get_json(url, params=params, host=host, ips=_resolve_ips(host))
-    if payload is None:
+    last_err: str | None = None
+    for host in BETOFFER_HOSTS:
+        url = f"https://{host}/offering/v2018/{client}/betoffer/event/{kambi_id}.json"
+        payload, err = _http_get_json(url, params=params, host=host, ips=_resolve_ips(host))
+        if payload is not None:
+            return list(payload.get("betOffers") or [])
+        last_err = err
+        time.sleep(0.1)
+    if last_err:
         return []
-    return list(payload.get("betOffers") or [])
+    return []
 
 
 def _parse_ou_line_offers(
@@ -480,11 +717,22 @@ def _parse_ou_line_offers(
     return out
 
 
+def _is_total_corners_criterion(crit: str) -> bool:
+    c = (crit or "").strip().lower()
+    if c in {"total corners", "total corner kicks", "match corners", "corners"}:
+        return True
+    if "corner" not in c:
+        return False
+    if any(x in c for x in ("1st", "2nd", "first half", "second half", "team", "home", "away", "most")):
+        return False
+    return "total" in c
+
+
 def _parse_total_corners(offers: list[dict]) -> dict[str, float]:
     """Ritorna keys corners_over_9.5 / corners_under_9.5 …"""
     return _parse_ou_line_offers(
         offers,
-        criterion_match=lambda c: c.strip() == "total corners" or c.strip() == "total corner kicks",
+        criterion_match=_is_total_corners_criterion,
         key_prefix="corners",
         allowed_lines=CORNER_LINES,
     )
@@ -546,7 +794,9 @@ def lookup_kambi_football(
         score = 0
         if any(x in blob for x in ("u19", "u20", "u21", "youth")):
             score -= 5
-        if "champions" in blob or "premier" in blob or "serie" in blob:
+        if _is_big5_competition(str(ev.get("competition") or "")):
+            score += 3
+        elif "champions" in blob or "premier" in blob or "serie" in blob:
             score += 1
         candidates.append((score, ev))
     if not candidates:
@@ -567,13 +817,40 @@ def lookup_kambi_football(
     }
     if (include_corners or include_shots) and ev.get("kambi_id") is not None:
         try:
-            offers = _fetch_event_betoffers(ev["kambi_id"])
+            # riusa corner/shot già prefetchati nel listView cache
+            reused = False
             if include_corners:
-                result.update(_parse_total_corners(offers))
-                result["corners_fetched"] = True
+                cached_c = {
+                    k: v
+                    for k, v in ev.items()
+                    if str(k).startswith("corners_") and isinstance(v, (int, float))
+                }
+                if cached_c:
+                    result.update(cached_c)
+                    result["corners_fetched"] = True
+                    reused = True
             if include_shots:
-                result.update(_parse_total_shots(offers))
-                result["shots_fetched"] = True
+                cached_s = {
+                    k: v
+                    for k, v in ev.items()
+                    if str(k).startswith("shots_") and isinstance(v, (int, float))
+                }
+                if cached_s:
+                    result.update(cached_s)
+                    result["shots_fetched"] = True
+                    reused = True
+            need_c = include_corners and not any(str(k).startswith("corners_") for k in result)
+            need_s = include_shots and not any(str(k).startswith("shots_") for k in result)
+            if need_c or need_s:
+                offers = _fetch_event_betoffers(ev["kambi_id"])
+                if need_c:
+                    result.update(_parse_total_corners(offers))
+                    result["corners_fetched"] = True
+                if need_s:
+                    result.update(_parse_total_shots(offers))
+                    result["shots_fetched"] = True
+            elif reused:
+                result["side_markets_from_cache"] = True
         except Exception as exc:
             result["side_markets_error"] = str(exc)
     return result

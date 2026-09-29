@@ -9,6 +9,7 @@ quando ci sono abbastanza esiti globali e di lega.
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,9 @@ JSONL = PROCESSED / "our_history.jsonl"
 DB = PROCESSED / "our_history.sqlite"
 PLAYS_CSV = ROOT / "storico_giocate.csv"
 MONTHLY_SUCCESS_CSV = ROOT / "storico_successo_mensile.csv"
+# Journal portabile: sopravvive al runner GHA effimero e si riapplica sul SQLite locale
+FREEZE_JOURNAL = PROCESSED / "telegram_score_freeze.json"
+SETTLE_JOURNAL = PROCESSED / "local_settles.json"
 HIGH_VOTES = (7, 8, 9, 10)
 
 MIN_TEAM_MATCHES = 6
@@ -777,6 +781,7 @@ def archive_upcoming(rows: list[dict[str, Any]]) -> dict[str, Any]:
     conn = _connect()
     try:
         _migrate_jsonl(conn)
+        freeze_apply = apply_freeze_journal(conn)
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         added = 0
         from modules.data_update.team_names import resolve_known_team
@@ -830,6 +835,7 @@ def archive_upcoming(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 su_int = int(row.get("score_unified")) if row.get("score_unified") is not None else None
             except (TypeError, ValueError):
                 su_int = None
+            locked = int(row.get("score_locked") or 0) == 1
             rec = {
                 "match_key": _key({"date": row.get("date"), "home": home, "away": away}),
                 "date": row.get("date"),
@@ -873,12 +879,19 @@ def archive_upcoming(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "quadro_votes_n": q_vn,
                 "fotmob_match_id": fotmob_mid,
                 "pick_label": pick_label,
+                "score_locked": 1 if locked else 0,
+                "score_live": row.get("score_live"),
+                "quota_live": row.get("quota_live"),
+                "alert_frozen_at": row.get("alert_frozen_at"),
+                "alert_kind": row.get("alert_kind"),
             }
             exists = conn.execute("SELECT 1 FROM matches WHERE match_key=?", (rec["match_key"],)).fetchone()
             if not exists:
                 added += 1
             _upsert(conn, rec, now, keep_result=True)
         conn.commit()
+        # Dopo archive: riesporta locked + riapplica journal (righe create solo da alert)
+        freeze_sync = sync_freeze_state(conn)
         n = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
         n_rich_live = conn.execute(
             """
@@ -896,9 +909,707 @@ def archive_upcoming(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "n_rich_live_target": 80,
             "path": str(DB),
             "rich": True,
+            "freeze_journal": freeze_apply,
+            "freeze_sync": freeze_sync,
         }
     finally:
         conn.close()
+
+
+def _load_freeze_journal() -> dict[str, dict[str, Any]]:
+    if not FREEZE_JOURNAL.is_file():
+        return {}
+    try:
+        raw = json.loads(FREEZE_JOURNAL.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if isinstance(raw, dict) and isinstance(raw.get("freezes"), dict):
+        raw = raw["freezes"]
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for k, v in raw.items():
+        if isinstance(v, dict) and k:
+            out[str(k)] = v
+    return out
+
+
+def _save_freeze_journal(data: dict[str, dict[str, Any]]) -> None:
+    PROCESSED.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "n": len(data),
+        "freezes": data,
+    }
+    FREEZE_JOURNAL.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def record_freeze_journal(entry: dict[str, Any]) -> None:
+    """Scrive/aggiorna lo snapshot freeze (prima vittoria: non sovrascrive se già presente)."""
+    key = str(entry.get("match_key") or "").strip()
+    if not key:
+        return
+    data = _load_freeze_journal()
+    prev = data.get(key)
+    if prev and prev.get("alert_frozen_at"):
+        # Prima notifica vince (allineato a score_locked una tantum)
+        return
+    data[key] = {k: v for k, v in entry.items() if v is not None}
+    _save_freeze_journal(data)
+
+
+# Colonne esito da non perdere quando il pull cloud aggiorna lo SQLite
+_SETTLE_PRESERVE = (
+    "home_goals",
+    "away_goals",
+    "result",
+    "hit",
+    "settled_at",
+    "sofascore_stats",
+    "sofascore_match_id",
+)
+
+
+def merge_cloud_history(cloud_db: Path, *, local_db: Path | None = None) -> dict[str, Any]:
+    """Unisce our_history cloud nel DB locale senza cancellare i settle locali.
+
+    Usato da Scarica aggiornamento + apprendimento: prima copy2 azzerava hit/gol
+    manuali. Ora: INSERT righe nuove dal cloud; settle cloud solo se locale pending.
+    """
+    local_db = local_db or DB
+    cloud_db = Path(cloud_db)
+    if not cloud_db.is_file():
+        return {"ok": False, "error": "cloud db mancante"}
+
+    if not local_db.is_file():
+        local_db.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(cloud_db, local_db)
+        return {
+            "ok": True,
+            "mode": "copy",
+            "preserved_settled": 0,
+            "applied_cloud_settled": 0,
+            "inserted_from_cloud": 0,
+            "n_local": 0,
+        }
+
+    conn = sqlite3.connect(str(local_db), timeout=60)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA busy_timeout=60000")
+        conn.execute(_CREATE)
+        _ensure_columns(conn)
+        n_settled_before = int(
+            conn.execute("SELECT COUNT(*) FROM matches WHERE hit IS NOT NULL").fetchone()[0]
+        )
+
+        conn.execute("ATTACH DATABASE ? AS cloud", (str(cloud_db.resolve()),))
+        inserted = 0
+        applied_cloud = 0
+        err: str | None = None
+        try:
+            cloud_cols = [r[1] for r in conn.execute("PRAGMA cloud.table_info(matches)").fetchall()]
+            if not cloud_cols:
+                err = "cloud senza tabella matches"
+            else:
+                local_cols = {r[1] for r in conn.execute("PRAGMA table_info(matches)").fetchall()}
+                common = [c for c in cloud_cols if c in local_cols]
+                cols_sql = ", ".join(common)
+                cur = conn.execute(
+                    f"INSERT OR IGNORE INTO main.matches ({cols_sql}) SELECT {cols_sql} FROM cloud.matches"
+                )
+                try:
+                    inserted = int(cur.rowcount or 0)
+                except Exception:
+                    inserted = 0
+                cur.close()
+
+                cur = conn.execute("SELECT * FROM cloud.matches WHERE hit IS NOT NULL")
+                cloud_settled = cur.fetchall()
+                cur.close()
+                for row in cloud_settled:
+                    d = dict(row)
+                    key = d.get("match_key")
+                    if not key:
+                        continue
+                    cur = conn.execute(
+                        "SELECT hit FROM main.matches WHERE match_key=?", (key,)
+                    )
+                    local = cur.fetchone()
+                    cur.close()
+                    if local is None or local["hit"] is not None:
+                        continue
+                    sets: list[str] = []
+                    vals: list[Any] = []
+                    for col in _SETTLE_PRESERVE:
+                        if col not in d:
+                            continue
+                        sets.append(f"{col}=?")
+                        vals.append(d.get(col))
+                    if not sets:
+                        continue
+                    vals.append(key)
+                    conn.execute(
+                        "UPDATE main.matches SET "
+                        + ", ".join(sets)
+                        + " WHERE match_key=? AND hit IS NULL",
+                        vals,
+                    )
+                    applied_cloud += 1
+            conn.commit()
+        finally:
+            try:
+                conn.execute("DETACH DATABASE cloud")
+            except sqlite3.Error:
+                pass
+
+        if err:
+            return {"ok": False, "error": err}
+
+        n_settled_after = int(
+            conn.execute("SELECT COUNT(*) FROM matches WHERE hit IS NOT NULL").fetchone()[0]
+        )
+        n_after = int(conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0])
+    finally:
+        conn.close()
+
+    return {
+        "ok": True,
+        "mode": "merge",
+        "preserved_settled": n_settled_before,
+        "applied_cloud_settled": applied_cloud,
+        "inserted_from_cloud": inserted,
+        "n_after": n_after,
+        "n_settled_after": n_settled_after,
+    }
+
+def _load_settle_journal() -> dict[str, dict[str, Any]]:
+    if not SETTLE_JOURNAL.is_file():
+        return {}
+    try:
+        raw = json.loads(SETTLE_JOURNAL.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if isinstance(raw, dict) and isinstance(raw.get("settles"), dict):
+        raw = raw["settles"]
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for k, v in raw.items():
+        if isinstance(v, dict) and k:
+            out[str(k)] = v
+    return out
+
+
+def _save_settle_journal(data: dict[str, dict[str, Any]]) -> None:
+    PROCESSED.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "n": len(data),
+        "settles": data,
+    }
+    SETTLE_JOURNAL.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def export_settle_journal(*, roi_only: bool = True) -> dict[str, Any]:
+    """Scrive local_settles.json con gli esiti da portare sul cloud (learn).
+
+    Default: voto unificato >=8 oppure freeze Telegram (campione ROI / alert).
+    """
+    from modules.advisor.learn_policy import meets_roi_score, score_unified_of
+
+    rows = load_history()
+    data = _load_settle_journal()
+    added = 0
+    for r in rows:
+        if r.get("hit") is None:
+            continue
+        locked = int(r.get("score_locked") or 0) == 1
+        if roi_only and not locked and not meets_roi_score(r):
+            continue
+        key = str(r.get("match_key") or _key(r))
+        if not key or key.startswith("None|"):
+            continue
+        entry = {
+            "match_key": key,
+            "date": str(r.get("date") or "")[:10],
+            "home": r.get("home"),
+            "away": r.get("away"),
+            "league": r.get("league"),
+            "country": r.get("country"),
+            "pick": r.get("pick"),
+            "pick_group": r.get("pick_group"),
+            "pick_label": r.get("pick_label"),
+            "action": r.get("action"),
+            "score_unified": score_unified_of(r),
+            "score": r.get("score"),
+            "quota_pick": r.get("quota_pick"),
+            "score_locked": int(r.get("score_locked") or 0),
+            "home_goals": r.get("home_goals"),
+            "away_goals": r.get("away_goals"),
+            "result": r.get("result"),
+            "hit": int(r.get("hit") or 0),
+            "settled_at": r.get("settled_at"),
+            "sofascore_stats": r.get("sofascore_stats"),
+            "source": "local",
+        }
+        if key not in data:
+            added += 1
+        data[key] = entry
+    _save_settle_journal(data)
+    return {
+        "ok": True,
+        "path": str(SETTLE_JOURNAL),
+        "n": len(data),
+        "added_or_updated": added,
+        "roi_only": roi_only,
+    }
+
+
+def merge_settle_journal_file(other: Path | None = None) -> dict[str, Any]:
+    """Unisce un journal esterno (repo / cache) nel journal locale."""
+    base = _load_settle_journal()
+    if other is None or not other.is_file():
+        return {"ok": True, "n": len(base), "merged": 0}
+    try:
+        raw = json.loads(other.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"ok": False, "error": str(exc), "n": len(base)}
+    if isinstance(raw, dict) and isinstance(raw.get("settles"), dict):
+        raw = raw["settles"]
+    if not isinstance(raw, dict):
+        return {"ok": False, "error": "journal invalido", "n": len(base)}
+    merged = 0
+    for k, v in raw.items():
+        if not isinstance(v, dict):
+            continue
+        key = str(k)
+        cur = base.get(key)
+        if cur is None:
+            base[key] = v
+            merged += 1
+            continue
+        # Preferisci settle piu recente
+        t_new = str(v.get("settled_at") or "")
+        t_old = str(cur.get("settled_at") or "")
+        if t_new and (not t_old or t_new > t_old):
+            base[key] = v
+            merged += 1
+    _save_settle_journal(base)
+    return {"ok": True, "n": len(base), "merged": merged}
+
+
+def apply_settle_journal(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
+    """Applica local_settles.json sullo SQLite: chiude match ancora pending.
+
+    Usato dal job cloud prima di settle_pending / online_learn.
+    """
+    owns = conn is None
+    if owns:
+        conn = _connect()
+    applied = 0
+    skipped = 0
+    missing = 0
+    try:
+        _migrate_jsonl(conn)
+        journal = _load_settle_journal()
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for key, entry in journal.items():
+            prev = conn.execute("SELECT * FROM matches WHERE match_key=?", (key,)).fetchone()
+            if prev is None:
+                # crea stub minimo se abbiamo date/home/away
+                day = str(entry.get("date") or "")[:10]
+                home = entry.get("home")
+                away = entry.get("away")
+                if not day or not home or not away:
+                    missing += 1
+                    continue
+                rec = {
+                    "match_key": key,
+                    "date": day,
+                    "time": entry.get("time") or "",
+                    "home": home,
+                    "away": away,
+                    "league": entry.get("league") or "",
+                    "country": entry.get("country") or "",
+                    "pick": entry.get("pick"),
+                    "action": entry.get("action"),
+                    "score": entry.get("score"),
+                    "score_unified": entry.get("score_unified"),
+                    "quota_pick": entry.get("quota_pick"),
+                    "pick_group": entry.get("pick_group"),
+                    "pick_label": entry.get("pick_label"),
+                    "score_locked": int(entry.get("score_locked") or 0),
+                    "covered": 1,
+                }
+                _upsert(conn, rec, now, keep_result=False)
+                prev = conn.execute("SELECT * FROM matches WHERE match_key=?", (key,)).fetchone()
+            if prev is None:
+                missing += 1
+                continue
+            if prev["hit"] is not None:
+                skipped += 1
+                continue
+            try:
+                hit = int(entry.get("hit"))
+            except (TypeError, ValueError):
+                skipped += 1
+                continue
+            hg = entry.get("home_goals")
+            ag = entry.get("away_goals")
+            res = entry.get("result")
+            try:
+                hg_i = int(hg) if hg is not None else None
+                ag_i = int(ag) if ag is not None else None
+            except (TypeError, ValueError):
+                hg_i = ag_i = None
+            if res is None and hg_i is not None and ag_i is not None:
+                res = "1" if hg_i > ag_i else "2" if ag_i > hg_i else "X"
+            sofa = entry.get("sofascore_stats")
+            sofa_s = _json_dump(sofa) if sofa is not None else None
+            settled_at = str(entry.get("settled_at") or now)
+            cur = conn.execute(
+                """
+                UPDATE matches SET
+                    home_goals=COALESCE(?, home_goals),
+                    away_goals=COALESCE(?, away_goals),
+                    result=COALESCE(?, result),
+                    hit=?,
+                    settled_at=?,
+                    sofascore_stats=COALESCE(?, sofascore_stats),
+                    pick=COALESCE(pick, ?),
+                    pick_group=COALESCE(pick_group, ?),
+                    score_unified=COALESCE(score_unified, ?),
+                    quota_pick=COALESCE(quota_pick, ?),
+                    score_locked=CASE
+                        WHEN score_locked=1 THEN 1
+                        ELSE COALESCE(?, score_locked)
+                    END
+                WHERE match_key=? AND hit IS NULL
+                """,
+                (
+                    hg_i,
+                    ag_i,
+                    res,
+                    1 if hit == 1 else 0,
+                    settled_at,
+                    sofa_s,
+                    entry.get("pick"),
+                    entry.get("pick_group"),
+                    entry.get("score_unified"),
+                    entry.get("quota_pick"),
+                    int(entry.get("score_locked") or 0),
+                    key,
+                ),
+            )
+            if int(cur.rowcount or 0) > 0:
+                applied += 1
+            else:
+                skipped += 1
+        conn.commit()
+        try:
+            export_plays_csv()
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "applied": applied,
+            "skipped": skipped,
+            "missing": missing,
+            "n_journal": len(journal),
+        }
+    finally:
+        if owns:
+            conn.close()
+
+
+
+def merge_freeze_journal_file(other: Path | None = None) -> dict[str, Any]:
+    """Unisce un journal esterno (es. cache GHA) tenendo il freeze più vecchio per match."""
+    base = _load_freeze_journal()
+    if other is None or not other.is_file():
+        return {"ok": True, "n": len(base), "merged": 0}
+    try:
+        raw = json.loads(other.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"ok": False, "error": str(exc), "n": len(base)}
+    if isinstance(raw, dict) and isinstance(raw.get("freezes"), dict):
+        raw = raw["freezes"]
+    if not isinstance(raw, dict):
+        return {"ok": False, "error": "journal invalido", "n": len(base)}
+    merged = 0
+    for k, v in raw.items():
+        if not isinstance(v, dict):
+            continue
+        key = str(k)
+        cur = base.get(key)
+        if cur is None:
+            base[key] = v
+            merged += 1
+            continue
+        t_new = str(v.get("alert_frozen_at") or "")
+        t_old = str(cur.get("alert_frozen_at") or "")
+        if t_new and (not t_old or t_new < t_old):
+            base[key] = v
+            merged += 1
+    _save_freeze_journal(base)
+    return {"ok": True, "n": len(base), "merged": merged}
+
+
+def apply_freeze_journal(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
+    """Riapplica i freeze del journal sul SQLite (cloud→locale / refresh)."""
+    owns = conn is None
+    if owns:
+        conn = _connect()
+    applied = 0
+    skipped = 0
+    created = 0
+    resettled = 0
+    try:
+        _migrate_jsonl(conn)
+        journal = _load_freeze_journal()
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for key, entry in journal.items():
+            prev = conn.execute("SELECT * FROM matches WHERE match_key=?", (key,)).fetchone()
+            if prev and int(prev["score_locked"] or 0) == 1:
+                skipped += 1
+                continue
+            try:
+                su = int(entry.get("score_unified") or entry.get("score"))
+            except (TypeError, ValueError):
+                skipped += 1
+                continue
+            pick = entry.get("pick")
+            action = entry.get("action") or entry.get("alert_kind") or "gioca"
+            quota = entry.get("quota_pick")
+            try:
+                quota_f = float(quota) if quota is not None else None
+            except (TypeError, ValueError):
+                quota_f = None
+            kind_s = str(entry.get("alert_kind") or "gioca").lower()
+            if kind_s not in {"gioca", "watch"}:
+                kind_s = "gioca"
+            frozen_at = str(entry.get("alert_frozen_at") or now)
+            day = str(entry.get("date") or (prev["date"] if prev else ""))[:10]
+            home = entry.get("home") or (prev["home"] if prev else "")
+            away = entry.get("away") or (prev["away"] if prev else "")
+            if not day or not home or not away:
+                skipped += 1
+                continue
+            if not prev:
+                rec = {
+                    "match_key": key,
+                    "date": day,
+                    "time": entry.get("time") or "",
+                    "home": home,
+                    "away": away,
+                    "league": entry.get("league") or "",
+                    "country": entry.get("country") or "",
+                    "pick": pick,
+                    "action": action,
+                    "score": su,
+                    "score_unified": su,
+                    "ev_cons": entry.get("ev_cons"),
+                    "probability": entry.get("probability"),
+                    "odds_source": entry.get("odds_source"),
+                    "skip_reason": None,
+                    "covered": 1,
+                    "home_goals": None,
+                    "away_goals": None,
+                    "result": None,
+                    "hit": None,
+                    "saved_at": now,
+                    "settled_at": None,
+                    "quota_pick": quota_f,
+                    "agree_share": None,
+                    "data_edge": None,
+                    "move_rank": None,
+                    "residual": None,
+                    "adj_ev": None,
+                    "data_factors": None,
+                    "no_bet_reasons": None,
+                    "pick_group": entry.get("pick_group"),
+                    "model_cluster": None,
+                    "ev_sharp": entry.get("ev_sharp"),
+                    "context_partial": 0,
+                    "synthetic_backfill": 0,
+                    "clv": None,
+                    "quota_close": None,
+                    "beat_close": None,
+                    "quadro_agree_n": None,
+                    "quadro_votes_n": None,
+                    "fotmob_match_id": None,
+                    "pick_label": entry.get("pick_label"),
+                    "sofascore_match_id": None,
+                    "sofascore_stats": None,
+                    "score_locked": 1,
+                    "score_live": su,
+                    "quota_live": quota_f,
+                    "alert_frozen_at": frozen_at,
+                    "alert_kind": kind_s,
+                }
+                _upsert(conn, rec, now, keep_result=True)
+                created += 1
+                applied += 1
+                continue
+
+            hit = prev["hit"]
+            pk = str(pick or "")
+            # Ricalcola sempre l'hit sul pick freezato se ci sono gol (il pick archiviato poteva essere un altro)
+            if prev["home_goals"] is not None and prev["away_goals"] is not None and pick:
+                try:
+                    hg = int(prev["home_goals"])
+                    ag = int(prev["away_goals"])
+                    tot = hg + ag
+                    res = str(prev["result"] or ("1" if hg > ag else "2" if ag > hg else "X"))
+                    new_hit = _hit_for_pick(str(pick), res=res, hg=hg, ag=ag, tot=tot)
+                    if new_hit is not None:
+                        hit = new_hit
+                        resettled += 1
+                    elif pk.upper().startswith(("CORN", "CARD", "SHOT")):
+                        hit = None
+                        resettled += 1
+                except (TypeError, ValueError):
+                    pass
+            elif pk.upper().startswith(("CORN", "CARD", "SHOT")) and str(pick) != str(prev["pick"] or ""):
+                hit = None
+                resettled += 1
+
+            conn.execute(
+                """
+                UPDATE matches SET
+                    score_locked=1,
+                    score_unified=?,
+                    score=?,
+                    pick=COALESCE(?, pick),
+                    action=COALESCE(?, action),
+                    quota_pick=COALESCE(?, quota_pick),
+                    ev_cons=COALESCE(?, ev_cons),
+                    probability=COALESCE(?, probability),
+                    pick_group=COALESCE(?, pick_group),
+                    pick_label=COALESCE(?, pick_label),
+                    score_live=COALESCE(score_live, score_unified, ?),
+                    quota_live=COALESCE(?, quota_live),
+                    alert_frozen_at=?,
+                    alert_kind=?,
+                    hit=?,
+                    synthetic_backfill=0
+                WHERE match_key=?
+                """,
+                (
+                    su,
+                    int(entry.get("score") or su),
+                    pick,
+                    action,
+                    quota_f,
+                    entry.get("ev_cons"),
+                    entry.get("probability"),
+                    entry.get("pick_group"),
+                    entry.get("pick_label"),
+                    su,
+                    quota_f,
+                    frozen_at,
+                    kind_s,
+                    hit,
+                    key,
+                ),
+            )
+            applied += 1
+        conn.commit()
+        return {
+            "ok": True,
+            "applied": applied,
+            "created": created,
+            "skipped": skipped,
+            "resettled_hit": resettled,
+            "n_journal": len(journal),
+            "path": str(FREEZE_JOURNAL),
+        }
+    finally:
+        if owns:
+            conn.close()
+
+
+def export_locked_to_freeze_journal(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
+    """Esporta le righe score_locked=1 nel journal (prima vittoria: non restringe il journal)."""
+    owns = conn is None
+    if owns:
+        conn = _connect()
+    added = 0
+    kept = 0
+    try:
+        _migrate_jsonl(conn)
+        rows = conn.execute(
+            "SELECT * FROM matches WHERE score_locked=1"
+        ).fetchall()
+        data = _load_freeze_journal()
+        for prev in rows:
+            key = str(prev["match_key"] or "")
+            if not key:
+                continue
+            cur = data.get(key)
+            if cur and cur.get("alert_frozen_at"):
+                kept += 1
+                continue
+            entry = {
+                "match_key": key,
+                "date": prev["date"],
+                "time": prev["time"],
+                "home": prev["home"],
+                "away": prev["away"],
+                "league": prev["league"],
+                "country": prev["country"],
+                "pick": prev["pick"],
+                "action": prev["action"],
+                "score": prev["score"],
+                "score_unified": prev["score_unified"],
+                "quota_pick": prev["quota_pick"],
+                "ev_cons": prev["ev_cons"],
+                "probability": prev["probability"],
+                "pick_group": prev["pick_group"],
+                "pick_label": prev["pick_label"],
+                "alert_kind": prev["alert_kind"] or "gioca",
+                "alert_frozen_at": prev["alert_frozen_at"]
+                or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "odds_source": prev["odds_source"],
+            }
+            data[key] = {k: v for k, v in entry.items() if v is not None}
+            added += 1
+        if added:
+            _save_freeze_journal(data)
+        return {
+            "ok": True,
+            "added": added,
+            "kept": kept,
+            "n_locked_db": len(rows),
+            "n_journal": len(data),
+            "path": str(FREEZE_JOURNAL),
+        }
+    finally:
+        if owns:
+            conn.close()
+
+
+def sync_freeze_state(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
+    """Sincronizza freeze in entrambe le direzioni: DB locked → journal, poi journal → DB.
+
+    Resiste a cache GHA incomplete: se sopravvive SQLite o journal, l'altro si ripopola.
+    """
+    owns = conn is None
+    if owns:
+        conn = _connect()
+    try:
+        exported = export_locked_to_freeze_journal(conn)
+        applied = apply_freeze_journal(conn)
+        return {
+            "ok": True,
+            "export": exported,
+            "apply": applied,
+            "n_journal": len(_load_freeze_journal()),
+        }
+    finally:
+        if owns:
+            conn.close()
 
 
 def freeze_score_at_alert(
@@ -910,7 +1621,7 @@ def freeze_score_at_alert(
     """Congela voto/pick/quota al momento della notifica Telegram (una sola volta).
 
     I refresh successivi aggiornano solo score_live/quota_live; ROI e apprendimento
-    restano sul voto della notifica.
+    restano sul voto della notifica. Snapshot anche su FREEZE_JOURNAL (sync GHA↔locale).
     """
     from modules.data_update.team_names import resolve_known_team
 
@@ -935,9 +1646,34 @@ def freeze_score_at_alert(
     conn = _connect()
     try:
         _migrate_jsonl(conn)
+        # Porta eventuali freeze cloud/journal prima di decidere
+        apply_freeze_journal(conn)
         key = _key({"date": day, "home": home, "away": away})
         prev = conn.execute("SELECT * FROM matches WHERE match_key=?", (key,)).fetchone()
         if prev and int(prev["score_locked"] or 0) == 1:
+            record_freeze_journal(
+                {
+                    "match_key": key,
+                    "date": day,
+                    "home": home,
+                    "away": away,
+                    "league": prev["league"],
+                    "country": prev["country"],
+                    "time": prev["time"],
+                    "pick": prev["pick"],
+                    "action": prev["action"],
+                    "score": prev["score"],
+                    "score_unified": prev["score_unified"],
+                    "quota_pick": prev["quota_pick"],
+                    "ev_cons": prev["ev_cons"],
+                    "probability": prev["probability"],
+                    "pick_group": prev["pick_group"],
+                    "pick_label": prev["pick_label"],
+                    "alert_kind": prev["alert_kind"] or kind_s,
+                    "alert_frozen_at": prev["alert_frozen_at"] or now,
+                    "odds_source": prev["odds_source"],
+                }
+            )
             return {
                 "ok": True,
                 "already_locked": True,
@@ -1011,7 +1747,7 @@ def freeze_score_at_alert(
             "alert_kind": kind_s,
         }
         _upsert(conn, rec, now, keep_result=True)
-        # Forza lock anche se _upsert aveva già prev unlocked: UPDATE esplicito
+        # Forza i campi freeze (dopo upsert score_locked è già 1 → non filtrare su unlocked)
         conn.execute(
             """
             UPDATE matches SET
@@ -1030,7 +1766,7 @@ def freeze_score_at_alert(
                 alert_frozen_at=?,
                 alert_kind=?,
                 synthetic_backfill=0
-            WHERE match_key=? AND COALESCE(score_locked, 0)=0
+            WHERE match_key=?
             """,
             (
                 su,
@@ -1050,6 +1786,29 @@ def freeze_score_at_alert(
             ),
         )
         conn.commit()
+        record_freeze_journal(
+            {
+                "match_key": key,
+                "date": day,
+                "home": home,
+                "away": away,
+                "league": rec["league"],
+                "country": rec["country"],
+                "time": rec["time"],
+                "pick": rec["pick"],
+                "action": rec["action"],
+                "score": sc_int,
+                "score_unified": su,
+                "quota_pick": rec["quota_pick"],
+                "ev_cons": rec["ev_cons"],
+                "probability": rec["probability"],
+                "pick_group": rec["pick_group"],
+                "pick_label": rec["pick_label"],
+                "alert_kind": kind_s,
+                "alert_frozen_at": now,
+                "odds_source": rec.get("odds_source"),
+            }
+        )
         return {
             "ok": True,
             "already_locked": False,
@@ -1085,7 +1844,207 @@ def freeze_alerts_batch(alerts: list[dict[str, Any]]) -> dict[str, Any]:
             skipped += 1
         else:
             errors.append(str(out.get("error") or "freeze fail"))
-    return {"ok": True, "frozen": frozen, "skipped": skipped, "errors": errors[:8]}
+    sync = sync_freeze_state()
+    upcoming_overlay: dict[str, Any] = {}
+    try:
+        upcoming_overlay = apply_freeze_to_upcoming_file()
+    except Exception as exc:
+        upcoming_overlay = {"ok": False, "error": str(exc)}
+    journal_n = len(_load_freeze_journal())
+    return {
+        "ok": True,
+        "frozen": frozen,
+        "skipped": skipped,
+        "errors": errors[:8],
+        "journal_n": journal_n,
+        "journal_path": str(FREEZE_JOURNAL),
+        "sync": sync,
+        "upcoming_overlay": upcoming_overlay,
+    }
+
+
+def _freeze_entry_for_row(row: dict[str, Any], journal: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    """Trova lo snapshot freeze (journal) per una riga calendario."""
+    from modules.data_update.team_names import resolve_known_team
+
+    day = str(row.get("date") or "")[:10]
+    home_raw = str(row.get("home") or "").strip()
+    away_raw = str(row.get("away") or "").strip()
+    if not day or not home_raw or not away_raw:
+        return None
+    home = resolve_known_team(home_raw) or home_raw
+    away = resolve_known_team(away_raw) or away_raw
+    for key in (
+        f"{day}|{home}|{away}",
+        f"{day}|{home_raw}|{away_raw}",
+        str(row.get("match_key") or ""),
+    ):
+        if key and key in journal:
+            return journal[key]
+    return None
+
+
+def overlay_freeze_on_upcoming(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Applica freeze Telegram sulle righe calendario: pick/voto/quota bloccati.
+
+    Il ricalcolo live resta in score_live / quota_live / pick_live / action_live
+    (solo info). La riga ufficiale resta pending fino al settle.
+    """
+    if not rows:
+        return {"ok": True, "n_overlaid": 0, "n_rows": 0}
+    try:
+        sync_freeze_state()
+    except Exception:
+        pass
+    journal = _load_freeze_journal()
+    # Integra anche locked SQLite non ancora nel journal
+    try:
+        conn = _connect()
+        try:
+            for r in conn.execute(
+                "SELECT * FROM matches WHERE score_locked=1 AND hit IS NULL"
+            ).fetchall():
+                d = _row_to_dict(r)
+                key = str(d.get("match_key") or "")
+                if key and key not in journal:
+                    journal[key] = {
+                        "match_key": key,
+                        "date": d.get("date"),
+                        "home": d.get("home"),
+                        "away": d.get("away"),
+                        "pick": d.get("pick"),
+                        "action": d.get("action"),
+                        "score": d.get("score"),
+                        "score_unified": d.get("score_unified"),
+                        "quota_pick": d.get("quota_pick"),
+                        "pick_group": d.get("pick_group"),
+                        "pick_label": d.get("pick_label"),
+                        "alert_kind": d.get("alert_kind"),
+                        "alert_frozen_at": d.get("alert_frozen_at"),
+                        "odds_source": d.get("odds_source"),
+                        "ev_cons": d.get("ev_cons"),
+                        "probability": d.get("probability"),
+                    }
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+    overlaid = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        entry = _freeze_entry_for_row(row, journal)
+        if not entry:
+            # già marcata locked in JSON da un giro precedente
+            if int(row.get("score_locked") or 0) != 1:
+                continue
+            entry = {
+                "pick": row.get("pick"),
+                "action": row.get("action"),
+                "score_unified": row.get("score_unified"),
+                "score": row.get("score"),
+                "quota_pick": row.get("quota_pick"),
+                "pick_group": row.get("pick_group"),
+                "pick_label": row.get("pick_label") or row.get("pick_name"),
+                "alert_kind": row.get("alert_kind"),
+                "alert_frozen_at": row.get("alert_frozen_at"),
+            }
+
+        # Snapshot live = calcolo corrente, poi applica freeze.
+        # Se la riga è già overlaid (voto ufficiale = freeze), non rimpiazzare score_live.
+        freeze_su = None
+        try:
+            freeze_su = int(
+                entry.get("score_unified")
+                if entry.get("score_unified") is not None
+                else entry.get("score")
+            )
+        except (TypeError, ValueError):
+            freeze_su = None
+        already_locked = int(row.get("score_locked") or 0) == 1
+        try:
+            current_su = int(row["score_unified"]) if row.get("score_unified") is not None else None
+        except (TypeError, ValueError):
+            current_su = None
+        already_overlaid = (
+            already_locked
+            and freeze_su is not None
+            and current_su is not None
+            and current_su == freeze_su
+            and row.get("score_live") is not None
+        )
+        if not already_overlaid:
+            row["score_live"] = row.get("score_unified")
+            row["quota_live"] = row.get("quota_pick")
+            row["pick_live"] = row.get("pick")
+            row["action_live"] = row.get("action")
+
+        if entry.get("pick") not in (None, "", "—"):
+            row["pick"] = entry.get("pick")
+        if entry.get("action"):
+            row["action"] = entry.get("action")
+        if freeze_su is not None:
+            row["score_unified"] = freeze_su
+            try:
+                row["score"] = int(entry["score"]) if entry.get("score") is not None else freeze_su
+            except (TypeError, ValueError):
+                row["score"] = freeze_su
+        if entry.get("quota_pick") is not None:
+            row["quota_pick"] = entry.get("quota_pick")
+        if entry.get("pick_group"):
+            row["pick_group"] = entry.get("pick_group")
+        label = entry.get("pick_label")
+        if label:
+            row["pick_name"] = label
+            row["pick_label"] = label
+        if entry.get("odds_source"):
+            row["odds_source"] = entry.get("odds_source")
+        if entry.get("ev_cons") is not None:
+            row["ev_cons"] = entry.get("ev_cons")
+        if entry.get("probability") is not None:
+            row["probability"] = entry.get("probability")
+
+        row["score_locked"] = 1
+        row["alert_kind"] = entry.get("alert_kind") or row.get("alert_kind") or "gioca"
+        row["alert_frozen_at"] = entry.get("alert_frozen_at") or row.get("alert_frozen_at")
+        row["freeze_pending"] = True
+        kind = str(row.get("alert_kind") or "gioca")
+        live_s = row.get("score_live")
+        live_bit = ""
+        if live_s is not None and freeze_su is not None:
+            try:
+                if int(live_s) != int(freeze_su):
+                    live_bit = f" · live ora {live_s}/10"
+            except (TypeError, ValueError):
+                live_bit = f" · live ora {live_s}/10"
+        row["freeze_note"] = (
+            f"Freeze Telegram ({kind}): pick/voto/quota della notifica{live_bit}. "
+            "In coda settle; il ricalcolo live è solo informativo."
+        )
+        overlaid += 1
+
+    return {"ok": True, "n_overlaid": overlaid, "n_rows": len(rows), "n_journal": len(journal)}
+
+
+def apply_freeze_to_upcoming_file(path: Path | None = None) -> dict[str, Any]:
+    """Rilegge upcoming_predictions.json, applica freeze, riscrive."""
+    target = path or (PROCESSED / "upcoming_predictions.json")
+    if not target.is_file():
+        return {"ok": False, "error": "upcoming assente"}
+    try:
+        rows = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"ok": False, "error": str(exc)}
+    if not isinstance(rows, list):
+        return {"ok": False, "error": "upcoming non lista"}
+    info = overlay_freeze_on_upcoming(rows)
+    try:
+        target.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+    except OSError as exc:
+        return {"ok": False, "error": str(exc), **info}
+    info["path"] = str(target)
+    return info
 
 
 def _float_or_none(v: Any) -> float | None:
@@ -1467,6 +2426,216 @@ def settle_from_results(results: pd.DataFrame) -> dict[str, Any]:
         conn.close()
 
 
+def list_stale_roi_pending(*, min_days: int = 8, min_score: int = 8) -> list[dict[str, Any]]:
+    """Pending con voto ≥min_score (o freeze) aperti da almeno min_days giorni."""
+    from modules.advisor.learn_policy import meets_roi_score, score_unified_of
+
+    today = datetime.now(timezone.utc).date()
+    out: list[dict[str, Any]] = []
+    for r in load_history():
+        if r.get("hit") is not None:
+            continue
+        locked = int(r.get("score_locked") or 0) == 1
+        if not locked and not meets_roi_score(r, min_score=min_score):
+            continue
+        day_s = str(r.get("date") or "")[:10]
+        try:
+            d0 = datetime.fromisoformat(day_s).date()
+        except ValueError:
+            continue
+        age = (today - d0).days
+        if age < int(min_days):
+            continue
+        out.append(
+            {
+                "match_key": r.get("match_key") or _key(r),
+                "date": day_s,
+                "time": r.get("time"),
+                "home": r.get("home"),
+                "away": r.get("away"),
+                "league": r.get("league"),
+                "country": r.get("country"),
+                "pick": r.get("pick"),
+                "pick_group": r.get("pick_group"),
+                "pick_label": r.get("pick_label"),
+                "action": r.get("action"),
+                "score_unified": score_unified_of(r),
+                "quota_pick": r.get("quota_pick"),
+                "score_locked": int(r.get("score_locked") or 0),
+                "age_days": age,
+                "home_goals": r.get("home_goals"),
+                "away_goals": r.get("away_goals"),
+                "result": r.get("result"),
+                "hit": r.get("hit"),
+            }
+        )
+    out.sort(key=lambda x: (int(x.get("age_days") or 0), str(x.get("date") or "")), reverse=True)
+    return out
+
+
+def manual_settle(
+    *,
+    match_key: str | None = None,
+    date: str | None = None,
+    home: str | None = None,
+    away: str | None = None,
+    home_goals: int | None = None,
+    away_goals: int | None = None,
+    hit: int | None = None,
+    corners_home: int | None = None,
+    corners_away: int | None = None,
+    shots_home: int | None = None,
+    shots_away: int | None = None,
+) -> dict[str, Any]:
+    """Chiude una partita a mano (FT e/o hit, + corner/tiri se il pick li richiede)."""
+    from modules.data_update.team_names import resolve_known_team
+
+    conn = _connect()
+    try:
+        _migrate_jsonl(conn)
+        rec = None
+        if match_key:
+            rec = conn.execute("SELECT * FROM matches WHERE match_key=?", (match_key,)).fetchone()
+        if rec is None and date and home and away:
+            h = resolve_known_team(home) or home
+            a = resolve_known_team(away) or away
+            day = str(date)[:10]
+            for key in (_key({"date": day, "home": h, "away": a}), f"{day}|{home}|{away}"):
+                rec = conn.execute("SELECT * FROM matches WHERE match_key=?", (key,)).fetchone()
+                if rec:
+                    break
+            if rec is None:
+                rec = conn.execute(
+                    "SELECT * FROM matches WHERE date=? AND home=? AND away=?",
+                    (day, h, a),
+                ).fetchone()
+        if rec is None:
+            return {"ok": False, "error": "partita non trovata"}
+        if rec["hit"] is not None:
+            return {
+                "ok": False,
+                "error": "già settled",
+                "match_key": rec["match_key"],
+                "hit": int(rec["hit"]),
+            }
+
+        pick = str(rec["pick"] or "")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        hg = home_goals if home_goals is not None else rec["home_goals"]
+        ag = away_goals if away_goals is not None else rec["away_goals"]
+        try:
+            hg_i = int(hg) if hg is not None else None
+            ag_i = int(ag) if ag is not None else None
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "gol non validi"}
+
+        res = None
+        if hg_i is not None and ag_i is not None:
+            res = "1" if hg_i > ag_i else "2" if ag_i > hg_i else "X"
+
+        final_hit: int | None
+        if hit is not None:
+            try:
+                final_hit = 1 if int(hit) == 1 else 0
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "hit non valido"}
+        else:
+            if hg_i is None or ag_i is None or res is None:
+                return {"ok": False, "error": "servono gol FT oppure hit esplicito"}
+            pu = pick.upper()
+            hc = corners_home
+            ac = corners_away
+            sh = shots_home
+            sa = shots_away
+            if pu.startswith("CORN") and (hc is None or ac is None):
+                return {"ok": False, "error": "pick corner: servono corners_home/away"}
+            if pu.startswith("SHOT") and (sh is None or sa is None):
+                return {"ok": False, "error": "pick tiri: servono shots_home/away"}
+            computed = _hit_for_pick(
+                pick,
+                res=res,
+                hg=hg_i,
+                ag=ag_i,
+                tot=hg_i + ag_i,
+                hc=int(hc) if hc is not None else None,
+                ac=int(ac) if ac is not None else None,
+                sh=int(sh) if sh is not None else None,
+                sa=int(sa) if sa is not None else None,
+            )
+            if computed is None:
+                return {"ok": False, "error": "impossibile calcolare hit (stats mancanti)"}
+            final_hit = int(computed)
+
+        # opzionale: salva corner in sofascore_stats JSON per audit
+        sofa_stats = None
+        if corners_home is not None or corners_away is not None or shots_home is not None:
+            try:
+                prev_stats = rec["sofascore_stats"]
+                if isinstance(prev_stats, str) and prev_stats.strip():
+                    sofa_stats = json.loads(prev_stats)
+                elif isinstance(prev_stats, dict):
+                    sofa_stats = dict(prev_stats)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                sofa_stats = {}
+            if not isinstance(sofa_stats, dict):
+                sofa_stats = {}
+            if corners_home is not None:
+                sofa_stats["corners_home"] = int(corners_home)
+            if corners_away is not None:
+                sofa_stats["corners_away"] = int(corners_away)
+            if shots_home is not None:
+                sofa_stats["shots_home"] = int(shots_home)
+            if shots_away is not None:
+                sofa_stats["shots_away"] = int(shots_away)
+
+        conn.execute(
+            """
+            UPDATE matches SET
+                home_goals=COALESCE(?, home_goals),
+                away_goals=COALESCE(?, away_goals),
+                result=COALESCE(?, result),
+                hit=?,
+                settled_at=?,
+                sofascore_stats=COALESCE(?, sofascore_stats)
+            WHERE match_key=?
+            """,
+            (
+                hg_i,
+                ag_i,
+                res,
+                final_hit,
+                now,
+                json.dumps(sofa_stats, ensure_ascii=False) if sofa_stats is not None else None,
+                rec["match_key"],
+            ),
+        )
+        conn.commit()
+        try:
+            export_plays_csv()
+        except Exception:
+            pass
+        try:
+            export_settle_journal(roi_only=True)
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "match_key": rec["match_key"],
+            "home": rec["home"],
+            "away": rec["away"],
+            "date": rec["date"],
+            "pick": pick,
+            "home_goals": hg_i,
+            "away_goals": ag_i,
+            "result": res,
+            "hit": final_hit,
+            "settled_at": now,
+            "presa": "Sì" if final_hit == 1 else "No",
+        }
+    finally:
+        conn.close()
+
+
 def _fetch_world_results(*, days_back: int = 3) -> pd.DataFrame:
     """Scarica i risultati degli ultimi N giorni da TheSportsDB e API-Football."""
     import json
@@ -1707,6 +2876,10 @@ def settle_scorer_pending(*, max_fetch: int = 40) -> dict[str, Any]:
 
 def settle_pending(*, learn: bool = True, learn_only_if_settled: bool = False) -> dict[str, Any]:
     """Chiude i match archiviati: Sofascore Big 5 prima, poi coppe/FD/mondo e scorers."""
+    try:
+        sync_freeze_state()
+    except Exception as exc:
+        print(f"skip freeze sync pre-settle: {exc}")
     conn = _connect()
     try:
         _migrate_jsonl(conn)
@@ -1805,6 +2978,18 @@ def settle_pending(*, learn: bool = True, learn_only_if_settled: bool = False) -
         summary["plays_csv"] = export_plays_csv()
     except Exception as exc:
         summary["plays_csv_error"] = str(exc)
+    try:
+        from modules.notify.stale_settle import notify_stale_pending_settlements
+
+        stale_info = notify_stale_pending_settlements()
+        summary["stale_settle_notify"] = stale_info
+        if stale_info.get("n_sent"):
+            print(
+                f"telegram settle manuale: {stale_info.get('n_sent')} msg · "
+                f"{stale_info.get('n_new')} pending ≥{stale_info.get('min_days')}g"
+            )
+    except Exception as exc:
+        summary["stale_settle_notify_error"] = str(exc)
     return summary
 
 

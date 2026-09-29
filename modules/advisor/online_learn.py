@@ -98,11 +98,11 @@ def _recent_roi(
 ) -> dict[str, Any]:
     if min_score is None:
         min_score = ROI_MIN_SCORE
-    pool = trainable_settled(rows)
+    from modules.advisor.learn_policy import is_live, roi_settled
+
+    pool = roi_settled(rows, min_score=min_score)
     if live_only:
         pool = [r for r in pool if is_live(r)]
-    if min_score:
-        pool = [r for r in pool if meets_roi_score(r, min_score=min_score)]
     chunk = pool[-last_n:]
     pnl = 0.0
     n = 0

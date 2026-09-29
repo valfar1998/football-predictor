@@ -1,12 +1,14 @@
-"""Quote Pinnacle da The Odds API (the-odds-api.com).
+"""Quote bookmaker IT da The Odds API (the-odds-api.com).
+
+Default: Codere IT (`codere_it`) — distinto da Kambi/Unibet.
+Pinnacle deprecato (override con ODDS_API_BOOKMAKER=pinnacle se serve).
 
 Piano gratuito: 500 chiamate/mese.
 Strategia: fetch per sport-key Big 5 (+ UCL) 1×/giorno, cache JSON locale.
-La cache viene usata da enrich_value come sharp odd di riferimento.
 
 Featured: /v4/sports/{sport_key}/odds  markets=h2h,totals
 Corner (per evento): /v4/sports/{sport_key}/events/{id}/odds
-  markets=alternate_totals_corners,alternate_spreads_corners,corners_1x2
+  markets=alternate_totals_corners,...
 
 Chiave API: salva in data/raw/odds-api.key oppure env ODDS_API_KEY.
 """
@@ -22,11 +24,12 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
 RAW = ROOT / "data" / "raw"
-CACHE = RAW / "pinnacle_odds.json"
+CACHE = RAW / "pinnacle_odds.json"  # nome storico; payload ora = bookmaker configurato
 CORNERS_CACHE = RAW / "pinnacle_corners.json"
 KEY_PATH = RAW / "odds-api.key"
 BASE = "https://api.the-odds-api.com/v4"
 UA = "Mozilla/5.0 (compatible; football-predictor/1.0; +local)"
+DEFAULT_BOOKMAKER = "codere_it"
 
 # Numero di chiamate rimanenti lette dall'ultimo header di risposta
 _REMAINING_PATH = RAW / "odds-api-remaining.txt"
@@ -47,6 +50,20 @@ CORNER_MARKETS = (
     "corners_1x2",
     "alternate_team_totals_corners",
 )
+
+
+def _bookmaker_key() -> str:
+    return (os.environ.get("ODDS_API_BOOKMAKER") or DEFAULT_BOOKMAKER).strip().lower() or DEFAULT_BOOKMAKER
+
+
+def _bookmaker_label() -> str:
+    key = _bookmaker_key()
+    labels = {
+        "codere_it": "Codere IT",
+        "unibet_it": "Unibet IT",
+        "pinnacle": "Pinnacle",
+    }
+    return labels.get(key, key)
 
 
 def _api_key() -> str | None:
@@ -103,8 +120,10 @@ def _cache_is_fresh(max_age_hours: float = 20.0) -> bool:
 
 
 def fetch_pinnacle_odds(*, force: bool = False, max_age_hours: float = 20.0) -> dict:
-    """Scarica quote Pinnacle h2h+totals per Big 5 + UCL (una call per sport-key)."""
+    """Scarica quote bookmaker Odds API (default Codere IT) h2h+totals Big 5 + UCL."""
     key = _api_key()
+    book = _bookmaker_key()
+    label = _bookmaker_label()
     if not key:
         return {"ok": False, "error": "chiave ODDS_API_KEY non trovata", "n_events": 0, "events": [], "from_cache": False}
 
@@ -119,6 +138,7 @@ def fetch_pinnacle_odds(*, force: bool = False, max_age_hours: float = 20.0) -> 
                 "from_cache": True,
                 "events": events,
                 "by_sport": data.get("by_sport") or {},
+                "bookmaker": data.get("bookmaker") or book,
             }
         except Exception:
             pass
@@ -133,7 +153,7 @@ def fetch_pinnacle_odds(*, force: bool = False, max_age_hours: float = 20.0) -> 
                 f"{BASE}/sports/{sport_key}/odds"
                 f"?regions=eu"
                 f"&markets=h2h,totals"
-                f"&bookmakers=pinnacle"
+                f"&bookmakers={book}"
                 f"&oddsFormat=decimal"
                 f"&dateFormat=iso"
             )
@@ -157,6 +177,7 @@ def fetch_pinnacle_odds(*, force: bool = False, max_age_hours: float = 20.0) -> 
             by_sport[sport_key] = len(batch)
         payload = {
             "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "bookmaker": book,
             "remaining": remaining,
             "events": all_events,
             "by_sport": by_sport,
@@ -165,7 +186,7 @@ def fetch_pinnacle_odds(*, force: bool = False, max_age_hours: float = 20.0) -> 
         CACHE.parent.mkdir(parents=True, exist_ok=True)
         CACHE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         n = len(all_events)
-        print(f"ok Pinnacle odds: {n} eventi su {len(by_sport)} sport (chiamate rimanenti: {remaining})")
+        print(f"ok {label} odds: {n} eventi su {len(by_sport)} sport (chiamate rimanenti: {remaining})")
         return {
             "ok": n > 0,
             "n_events": n,
@@ -173,6 +194,7 @@ def fetch_pinnacle_odds(*, force: bool = False, max_age_hours: float = 20.0) -> 
             "from_cache": False,
             "events": all_events,
             "by_sport": by_sport,
+            "bookmaker": book,
             "error": None if n else ("; ".join(errors) or "nessun evento"),
         }
     except HTTPError as exc:
@@ -268,7 +290,7 @@ def lookup_pinnacle(
             "odd_under_25": None,
         }
         for bm in ev.get("bookmakers") or []:
-            if str(bm.get("key") or "").lower() != "pinnacle":
+            if str(bm.get("key") or "").lower() != _bookmaker_key():
                 continue
             for mkt in bm.get("markets") or []:
                 mkt_key = str(mkt.get("key") or "")
@@ -330,7 +352,7 @@ def _parse_corner_markets(data: dict) -> dict:
         "markets_present": [],
     }
     for bm in data.get("bookmakers") or []:
-        if str(bm.get("key") or "").lower() != "pinnacle":
+        if str(bm.get("key") or "").lower() != _bookmaker_key():
             continue
         for mkt in bm.get("markets") or []:
             mk = str(mkt.get("key") or "")
@@ -366,8 +388,9 @@ def fetch_event_corner_odds(
     *,
     force: bool = False,
 ) -> dict:
-    """Fetch mercati corner Pinnacle per un singolo evento (1 credito tipico)."""
+    """Fetch mercati corner del bookmaker Odds API per un singolo evento (1 credito tipico)."""
     key = _api_key()
+    book = _bookmaker_key()
     if not key:
         return {"ok": False, "error": "chiave ODDS_API_KEY non trovata"}
     cache: dict = {}
@@ -386,7 +409,7 @@ def fetch_event_corner_odds(
     markets = ",".join(CORNER_MARKETS)
     url = (
         f"{BASE}/sports/{sport_key}/events/{event_id}/odds"
-        f"?regions=eu&markets={markets}&bookmakers=pinnacle&oddsFormat=decimal"
+        f"?regions=eu&markets={markets}&bookmakers={book}&oddsFormat=decimal"
     )
     try:
         data, headers = _get(url, key)

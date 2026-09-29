@@ -100,12 +100,36 @@ jobs:
           restore-keys: |
             cloud-upcoming-
 
+      - name: Prep telegram cache dir
+        run: mkdir -p /tmp/fp-telegram-cache data/processed
+
       - uses: actions/cache/restore@v4
         with:
-          path: data/processed/telegram_alerts_sent.json
+          path: /tmp/fp-telegram-cache
           key: telegram-sent-${{ github.run_id }}
           restore-keys: |
             telegram-sent-
+
+      - name: Merge telegram cache (freeze + sent, no overwrite)
+        run: python scripts/merge_telegram_cache.py /tmp/fp-telegram-cache
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/processed/our_history.sqlite
+            data/processed/our_history.sqlite-wal
+            data/processed/our_history.sqlite-shm
+          key: cloud-history-${{ github.run_id }}
+          restore-keys: |
+            cloud-history-
+            cloud-history-v2
+
+      - name: Re-sync freeze after history restore
+        run: |
+          python - <<'PY'
+          from modules.data_update.history import sync_freeze_state
+          print(sync_freeze_state())
+          PY
 
       - uses: actions/cache/restore@v4
         with:
@@ -125,11 +149,33 @@ jobs:
           PYTHONUTF8: "1"
         run: python scripts/notify_cloud.py
 
+      - name: Upload freeze journal (artefatto)
+        uses: actions/upload-artifact@v4
+        if: always() && hashFiles('data/processed/telegram_score_freeze.json') != ''
+        with:
+          name: telegram-freeze-${{ github.run_id }}
+          path: |
+            data/processed/telegram_score_freeze.json
+            data/processed/telegram_alerts_sent.json
+          if-no-files-found: ignore
+          retention-days: 30
+
       - uses: actions/cache/save@v4
         if: always() && hashFiles('data/processed/telegram_alerts_sent.json') != ''
         with:
-          path: data/processed/telegram_alerts_sent.json
+          path: |
+            data/processed/telegram_alerts_sent.json
+            data/processed/telegram_score_freeze.json
           key: telegram-sent-${{ github.run_id }}
+
+      - uses: actions/cache/save@v4
+        if: always() && hashFiles('data/processed/our_history.sqlite') != ''
+        with:
+          path: |
+            data/processed/our_history.sqlite
+            data/processed/our_history.sqlite-wal
+            data/processed/our_history.sqlite-shm
+          key: cloud-history-${{ github.run_id }}
 
       - uses: actions/cache/save@v4
         if: always()

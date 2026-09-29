@@ -232,14 +232,60 @@ def _fmt_quota(val: float | None) -> str | None:
     return f"{val:.2f}".rstrip("0").rstrip(".")
 
 
+_SOURCE_LABELS = {
+    "asianbetsoccer": "AsianBetSoccer",
+    "betfair": "Betfair",
+    "kambi_unibet": "Kambi/Unibet",
+    "pinnacle": "Pinnacle",
+    "codere_it": "Codere",
+    "book": "football-data",
+    "football-data.co.uk": "football-data",
+    "football-data.org": "football-data.org",
+}
+
+
+def _odds_source_of(row: dict) -> str | None:
+    """Fonte quota del pick (riga calendario o mercato matching)."""
+    candidates: list[str] = []
+    for key in ("odds_source", "quota_source"):
+        raw = row.get(key)
+        if raw:
+            candidates.append(str(raw))
+    pick = str(row.get("pick") or "").strip().upper()
+    markets = row.get("markets")
+    if isinstance(markets, list) and pick:
+        for m in markets:
+            if not isinstance(m, dict):
+                continue
+            if str(m.get("code") or "").upper() != pick:
+                continue
+            src = m.get("odds_source")
+            if src:
+                candidates.insert(0, str(src))
+            break
+    odds = row.get("odds")
+    if isinstance(odds, dict):
+        for sk in ("side_odds_source", "odds_source", "source"):
+            if odds.get(sk):
+                candidates.append(str(odds.get(sk)))
+    for raw in candidates:
+        s = raw.strip().lower()
+        if not s or s.startswith("stimata"):
+            continue
+        return _SOURCE_LABELS.get(s, raw.strip())
+    return None
+
+
 def _quota_lines(row: dict, *, book_label: str = "Quota") -> list[str]:
-    """Righe Telegram: quota book + quota equa dall'analisi."""
+    """Righe Telegram: quota book (+ fonte) + quota equa dall'analisi."""
     book = _fmt_quota(_quota_of(row))
     fair = _fmt_quota(_fair_quota_of(row))
+    src = _odds_source_of(row)
+    src_bit = f" ({src})" if src else ""
     if book and fair and book != fair:
-        return [f"{book_label} {book} · equa {fair}"]
+        return [f"{book_label} {book}{src_bit} · equa {fair}"]
     if book:
-        return [f"{book_label} {book}"]
+        return [f"{book_label} {book}{src_bit}"]
     if fair:
         return [f"Equa (analisi) {fair}"]
     return []

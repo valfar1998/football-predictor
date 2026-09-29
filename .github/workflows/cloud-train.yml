@@ -30,10 +30,10 @@ jobs:
             data/processed/our_history.sqlite
             data/processed/our_history.sqlite-wal
             data/processed/our_history.sqlite-shm
-          key: cloud-history-v2
+          key: cloud-history-${{ github.run_id }}
           restore-keys: |
-            cloud-history-v2
             cloud-history-
+            cloud-history-v2
 
       - uses: actions/cache/restore@v4
         with:
@@ -116,12 +116,18 @@ jobs:
             data/raw/fixtures
           key: cloud-fd-v1
 
+      - name: Prep telegram cache dir
+        run: mkdir -p /tmp/fp-telegram-cache data/processed
+
       - uses: actions/cache/restore@v4
         with:
-          path: data/processed/telegram_alerts_sent.json
+          path: /tmp/fp-telegram-cache
           key: telegram-sent-${{ github.run_id }}
           restore-keys: |
             telegram-sent-
+
+      - name: Merge telegram cache (freeze + sent, no overwrite)
+        run: python scripts/merge_telegram_cache.py /tmp/fp-telegram-cache
 
       - uses: actions/cache/restore@v4
         with:
@@ -161,6 +167,8 @@ jobs:
             data/models/learn_digest.md
             data/models/learn_digest_meta.json
             data/processed/our_history.sqlite
+            data/processed/telegram_score_freeze.json
+            data/processed/local_settles.json
             docs/APPRENDIMENTO.md
           if-no-files-found: ignore
           retention-days: 14
@@ -168,7 +176,10 @@ jobs:
       - uses: actions/cache/save@v4
         if: always() && hashFiles('data/processed/telegram_alerts_sent.json') != ''
         with:
-          path: data/processed/telegram_alerts_sent.json
+          path: |
+            data/processed/telegram_alerts_sent.json
+            data/processed/telegram_score_freeze.json
+            data/processed/local_settles.json
           key: telegram-sent-${{ github.run_id }}
 
       - uses: actions/cache/save@v4
@@ -178,7 +189,7 @@ jobs:
             data/processed/our_history.sqlite
             data/processed/our_history.sqlite-wal
             data/processed/our_history.sqlite-shm
-          key: cloud-history-v2
+          key: cloud-history-${{ github.run_id }}
 
       - uses: actions/cache/save@v4
         if: always()

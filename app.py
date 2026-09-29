@@ -167,6 +167,16 @@ def _as_frac(val) -> float:
     return x
 
 
+def _as_int_flag(val, default: int = 0) -> int:
+    """Cast sicuro per flag interi da pandas (NaN → default)."""
+    try:
+        if val is None or pd.isna(val):
+            return default
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
 def _frac_series(s: pd.Series | None, *, fill: float | None = None) -> pd.Series:
     if s is None:
         return pd.Series(dtype=float)
@@ -520,7 +530,7 @@ def _asian_radar_table(min_rank: int) -> pd.DataFrame:
 
 
 def _enrich_upcoming(rows: list[dict]) -> list[dict]:
-    """Ricalcola livelli, commenti e Δ pp dal cache Asian."""
+    """Ricalcola livelli, commenti e Δ pp dal cache Asian + overlay freeze Telegram."""
     out: list[dict] = []
     for match in rows:
         item = dict(match)
@@ -542,6 +552,12 @@ def _enrich_upcoming(rows: list[dict]) -> list[dict]:
             item["line_move"] = move.get("line_move")
             item["spread_score"] = move.get("spread_score")
         out.append(item)
+    try:
+        from modules.data_update.history import overlay_freeze_on_upcoming
+
+        overlay_freeze_on_upcoming(out)
+    except Exception:
+        pass
     return out
 
 
@@ -618,14 +634,44 @@ def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
     if "odds_real" in show.columns:
         show["odds_real"] = show["odds_real"].map(lambda x: "Sì" if bool(x) else "No")
     if "action" in show.columns:
-        show["action"] = show["action"].map(
-            lambda x: (
-                "No bet" if x == "no_bet"
-                else "N/D" if x == "n/d"
-                else "Invalido" if x == "invalido"
-                else "Gioca"
-            )
+        locked = (
+            view["score_locked"].fillna(0).astype(int).eq(1)
+            if "score_locked" in view.columns
+            else pd.Series(False, index=view.index)
         )
+        show["action"] = [
+            (
+                ("Freeze · Gioca" if a == "gioca" else "Freeze · No bet" if a == "no_bet" else f"Freeze · {a}")
+                if bool(lk)
+                else (
+                    "No bet" if a == "no_bet"
+                    else "N/D" if a == "n/d"
+                    else "Invalido" if a == "invalido"
+                    else "Gioca"
+                )
+            )
+            for a, lk in zip(show["action"].tolist(), locked.reindex(show.index).fillna(False).tolist())
+        ]
+    if "score_unified" in show.columns and "score_live" in view.columns:
+        # Nota live accanto al voto freeze, senza cambiare il voto ufficiale
+        live = view.reindex(show.index)["score_live"]
+        locked = (
+            view.reindex(show.index)["score_locked"].fillna(0).astype(int).eq(1)
+            if "score_locked" in view.columns
+            else pd.Series(False, index=show.index)
+        )
+        def _voto_cell(su, lv, lk):
+            if not lk or lv is None or (su is not None and str(su) == str(lv)):
+                return su
+            return f"{su} (live {lv})"
+        show["score_unified"] = [
+            _voto_cell(su, lv, bool(lk))
+            for su, lv, lk in zip(
+                show["score_unified"].tolist(),
+                live.tolist(),
+                locked.fillna(False).tolist(),
+            )
+        ]
     for drop_col in ("drop_1", "drop_x", "drop_2"):
         if drop_col in show.columns:
             show[drop_col] = pd.to_numeric(show[drop_col], errors="coerce")
@@ -722,30 +768,34 @@ def _batch(title: str):
 def _table(markets: list[dict]) -> None:
     rows = []
     for m in markets:
+        if not isinstance(m, dict):
+            continue
         real = m.get("odds_real")
         if real is None:
             src = str(m.get("odds_source") or "")
             real = bool(src) and not src.startswith("stimata")
+        prob = m.get("probability")
         rows.append(
             {
-                "Mercato": m["name"],
-                "Codice": m["code"],
-                "Prob.": f"{m['probability']:.0%}",
+                "Mercato": m.get("name") or m.get("code") or "—",
+                "Codice": m.get("code") or "—",
+                "Prob.": f"{prob:.0%}" if isinstance(prob, (int, float)) else "—",
                 "P cons.": f"{m['p_cons']:.0%}" if m.get("p_cons") is not None else "—",
                 "P mercato": f"{m['p_market']:.0%}" if real and m.get("p_market") is not None else "—",
-                "Quota book": m["odds"],
-                "Quota equa": m["fair_odds"],
+                "Quota book": m.get("odds") if m.get("odds") is not None else "—",
+                "Quota equa": m.get("fair_odds") if m.get("fair_odds") is not None else "—",
                 "Edge pp": _pct(m.get("edge_pp")) if real else "—",
                 "EV cons.": _pct(m.get("ev_cons")) if real else "—",
                 "EV sharp": _pct(m.get("ev_sharp")) if real else "—",
-                "Voto prob.": m.get("score_prob"),
+                "Voto prob.": m.get("score_prob") if m.get("score_prob") is not None else "—",
                 "Voto value": m.get("score_value") if real and m.get("score_value") is not None else "—",
-                "Voto finale": m.get("score"),
+                "Voto finale": m.get("score") if m.get("score") is not None else "—",
                 "Kelly ¼": f"{m['kelly_quarter']:.1%}" if m.get("kelly_quarter") is not None else "—",
                 "Fonte": m.get("odds_source") or "—",
             }
         )
-    st.dataframe(rows, width="stretch", hide_index=True)
+    if rows:
+        st.dataframe(rows, width="stretch", hide_index=True)
 
 
 def render_advice(
@@ -756,6 +806,8 @@ def render_advice(
     odds_from_asian: bool = False,
     match_date: str | None = None,
     league: str | None = None,
+    vote_copy_key: str = "singola_predizione",
+    calendar_row: dict | None = None,
 ) -> None:
     if odds_from_asian or market_move:
         match = pred.get("match") or ""
@@ -772,7 +824,51 @@ def render_advice(
         league=league or pred.get("league"),
     )
     play = advice["play"]
-    render_vote_copy(advice, key="singola_predizione")
+    freeze_row = calendar_row if isinstance(calendar_row, dict) else None
+    locked = bool(freeze_row) and _as_int_flag(freeze_row.get("score_locked")) == 1
+    if locked:
+        # Contratto Telegram: pick/voto/quota freezati; advise live resta solo informativo
+        live_su = play.get("score_unified")
+        live_pick = play.get("code") or play.get("pick")
+        live_quota = play.get("odds")
+        if freeze_row.get("pick") not in (None, "", "—"):
+            play = dict(play)
+            play["code"] = freeze_row.get("pick")
+            play["pick"] = freeze_row.get("pick")
+            if freeze_row.get("pick_name") or freeze_row.get("pick_label"):
+                play["name"] = freeze_row.get("pick_name") or freeze_row.get("pick_label")
+            play["action"] = freeze_row.get("action") or play.get("action")
+            try:
+                su = int(
+                    freeze_row.get("score_unified")
+                    if freeze_row.get("score_unified") is not None
+                    else freeze_row.get("score")
+                )
+                play["score_unified"] = su
+                play["score"] = int(freeze_row["score"]) if freeze_row.get("score") is not None else su
+            except (TypeError, ValueError):
+                pass
+            if freeze_row.get("quota_pick") is not None:
+                play["odds"] = freeze_row.get("quota_pick")
+            advice = dict(advice)
+            advice["play"] = play
+        st.info(
+            freeze_row.get("freeze_note")
+            or (
+                "Freeze Telegram: pick/voto/quota della notifica. "
+                "Pending settle — il ricalcolo live è solo informativo."
+            )
+        )
+        live_bits = []
+        if live_su is not None and live_su != play.get("score_unified"):
+            live_bits.append(f"voto live {live_su}/10")
+        if live_pick and str(live_pick) != str(play.get("code")):
+            live_bits.append(f"pick live {live_pick}")
+        if live_quota is not None and live_quota != play.get("odds"):
+            live_bits.append(f"quota live {live_quota}")
+        if live_bits:
+            st.caption("Solo info (non cambia la giocata): " + " · ".join(live_bits))
+    render_vote_copy(advice, key=vote_copy_key)
     left, right = st.columns([1.15, 1])
     with left:
         st.markdown(f"**{advice['match']}**")
@@ -785,6 +881,8 @@ def render_advice(
             head = f"NO BET {play.get('code') or ''}"
         else:
             head = f"GIOCA {play.get('code') or ''}"
+        if locked:
+            head = f"FREEZE · {head}"
         st.markdown(
             f'<p class="pick-code">{head}</p>'
             f'<p class="pick-name">{play["name"]} · {_kind_label(play.get("kind") or "")}</p>',
@@ -794,7 +892,8 @@ def render_advice(
         score_disp = play.get("score")
         st.markdown("**— / 10**" if score_disp is None else f"**{score_disp} / 10**")
         if play.get("score_unified") is not None:
-            st.caption(f"Voto unificato (value + Kelly + Asian + workflow + storico): **{play['score_unified']}/10**")
+            label = "Voto freeze (notifica)" if locked else "Voto unificato (value + Kelly + Asian + workflow + storico)"
+            st.caption(f"{label}: **{play['score_unified']}/10**")
         ms = play.get("match_scores") or advice.get("match_scores") or {}
         if play.get("score_100") is not None or advice.get("score_100") is not None:
             s100 = play.get("score_100") if play.get("score_100") is not None else advice.get("score_100")
@@ -1112,8 +1211,44 @@ def render_advice(
 st.title("Consiglio mercati")
 st.caption(
     "Tre livelli: **modello** (soldi: EV/Kelly/Gioca; ensemble XGB+Poisson), **voto unificato** (ordine in tabella), "
-    "**fonti extra** (quadro). Understat e meteo entrano nelle λ, non nell'EV. A sinistra basta **Aggiorna dati + modello**."
+    "**fonti extra** (quadro). Understat e meteo entrano nelle λ, non nell'EV. A sinistra basta **Aggiorna dati + modello**. "
+    "Dopo alert Telegram il pick/voto/quota sono **freeze** (pending settle); il live resta solo informativo."
 )
+try:
+    from modules.advisor.paper_stats import paper_trading_report
+
+    _home_roi = paper_trading_report()
+    if _home_roi.get("ok"):
+        _hn = int(_home_roi.get("n") or 0)
+        _hp = int(_home_roi.get("n_pending_score") or 0)
+        _hroi = _home_roi.get("odds_roi")
+        _hvotes = _home_roi.get("by_vote") or {}
+        hc1, hc2, hc3, hc4, hc5 = st.columns(5)
+        hc1.metric(
+            "Campione ROI",
+            f"{_hn} ({_hp})",
+            help=(
+                "Settled nel campione paper (voto ≥8 rich, oppure freeze Telegram). "
+                "Tra parentesi: ancora in attesa di settle."
+            ),
+        )
+        hc2.metric(
+            "ROI @ quote",
+            "n/d" if _hroi is None else f"{_hroi:+.1%}",
+            delta=f"hit {_home_roi.get('hit_rate', 0):.0%}" if _hn else None,
+        )
+        for _col, _vote in ((hc3, "8"), (hc4, "9"), (hc5, "10")):
+            _vs = _hvotes.get(_vote) or {}
+            _vroi = _vs.get("odds_roi")
+            _vn = int(_vs.get("n") or 0)
+            _vp = int(_vs.get("pending") or 0)
+            _col.metric(
+                f"ROI voto {_vote}",
+                "n/d" if _vroi is None else f"{_vroi:+.1%}",
+                delta=f"n={_vn} ({_vp})" if (_vn or _vp) else "n=0",
+            )
+except Exception:
+    pass
 with st.expander("Come funziona — cosa fa ogni pezzo", expanded=False):
     st.markdown(
         """
@@ -1124,7 +1259,7 @@ with st.expander("Come funziona — cosa fa ogni pezzo", expanded=False):
 3. **EV cons.** — quanto il book paga più (o meno) della probabilità del modello. Solo con quota reale. Vuoto = N/D.
 4. **Gioca / Mercato** — il consiglio (1, X, Over 2.5, …). Vuoto o "—" se il pick è invalido o N/D.
 
-Togli la spunta **Nascondi no-bet** se vuoi vedere Premier/Serie A/Liga: quelle partite *hanno* il voto, l'azione è No bet.
+Togli la spunta **Nascondi non giocabili** se vuoi vedere Premier/Serie A/Liga anche in no-bet, più N/D (fuori modello) e invalidi (senza quote).
 
 ---
 
@@ -1166,6 +1301,8 @@ Altre fonti *aggiungono righe* al calendario, spesso N/D:
 | **Quote AsianBetSoccer** | Quote Bet365 + movimento apertura→attuale | No in EV; sì nel voto unificato (gamba Asian) |
 | **Tipster** (Forebet, PredictZ, Vitibet) | Consenso siti pubblici | No in EV; sì nel quadro/voto |
 
+Tab **Analisi partita**: scegli una gara del calendario e vedi l'analisi completa (pick, quadro fonti, Asian, tipster) senza toccare la colonna a sinistra.
+
 ---
 
 **Livello 3 — Quadro (validazione, non generazione)**
@@ -1184,7 +1321,7 @@ Non ricalcolano EV/Kelly e **non creano pick**. Se ci sono, pesano al massimo un
 **Bottoni a sinistra — come usarli al meglio**
 
 *Ogni giorno (o dopo una pausa)*
-- **Scarica aggiornamento + apprendimento** — modello e learn (calibrazione/residual/pesi) da Actions. Poi **Solo quote**. Serve `gh auth login`.
+- **Scarica aggiornamento + apprendimento** — modello e learn (calibrazione/residual/pesi) da Actions. Lo storico cloud si **unisce** a quello locale (i settle manuali non vengono cancellati). Poi **Solo quote**. Serve `gh auth login`.
 - **Aggiorna dati + modello** — train completo in locale (~1h+). Solo se non usi GitHub o vuoi rifare tutto sul PC.
 - **Solo quote e calendario** — stesso giorno: fixtures football-data, quote Asian, Pinnacle/Betfair se la cache è scaduta. **Senza** riallenare, senza mondiale/coppe/tipster/FBref. Monte Carlo solo sulle partite **nuove**.
 
@@ -1353,25 +1490,28 @@ with st.sidebar:
                 st.error("Incolla prima il token.")
             else:
                 prog = _batch("Coppe")
-                from modules.data_update.upcoming import build_upcoming
+                try:
+                    from modules.data_update.upcoming import build_upcoming
 
-                prog(0.1, "GET /v4/matches…")
-                info = download_org_cups()
-                if not info.get("token"):
-                    st.error("Token assente o non letto.")
-                elif info.get("error"):
-                    st.error(str(info["error"]))
-                else:
-                    prog(0.35, "Calendario: riuso predizioni, MC solo sulle nuove…")
-                    upcoming_n = len(build_upcoming(reuse_predictions=True))
-                    n = info.get("n_cup_fixtures") or 0
-                    comps = ", ".join(info.get("competitions") or []) or "nessuna coppa in finestra"
-                    prog.done("OK")
-                    st.success(
-                        f"Coppe: {n} match · {comps} · calendario {upcoming_n} "
-                        f"(riuso predizioni dove possibile)"
-                    )
-                    st.rerun()
+                    prog(0.1, "GET /v4/matches…")
+                    info = download_org_cups()
+                    if not info.get("token"):
+                        st.error("Token assente o non letto.")
+                    elif info.get("error"):
+                        st.error(str(info["error"]))
+                    else:
+                        prog(0.35, "Calendario: riuso predizioni, MC solo sulle nuove…")
+                        upcoming_n = len(build_upcoming(reuse_predictions=True))
+                        n = info.get("n_cup_fixtures") or 0
+                        comps = ", ".join(info.get("competitions") or []) or "nessuna coppa in finestra"
+                        prog.done("OK")
+                        st.success(
+                            f"Coppe: {n} match · {comps} · calendario {upcoming_n} "
+                            f"(riuso predizioni dove possibile)"
+                        )
+                        st.rerun()
+                except Exception as exc:
+                    st.error(f"Errore scarico coppe: {exc}")
         st.caption(
             "Dopo il download non rifà Monte Carlo su tutto: riusa le predizioni già in calendario "
             "e calcola solo le partite nuove."
@@ -1671,8 +1811,8 @@ upcoming = _load_upcoming_enriched(
     if (ROOT / "data" / "raw" / "asian_odds.json").exists()
     else 0.0,
 )
-tab_cal, tab_mkt, tab_one, tab_eval = st.tabs(
-    ["Calendario", "Tutti i mercati", "Singola partita", "Valutazione"]
+tab_cal, tab_analisi, tab_mkt, tab_one, tab_eval = st.tabs(
+    ["Calendario", "Analisi partita", "Tutti i mercati", "Singola partita", "Valutazione"]
 )
 
 with tab_cal:
@@ -1699,9 +1839,19 @@ with tab_cal:
         df = ensure_play_rank_df(df)
         df = _filter_by_date(df)
         n_steam = int(df["movement_level"].notna().sum()) if "movement_level" in df.columns else 0
+        n_freeze = (
+            int(pd.to_numeric(df["score_locked"], errors="coerce").fillna(0).eq(1).sum())
+            if "score_locked" in df.columns
+            else 0
+        )
         st.caption(
             f"Steam Asian agganciato su **{n_steam}** partite di questo calendario "
             f"(su {len(df)}). Il filtro *Leggero+* nasconde le stabili e chi non ha match di nomi."
+            + (
+                f" · **{n_freeze}** freeze Telegram (pick/voto/quota della notifica, pending settle; live solo info)."
+                if n_freeze
+                else ""
+            )
         )
         countries = sorted(df["country"].dropna().unique())
         f1, f2, f3, f4 = st.columns(4)
@@ -1726,7 +1876,12 @@ with tab_cal:
         with q4:
             only_value = st.checkbox("Solo EV cons. positivo", value=False)
         aligned_only = st.checkbox("Solo allineati al mercato asiatico", value=False)
-        hide_nbet = st.checkbox("Nascondi no-bet (edge basso o mercato contrario)", value=True)
+        hide_nbet = st.checkbox(
+            "Nascondi non giocabili (no-bet, N/D, invalidi)",
+            value=True,
+            help="No-bet = edge basso / mercato contrario. N/D = squadre fuori modello. "
+            "Invalido = senza quote (niente EV/Kelly). Togli la spunta per vedere tutto il calendario.",
+        )
         s1, s2, s3 = st.columns(3)
         with s1:
             sort_mode = st.selectbox(
@@ -1752,7 +1907,25 @@ with tab_cal:
 
         view = df[df["country"].isin(sel_country) & df["league"].isin(sel_league)].copy()
         if "pick_group" in view.columns:
-            view = view[view["pick_group"].fillna("1x2").isin(sel_groups)]
+            def _matches_tipo(r) -> bool:
+                pg = r.get("pick_group") if pd.notna(r.get("pick_group")) else "1x2"
+                if pg in sel_groups:
+                    return True
+                ag = r.get("advice_groups")
+                if isinstance(ag, list):
+                    return any(g in sel_groups for g in ag)
+                if isinstance(ag, str) and ag.strip().startswith("["):
+                    try:
+                        import ast
+
+                        parsed = ast.literal_eval(ag)
+                        if isinstance(parsed, list):
+                            return any(g in sel_groups for g in parsed)
+                    except Exception:
+                        return False
+                return False
+
+            view = view[view.apply(_matches_tipo, axis=1)]
         # Filtro sul voto unificato (quello in tabella); fallback al voto mercato
         if "score_unified" in view.columns:
             view = view[view["score_unified"].isna() | (view["score_unified"] >= min_score)]
@@ -1768,11 +1941,26 @@ with tab_cal:
         if aligned_only and "market_align" in view.columns:
             view = view[view["market_align"] == "allineato"]
         n_nbet = int((view["action"] == "no_bet").sum()) if "action" in view.columns else 0
+        n_nd_pre = int((view["action"] == "n/d").sum()) if "action" in view.columns else 0
+        n_inv_pre = int((view["action"] == "invalido").sum()) if "action" in view.columns else 0
         n_nbet_uni = 0
         if "action" in view.columns and "score_unified" in view.columns:
             n_nbet_uni = int(((view["action"] == "no_bet") & view["score_unified"].notna()).sum())
         if hide_nbet and "action" in view.columns:
-            view = view[view["action"].fillna("gioca") != "no_bet"]
+            def _keep_playable(r) -> bool:
+                if _as_int_flag(r.get("score_locked")) == 1:
+                    return True  # freeze Telegram: sempre visibile fino al settle
+                act = r.get("action") if pd.notna(r.get("action")) else "gioca"
+                if act == "gioca":
+                    return True
+                # Filtro Tipo consiglio ristretto: tieni no-bet se c’è un gruppo secondario giocabile
+                if act == "no_bet" and len(sel_groups) < len(group_opts):
+                    pg = r.get("playable_groups")
+                    if isinstance(pg, list) and any(g in sel_groups for g in pg):
+                        return True
+                return False
+
+            view = view[view.apply(_keep_playable, axis=1)]
         if only_asian:
             has_asian = pd.Series(False, index=view.index)
             if "movement_level" in view.columns:
@@ -1790,13 +1978,14 @@ with tab_cal:
         st.write(f"{len(view)} partite dopo i filtri (su {len(df)})")
         st.caption(
             "Colonne chiave dopo le squadre: **Gioca · Indice gioca · Azione · EV cons. · Voto unificato · Mercato · Kelly**. "
-            "L'**Indice gioca** (0–100) unifica tutto per l'ordinamento."
+            "L'**Indice gioca** (0–100) unifica tutto per l'ordinamento. "
+            "**Tipo consiglio** include anche gruppi secondari (`advice_groups`), non solo il pick primario."
         )
-        if hide_nbet and n_nbet:
+        if hide_nbet and (n_nbet or n_nd_pre or n_inv_pre):
             st.caption(
-                f"Nascoste **{n_nbet} no-bet** ({n_nbet_uni} con voto unificato già calcolato). "
-                "Togli la spunta *Nascondi no-bet* per vederle: Premier, Serie A, Liga, Championship, ecc. "
-                "No-bet = edge basso o mercato contrario, non assenza di analisi."
+                f"Nascoste **{n_nbet} no-bet** ({n_nbet_uni} con voto), **{n_nd_pre} N/D**, **{n_inv_pre} invalidi**. "
+                "Togli *Nascondi non giocabili* per vederle (es. Como–Parma no-bet in Serie A). "
+                "No-bet = edge basso; N/D = fuori modello; invalido = senza quote."
             )
         nd = int((view["action"] == "n/d").sum()) if "action" in view.columns else 0
         n_inv = int((view["action"] == "invalido").sum()) if "action" in view.columns else 0
@@ -1822,7 +2011,8 @@ with tab_cal:
                 "Kelly ¼": st.column_config.NumberColumn("Kelly ¼", format="percent"),
                 "CLV vs apertura": st.column_config.NumberColumn("CLV vs apertura", format="percent"),
                 "Prob.": st.column_config.NumberColumn("Prob.", format="percent"),
-                "Voto unificato": st.column_config.NumberColumn("Voto unificato", format="%d"),
+                # Può essere "8 (live 5)" sulle freeze
+                "Voto unificato": st.column_config.TextColumn("Voto unificato"),
                 "Indice gioca": st.column_config.NumberColumn("Indice gioca", format="%.1f"),
                 "Score 0–100": st.column_config.NumberColumn("Score 0–100", format="%.0f"),
                 "Risk": st.column_config.NumberColumn("Risk", format="%.0f"),
@@ -2003,6 +2193,126 @@ with tab_cal:
                         )
 
         # Vista volutamente tabellare: niente passaggi extra obbligatori.
+
+with tab_analisi:
+    st.caption(
+        "Scegli una partita del calendario: l'algoritmo riesegue l'analisi completa "
+        "(modello, quote, quadro fonti, Asian, tipster) e mostra cosa pensa."
+    )
+    if not upcoming:
+        st.info("Nessun calendario. Premi **Aggiorna dati + modello** nella colonna a sinistra.")
+    else:
+        df_an = pd.DataFrame(upcoming)
+        df_an = _filter_by_date(df_an, key="analisi_dates")
+        countries_an = sorted(df_an["country"].dropna().unique()) if "country" in df_an.columns else []
+        f_a1, f_a2 = st.columns(2)
+        with f_a1:
+            sel_country_an = st.multiselect(
+                "Paese",
+                countries_an,
+                default=countries_an,
+                key="analisi_country",
+            )
+        with f_a2:
+            league_opts_an = (
+                sorted(df_an.loc[df_an["country"].isin(sel_country_an), "league"].dropna().unique())
+                if sel_country_an and "league" in df_an.columns
+                else []
+            )
+            sel_league_an = st.multiselect(
+                "Campionato",
+                league_opts_an,
+                default=league_opts_an,
+                key="analisi_league",
+            )
+        pool = df_an
+        if sel_country_an and "country" in pool.columns:
+            pool = pool[pool["country"].isin(sel_country_an)]
+        if sel_league_an and "league" in pool.columns:
+            pool = pool[pool["league"].isin(sel_league_an)]
+        pool = pool.sort_values(
+            [c for c in ("date", "time", "home") if c in pool.columns],
+            ascending=True,
+        )
+        by_key = {
+            (str(u.get("date")), str(u.get("home")), str(u.get("away"))): u
+            for u in upcoming
+        }
+        options: list[tuple[str, str, str]] = []
+        labels: dict[tuple[str, str, str], str] = {}
+        for _, r in pool.iterrows():
+            key = (str(r.get("date")), str(r.get("home")), str(r.get("away")))
+            if key not in by_key:
+                continue
+            options.append(key)
+            time_s = str(r.get("time") or "").strip()
+            league_s = str(r.get("league") or "")
+            pick_s = str(r.get("pick") or "—")
+            act = r.get("action")
+            locked = _as_int_flag(r.get("score_locked")) == 1 if "score_locked" in r.index else False
+            act_s = (
+                "Freeze" if locked
+                else "No bet" if act == "no_bet"
+                else "N/D" if act == "n/d"
+                else "Invalido" if act == "invalido"
+                else "Gioca"
+            )
+            labels[key] = (
+                f"{key[0]}"
+                + (f" {time_s}" if time_s and time_s not in {"nan", "None"} else "")
+                + f" · {league_s} · {key[1]} vs {key[2]} · {act_s} {pick_s}"
+            )
+        if not options:
+            st.warning("Nessuna partita con i filtri scelti.")
+        else:
+            chosen = st.selectbox(
+                "Partita",
+                options,
+                format_func=lambda k: labels.get(k, str(k)),
+                key="analisi_match",
+            )
+            raw = by_key.get(chosen) if chosen else None
+            if not isinstance(raw, dict):
+                st.error("Partita non trovata nel calendario.")
+            else:
+                pred = raw.get("prediction") if isinstance(raw.get("prediction"), dict) else {}
+                if not pred:
+                    st.warning(
+                        "Questa riga non ha ancora una predizione completa. "
+                        "Aggiorna il calendario e riprova."
+                    )
+                else:
+                    odds = raw.get("odds") if isinstance(raw.get("odds"), dict) else {}
+                    market_move = (
+                        raw.get("market_move")
+                        if isinstance(raw.get("market_move"), dict)
+                        else None
+                    )
+                    odds_src = str(raw.get("odds_source") or "")
+                    odds_from_asian = odds_src == "asianbetsoccer" or bool(market_move)
+                    # Allinea meta partita sulla predizione se mancanti
+                    pred = dict(pred)
+                    for fld in ("home", "away", "league", "country", "date"):
+                        if not pred.get(fld) and raw.get(fld) is not None:
+                            pred[fld] = raw.get(fld)
+                    if not pred.get("match"):
+                        pred["match"] = f"{raw.get('home')} vs {raw.get('away')}"
+                    meta_bits = [
+                        str(raw.get("date") or ""),
+                        str(raw.get("league") or ""),
+                        f"fonte quote: {odds_src or '—'}",
+                    ]
+                    st.caption(" · ".join(b for b in meta_bits if b))
+                    render_advice(
+                        pred,
+                        odds,
+                        market_move=market_move,
+                        odds_from_asian=odds_from_asian,
+                        match_date=str(raw.get("date") or "") or None,
+                        league=raw.get("league"),
+                        vote_copy_key="analisi_partita",
+                        calendar_row=raw,
+                    )
 
 with tab_mkt:
     if not upcoming:
@@ -2231,6 +2541,240 @@ with tab_one:
 with tab_eval:
     cal = load_calibration()
     summary = cal.get("backtest_summary") or {}
+
+    # --- Paper ROI in evidenza (voto ≥8) ---
+    from modules.advisor.paper_stats import paper_trading_report
+
+    _roi_rep = paper_trading_report()
+    st.subheader("Paper ROI (voto ≥8)")
+    if not _roi_rep.get("ok"):
+        st.caption(_roi_rep.get("error") or "Report non disponibile")
+    else:
+        _min_sc = _roi_rep.get("min_score") or 8
+        _prog = _roi_rep.get("sample_progress") or {}
+        _nxt = _prog.get("next") or {}
+        _cur = _prog.get("current")
+        _n_db = int(_roi_rep.get("n_history") or 0)
+        _n_settled = int(_roi_rep.get("n_settled_total") or 0)
+        _n_pending = int(_roi_rep.get("n_pending") or 0)
+        _settled_pct = _roi_rep.get("settled_pct")
+        _n_pend_sc = int(_roi_rep.get("n_pending_score") or 0)
+        _n_lock_pend = int(_roi_rep.get("n_locked_pending") or 0)
+
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric("Partite in DB", f"{_n_db}")
+        d2.metric(
+            "Chiuse",
+            f"{_n_settled}",
+            delta=None if _settled_pct is None else f"{_settled_pct:.0%} del DB",
+        )
+        d3.metric("In attesa settle", f"{_n_pending}", delta=f"voto ≥{_min_sc}: {_n_pend_sc}")
+        d4.metric(
+            "Freeze Telegram",
+            f"{int(_roi_rep.get('n_locked_total') or 0)}",
+            delta=f"pending {_n_lock_pend}",
+        )
+
+        r1, r2, r3, r4, r5 = st.columns(5)
+        _roi = _roi_rep.get("odds_roi")
+        r1.metric(
+            "ROI @ quote",
+            "n/d" if _roi is None else f"{_roi:+.1%}",
+            delta=f"flat {_roi_rep.get('flat_roi', 0):+.1%}" if _roi_rep.get("n") else None,
+        )
+        r2.metric(
+            "PnL totale",
+            f"{_roi_rep.get('odds_pnl', 0):+.2f} u",
+            delta=f"flat {_roi_rep.get('flat_pnl', 0):+.1f} u" if _roi_rep.get("n") else None,
+        )
+        _hr = _roi_rep.get("hit_rate")
+        r3.metric(
+            "Hit rate",
+            "—" if _hr is None else f"{_hr:.0%}",
+            delta=f"{_roi_rep.get('hits', 0)}/{_roi_rep.get('n', 0)}",
+        )
+        _n_now = int(_prog.get("n") or _roi_rep.get("n") or 0)
+        _target = int(_prog.get("target_n") or 15)
+        _pct_tgt = _prog.get("pct_of_target")
+        if _pct_tgt is None and _target:
+            _pct_tgt = round(100.0 * _n_now / _target, 1)
+        r4.metric(
+            "Campione ROI",
+            f"{_n_now} ({_n_pend_sc})",
+            delta=f"{_n_now}/{_target} · {_pct_tgt:.0f}%" if _pct_tgt is not None else f"{_n_now}/{_target}",
+            help="Settled voto ≥8; tra parentesi pending ancora da settle.",
+        )
+        _clv = _roi_rep.get("mean_clv")
+        r5.metric(
+            "CLV medio",
+            "n/d" if _clv is None else f"{_clv:+.2%}",
+            delta=f"voto ≥{_min_sc}",
+        )
+
+        _votes = _roi_rep.get("by_vote") or {}
+        v8, v9, v10 = st.columns(3)
+        for _col, _vote in ((v8, "8"), (v9, "9"), (v10, "10")):
+            _vs = _votes.get(_vote) or {}
+            _vroi = _vs.get("odds_roi")
+            _vn = int(_vs.get("n") or 0)
+            _vp = int(_vs.get("pending") or 0)
+            _vhr = _vs.get("hit_rate")
+            _col.metric(
+                f"ROI voto {_vote}",
+                "n/d" if _vroi is None else f"{_vroi:+.1%}",
+                delta=(
+                    f"n={_vn} ({_vp})"
+                    + (f" · hit {_vhr:.0%}" if _vhr is not None else "")
+                ),
+            )
+
+        _bar = min(1.0, float(_prog.get("progress") or 0.0))
+        _pct_stable = _prog.get("pct_of_stable")
+        if _pct_stable is None:
+            _pct_stable = round(100.0 * _n_now / 40.0, 1)
+        _bar_label = _prog.get("label") or f"{_n_now}/{_target}"
+        st.progress(
+            _bar,
+            text=f"{_bar_label} · {_pct_tgt:.0f}% livello · {_pct_stable:.0f}% verso ROI stabile (40)",
+        )
+        if _nxt:
+            st.caption(
+                f"Obiettivo livello successivo: **{_nxt.get('name')}** a n≥{_nxt.get('n')} "
+                f"(mancano **{_prog.get('remaining', 0)}** esiti) — {_nxt.get('desc', '')}. "
+                "Solo giocate settled con voto unificato ≥8 e quota."
+            )
+        elif _cur:
+            st.caption(
+                f"Livello massimo raggiunto: **{_cur.get('name')}** (n={_n_now}). "
+                f"{_cur.get('desc', '')}"
+            )
+        else:
+            st.caption("Ancora nessun esito voto ≥8 settled: il ROI si riempie dopo archive + settle.")
+        if _n_pend_sc:
+            st.caption(
+                f"In coda al settle: **{_n_pend_sc}** partite con voto ≥{_min_sc} "
+                f"(di cui **{_n_lock_pend}** freeze Telegram) — non ancora nel ROI."
+            )
+
+        with st.expander("Sync settle locali → cloud (apprendimento)", expanded=False):
+            st.caption(
+                "Esporta le chiusure locali (voto ≥8 / freeze) in `local_settles.json`. "
+                "Dopo **commit + push**, il job cloud le applica prima di apprendere."
+            )
+            c_sync1, c_sync2 = st.columns(2)
+            with c_sync1:
+                if st.button("Esporta journal settle", key="export_settle_journal"):
+                    from modules.data_update.history import export_settle_journal
+
+                    st.write(export_settle_journal(roi_only=True))
+            with c_sync2:
+                if st.button("Esporta + commit + push", key="push_settle_journal"):
+                    import subprocess
+
+                    proc = subprocess.run(
+                        [sys.executable, "scripts/push_local_settles.py", "--commit", "--push"],
+                        cwd=str(ROOT),
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                    st.code((proc.stdout or "") + (proc.stderr or ""))
+                    if proc.returncode != 0:
+                        st.error("Push fallito — controlla git remote / auth.")
+                    else:
+                        st.success("Journal pushato. Al prossimo job cloud i settle entreranno nel learn.")
+
+    with st.expander("Settle manuale (pending ≥8 giorni)", expanded=False):
+        from modules.data_update.history import list_stale_roi_pending, manual_settle
+        from modules.notify.stale_settle import STALE_DAYS, notify_stale_pending_settlements
+
+        st.caption(
+            f"Se l’auto-settle non chiude entro **{STALE_DAYS} giorni**, arriva un alert Telegram. "
+            "Qui inserisci FT (e corner/tiri se il pick li richiede) oppure solo Presa/Non presa."
+        )
+        c_stale1, c_stale2 = st.columns(2)
+        with c_stale1:
+            if st.button("Controlla pending stale ora"):
+                st.write(notify_stale_pending_settlements(dry_run=True))
+        with c_stale2:
+            if st.button("Invia alert Telegram stale"):
+                st.write(notify_stale_pending_settlements(dry_run=False))
+
+        stale_rows = list_stale_roi_pending(min_days=STALE_DAYS)
+        all_pend_roi = list_stale_roi_pending(min_days=0)
+        if not all_pend_roi:
+            st.caption("Nessun pending voto ≥8 / freeze.")
+        else:
+            labels = {
+                str(r["match_key"]): (
+                    f"+{r.get('age_days')}g · {r.get('date')} · {r.get('home')} vs {r.get('away')} · "
+                    f"{r.get('pick')} (voto {r.get('score_unified')})"
+                )
+                for r in all_pend_roi
+            }
+            choice = st.selectbox(
+                "Partita",
+                options=list(labels.keys()),
+                format_func=lambda k: labels.get(k, k),
+            )
+            sel = next((r for r in all_pend_roi if r.get("match_key") == choice), None)
+            if sel:
+                mode = st.radio(
+                    "Come chiudere",
+                    ["FT + stats (calcola presa)", "Solo Presa / Non presa"],
+                    horizontal=True,
+                )
+                if mode.startswith("FT"):
+                    g1, g2 = st.columns(2)
+                    with g1:
+                        hg = st.number_input("Gol casa", min_value=0, max_value=20, value=0, step=1)
+                    with g2:
+                        ag = st.number_input("Gol ospite", min_value=0, max_value=20, value=0, step=1)
+                    pk = str(sel.get("pick") or "").upper()
+                    ch = ca = sh = sa = None
+                    if pk.startswith("CORN"):
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            ch = st.number_input("Corner casa", min_value=0, max_value=40, value=0, step=1)
+                        with c2:
+                            ca = st.number_input("Corner ospite", min_value=0, max_value=40, value=0, step=1)
+                    if pk.startswith("SHOT"):
+                        s1, s2 = st.columns(2)
+                        with s1:
+                            sh = st.number_input("Tiri casa", min_value=0, max_value=60, value=0, step=1)
+                        with s2:
+                            sa = st.number_input("Tiri ospite", min_value=0, max_value=60, value=0, step=1)
+                    if st.button("Chiudi con FT", type="primary"):
+                        out = manual_settle(
+                            match_key=choice,
+                            home_goals=int(hg),
+                            away_goals=int(ag),
+                            corners_home=int(ch) if ch is not None else None,
+                            corners_away=int(ca) if ca is not None else None,
+                            shots_home=int(sh) if sh is not None else None,
+                            shots_away=int(sa) if sa is not None else None,
+                        )
+                        if out.get("ok"):
+                            st.success(f"Chiusa: {out.get('presa')} · hit={out.get('hit')}")
+                            st.rerun()
+                        else:
+                            st.error(out.get("error") or out)
+                else:
+                    presa = st.radio("Esito scommessa", ["Presa", "Non presa"], horizontal=True)
+                    if st.button("Chiudi con esito", type="primary"):
+                        out = manual_settle(
+                            match_key=choice,
+                            hit=1 if presa == "Presa" else 0,
+                        )
+                        if out.get("ok"):
+                            st.success(f"Chiusa: {out.get('presa')}")
+                            st.rerun()
+                        else:
+                            st.error(out.get("error") or out)
+            if stale_rows:
+                st.caption(f"Di cui ≥{STALE_DAYS} giorni: **{len(stale_rows)}** (soglia alert Telegram).")
+    st.divider()
 
     with st.expander("Disaccordi modello (debug)", expanded=False):
         st.caption("Confronta lean ML / mercato / xG / FotMob / MC sulle partite del calendario.")
@@ -2522,8 +3066,9 @@ with tab_eval:
         from modules.advisor.data_signal_weights import optimize_weights
 
         st.caption(
-            "Report su righe **trainable** con **voto unificato ≥8**. "
-            "Kelly con **drawdown guard**. CLV da quota archiviata vs close Asian/fd."
+            "Report su campione **ROI**: voto ≥8 *rich* **oppure** freeze Telegram. "
+            "Kelly con **drawdown guard**. CLV da quota archiviata vs close Asian/fd. "
+            "L’apprendimento ML (bins/residual) resta solo sulle righe rich."
         )
         cbtn1, cbtn2, cbtn3 = st.columns(3)
         with cbtn1:
@@ -2546,7 +3091,11 @@ with tab_eval:
         else:
             m1, m2, m3, m4 = st.columns(4)
             min_sc = rep.get("min_score") or 8
-            m1.metric("Trainable ≥8", rep["n"], delta=f"tot {rep.get('n_settled_total', rep['n'])}")
+            m1.metric(
+                "Trainable ≥8",
+                rep["n"],
+                delta=f"DB {rep.get('n_history', '—')} · settled {rep.get('n_settled_total', rep['n'])}",
+            )
             m2.metric("Flat ROI", f"{rep.get('flat_roi', 0):.1%}", delta=f"voto ≥{min_sc}")
             m3.metric(
                 "ROI @ quote",
@@ -2557,6 +3106,15 @@ with tab_eval:
                 "CLV medio",
                 "n/d" if rep.get("mean_clv") is None else f"{rep.get('mean_clv'):+.2%}",
             )
+            _sp = rep.get("sample_progress") or {}
+            if _sp:
+                st.caption(
+                    f"Campione ROI: {_sp.get('label', '')} "
+                    f"({_sp.get('pct_of_target', 0):.0f}% livello · "
+                    f"{_sp.get('pct_of_stable', 0):.0f}% verso n=40). "
+                    f"Pending voto ≥{min_sc}: {rep.get('n_pending_score', 0)} "
+                    f"(freeze {rep.get('n_locked_pending', 0)})."
+                )
             ke = rep.get("kelly") or {}
             oe = rep.get("odds_equity") or {}
             k1, k2, k3, k4 = st.columns(4)

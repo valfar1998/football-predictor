@@ -51,6 +51,17 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "data" / "processed" / "upcoming_predictions.json"
 
 
+def _overlay_telegram_freeze(rows: list[dict]) -> dict[str, Any]:
+    """Pick/voto/quota della notifica restano fissi; live solo informativo."""
+    try:
+        from modules.data_update.history import overlay_freeze_on_upcoming
+
+        return overlay_freeze_on_upcoming(rows)
+    except Exception as exc:
+        print(f"skip freeze overlay upcoming: {exc}", flush=True)
+        return {"ok": False, "error": str(exc)}
+
+
 def _odd(fx: pd.Series, col: str) -> float | None:
     val = fx.get(col)
     if val is None or (isinstance(val, float) and pd.isna(val)):
@@ -226,7 +237,7 @@ def _collect_match_odds(
                 pinnacle_match = {**(pinnacle_match or {}), **corn}
         except Exception:
             pass
-    odds, odds_source = _fill_book_odds(odds, odds_source, pinnacle_match, "pinnacle")
+    odds, odds_source = _fill_book_odds(odds, odds_source, pinnacle_match, "codere_it")
     bf_match = None
     if betfair_events:
         try:
@@ -481,6 +492,10 @@ def _row_after_covered_advise(
             "alt_score": None if not alt else alt["score"],
             "play_corner": advice.get("play_corner"),
             "play_shot": advice.get("play_shot"),
+            "play_cards": advice.get("play_cards"),
+            "best_by_group": advice.get("best_by_group") or {},
+            "advice_groups": advice.get("advice_groups") or [],
+            "playable_groups": advice.get("playable_groups") or [],
             "p_home": mc.get("home_win", row.get("p_home")),
             "p_draw": mc.get("draw", row.get("p_draw")),
             "p_away": mc.get("away_win", row.get("p_away")),
@@ -693,6 +708,9 @@ def refresh_upcoming_odds(*, on_progress=None, archive: bool = True) -> dict:
             emit(on_progress, 0.05 + 0.9 * ((i + 1) / n), f"Value {i + 1}/{n}…")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
+    freeze_info = _overlay_telegram_freeze(out)
+    if freeze_info.get("n_overlaid"):
+        print(f"freeze overlay: {freeze_info['n_overlaid']} partite bloccate su notifica", flush=True)
     OUT.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
     hist_info: dict = {}
     if archive:
@@ -1289,6 +1307,12 @@ def build_upcoming(
                 "alt_pick": None if not alt else alt["code"],
                 "alt_name": None if not alt else alt["name"],
                 "alt_score": None if not alt else alt["score"],
+                "play_corner": advice.get("play_corner"),
+                "play_shot": advice.get("play_shot"),
+                "play_cards": advice.get("play_cards"),
+                "best_by_group": advice.get("best_by_group") or {},
+                "advice_groups": advice.get("advice_groups") or [],
+                "playable_groups": advice.get("playable_groups") or [],
                 "p_home": mc["home_win"],
                 "p_draw": mc["draw"],
                 "p_away": mc["away_win"],
@@ -1320,6 +1344,9 @@ def build_upcoming(
     emit(on_progress, 0.99, f"Salvataggio {len(rows)} partite…")
     print(f"calendario: salvataggio {len(rows)} partite…", flush=True)
     OUT.parent.mkdir(parents=True, exist_ok=True)
+    freeze_info = _overlay_telegram_freeze(rows)
+    if freeze_info.get("n_overlaid"):
+        print(f"freeze overlay: {freeze_info['n_overlaid']} partite bloccate su notifica", flush=True)
     OUT.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
     try:
         from modules.data_update.history import archive_upcoming, settle_pending

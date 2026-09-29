@@ -52,6 +52,50 @@ def _odds_band(od: float | None) -> str:
     return "3.50+"
 
 
+def _score_bucket_stats(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Flat + ROI @ quote su un sottoinsieme (es. voto esatto 8/9/10)."""
+    n = len(items)
+    hits = sum(1 for x in items if int(x.get("hit") or 0) == 1)
+    flat_pnl = float(hits - (n - hits))
+    odds_pnl = 0.0
+    odds_n = 0
+    for x in items:
+        od = _odds_of(x)
+        if od is None:
+            continue
+        odds_n += 1
+        odds_pnl += (od - 1.0) if int(x.get("hit") or 0) == 1 else -1.0
+    return {
+        "n": n,
+        "hits": hits,
+        "hit_rate": round(hits / n, 3) if n else None,
+        "flat_pnl": round(flat_pnl, 2),
+        "flat_roi": round(flat_pnl / n, 3) if n else None,
+        "odds_n": odds_n,
+        "odds_pnl": round(odds_pnl, 2),
+        "odds_roi": round(odds_pnl / odds_n, 3) if odds_n else None,
+    }
+
+
+def _by_unified_vote(
+    settled_rows: list[dict[str, Any]],
+    pending_rows: list[dict[str, Any]],
+    *,
+    votes: tuple[int, ...] = (8, 9, 10),
+) -> dict[str, dict[str, Any]]:
+    from modules.advisor.learn_policy import score_unified_of
+
+    out: dict[str, dict[str, Any]] = {}
+    for v in votes:
+        settled_v = [r for r in settled_rows if score_unified_of(r) == v]
+        pending_v = [r for r in pending_rows if score_unified_of(r) == v]
+        stats = _score_bucket_stats(settled_v)
+        stats["pending"] = len(pending_v)
+        stats["vote"] = v
+        out[str(v)] = stats
+    return out
+
+
 def _kelly_fraction(p: float, odds: float, frac: float = 0.25, risk_scale: float = 1.0) -> float:
     if odds <= 1.01 or p <= 0:
         return 0.0
@@ -96,7 +140,7 @@ def kelly_equity_snapshot(
     """Snapshot equity Kelly per drawdown guard (solo righe con quota)."""
     try:
         from modules.data_update.history import load_history
-        from modules.advisor.learn_policy import ROI_MIN_SCORE, meets_roi_score, trainable_settled
+        from modules.advisor.learn_policy import ROI_MIN_SCORE, meets_roi_score, roi_settled
     except Exception:
         return {"ok": False}
 
@@ -107,8 +151,8 @@ def kelly_equity_snapshot(
         key=lambda r: str(r.get("date") or ""),
     )
     if trainable_only:
-        rows = trainable_settled(rows)
-    if min_score:
+        rows = roi_settled(rows, min_score=min_score)
+    elif min_score:
         rows = [r for r in rows if meets_roi_score(r, min_score=min_score)]
     bank = 100.0
     pnls: list[float] = []
@@ -138,6 +182,19 @@ def kelly_equity_snapshot(
     return {"ok": True, **eq}
 
 
+def kelly_risk_scale_from_history(*, kelly_frac: float = 0.25) -> float:
+    """Drawdown guard da paper equity (qui, non in staking, per evitare import circolari)."""
+    from modules.advisor.staking import kelly_risk_scale
+
+    snap = kelly_equity_snapshot(kelly_frac=kelly_frac)
+    if not snap.get("ok"):
+        return 1.0
+    return kelly_risk_scale(
+        max_drawdown=snap.get("max_drawdown"),
+        sharpe=snap.get("sharpe"),
+    )
+
+
 def paper_trading_report(
     *,
     bankroll: float = 100.0,
@@ -148,26 +205,62 @@ def paper_trading_report(
     try:
         from modules.data_update.history import load_history
         from modules.model_training.league_clusters import cluster_for
-        from modules.advisor.learn_policy import ROI_MIN_SCORE, is_live, meets_roi_score, trainable_settled
+        from modules.advisor.learn_policy import ROI_MIN_SCORE, is_live, meets_roi_score, roi_settled
         from modules.advisor.staking import beat_close, kelly_risk_scale
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
     if min_score is None:
         min_score = ROI_MIN_SCORE
+    all_rows = load_history()
     all_settled = sorted(
-        [r for r in load_history() if r.get("hit") is not None],
+        [r for r in all_rows if r.get("hit") is not None],
         key=lambda r: str(r.get("date") or ""),
     )
-    rows = trainable_settled(all_settled) if trainable_only else all_settled
-    if min_score:
-        rows = [r for r in rows if meets_roi_score(r, min_score=min_score)]
+    all_pending = [r for r in all_rows if r.get("hit") is None]
+    pending_score = [
+        r
+        for r in all_pending
+        if meets_roi_score(r, min_score=min_score) or int(r.get("score_locked") or 0) == 1
+    ]
+    n_locked_pending = sum(1 for r in all_pending if int(r.get("score_locked") or 0) == 1)
+    n_locked_total = sum(1 for r in all_rows if int(r.get("score_locked") or 0) == 1)
+    db_stats = {
+        "n_history": len(all_rows),
+        "n_settled_total": len(all_settled),
+        "n_pending": len(all_pending),
+        "n_pending_score": len(pending_score),
+        "n_locked_pending": n_locked_pending,
+        "n_locked_total": n_locked_total,
+        "settled_pct": round(len(all_settled) / len(all_rows), 3) if all_rows else None,
+    }
+    # Campione ROI: freeze Telegram + rich voto≥8 (non solo trainable/is_rich)
+    rows = roi_settled(all_settled, min_score=min_score) if trainable_only else [
+        r for r in all_settled if meets_roi_score(r, min_score=min_score)
+    ]
     live_rows = [r for r in rows if is_live(r)]
     if not rows:
+        from modules.advisor.learn_policy import roi_sample_progress
+
+        progress0 = roi_sample_progress(0)
+        progress0["pct_level"] = 0.0
+        progress0["pct_of_target"] = 0.0
+        progress0["pct_of_stable"] = 0.0
         return {
             "ok": True,
             "n": 0,
+            "n_locked": 0,
+            "hits": 0,
+            "hit_rate": None,
+            "flat_pnl": 0.0,
+            "flat_roi": None,
+            "odds_n": 0,
+            "odds_pnl": 0.0,
+            "odds_roi": None,
             "min_score": min_score,
+            **db_stats,
+            "by_vote": _by_unified_vote([], pending_score),
+            "sample_progress": progress0,
             "note": f"nessun esito settled con voto ≥{min_score}" if min_score else "nessun esito settled",
         }
 
@@ -242,6 +335,7 @@ def paper_trading_report(
         return "1-3"
 
     by_score = _bucket(score_band, rows)
+    by_vote = _by_unified_vote(rows, pending_score)
 
     flat_pnls = [1.0 if int(r.get("hit") or 0) == 1 else -1.0 for r in rows]
     odds_pnls = []
@@ -289,15 +383,26 @@ def paper_trading_report(
 
     overall_hits = sum(1 for r in rows if int(r.get("hit") or 0) == 1)
     live_odds_n = sum(1 for r in live_rows if _odds_of(r))
+    n_locked = sum(1 for r in rows if int(r.get("score_locked") or 0) == 1)
+    from modules.advisor.learn_policy import roi_sample_progress
+
+    progress = roi_sample_progress(len(rows))
+    target_n = int(progress.get("target_n") or 15)
+    final_target = 40
+    progress["pct_level"] = round(100.0 * min(1.0, float(progress.get("progress") or 0.0)), 1)
+    progress["pct_of_target"] = round(100.0 * len(rows) / target_n, 1) if target_n else 0.0
+    progress["pct_of_stable"] = round(100.0 * len(rows) / final_target, 1)
     return {
         "ok": True,
         "trainable_only": trainable_only,
         "min_score": min_score,
-        "n_settled_total": len(all_settled),
+        **db_stats,
         "n": len(rows),
         "n_live": len(live_rows),
         "n_live_odds": live_odds_n,
+        "n_locked": n_locked,
         "hit_rate": round(overall_hits / len(rows), 3),
+        "hits": overall_hits,
         "flat_pnl": round(sum(flat_pnls), 2),
         "flat_roi": round(sum(flat_pnls) / len(rows), 3),
         "odds_n": len(odds_pnls),
@@ -314,6 +419,7 @@ def paper_trading_report(
             "risk_scale": round(risk_scale, 3),
             "n_staked": sum(1 for x in kelly_pnls if abs(x) > 1e-9),
         },
+        "sample_progress": progress,
         "walk_forward_odds_roi": wf,
         "by_league": by_league[:15],
         "by_cluster": by_cluster,
@@ -322,4 +428,5 @@ def paper_trading_report(
         "by_action": by_action,
         "by_pick": by_pick,
         "by_score": by_score,
+        "by_vote": by_vote,
     }

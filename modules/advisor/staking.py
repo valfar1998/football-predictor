@@ -52,21 +52,6 @@ def kelly_risk_scale(*, max_drawdown: float | None, sharpe: float | None) -> flo
     return max(0.45, min(1.0, scale))
 
 
-def kelly_risk_scale_from_history(*, kelly_frac: float = KELLY_FRACTION) -> float:
-    """Drawdown guard da paper equity su righe trainable con quota."""
-    try:
-        from modules.advisor.paper_stats import kelly_equity_snapshot
-    except Exception:
-        return 1.0
-    snap = kelly_equity_snapshot(kelly_frac=kelly_frac)
-    if not snap.get("ok"):
-        return 1.0
-    return kelly_risk_scale(
-        max_drawdown=snap.get("max_drawdown"),
-        sharpe=snap.get("sharpe"),
-    )
-
-
 def clv_prob(odds_bet: float | None, odds_close: float | None) -> float | None:
     """CLV in probabilità: positivo se la quota presa è migliore della close."""
     if not odds_bet or not odds_close or odds_bet <= 1.01 or odds_close <= 1.01:
@@ -162,7 +147,6 @@ def no_bet_reasons(
 ) -> list[str]:
     reasons: list[str] = []
     group = str(play.get("group") or "")
-    side_market = group in {"corners", "shots", "cards"}
     ev = play.get("ev_cons")
     if ev is None:
         ev = play.get("ev")
@@ -180,13 +164,24 @@ def no_bet_reasons(
             reasons.append(
                 f"probabilità 1X2 {float(p_play):.0%} sotto il minimo giocabile {MIN_PROB_1X2_PLAY:.0%}"
             )
-    # Steam / sharp / residual sono calibrati su 1X2-O/U gol, non su corner/tiri Kambi
-    if not side_market:
+    # Steam / sharp / residual / conformal O-U: solo mercati core (1X2/O/U/AH/BTTS…)
+    # Tipi consiglio esplorativi (corner, tiri, cards, multigol, …) usano solo EV + quota reale
+    exploratory = group in {
+        "corners",
+        "shots",
+        "cards",
+        "scorer",
+        "multigol",
+        "parity",
+        "exact",
+        "combo",
+    }
+    if not exploratory:
         if sharp_ev is not None and sharp_ev < min_edge:
             reasons.append(f"Pinnacle/sharp non offre edge ({sharp_ev:+.1%})")
         if market_too_liquid_against(play, market_move, alignment, min_rank=min_rank, min_pp=min_pp):
             reasons.append("mercato troppo liquido contrario (steam forte, quota pick allungata)")
-    if agreement and agreement.get("block_no_bet") and not side_market:
+    if agreement and agreement.get("block_no_bet") and not exploratory:
         reasons.append(
             "fonti in disaccordo sul pick ("
             + (agreement.get("notes") or ["quadro spezzato"])[0]
@@ -198,7 +193,7 @@ def no_bet_reasons(
     if iv.get("ready") and iv.get("set") and code in {"1", "X", "2"}:
         if code not in (iv.get("set") or []):
             reasons.append(f"pick {code} fuori dal set conformal {iv.get('set')}")
-    if not side_market:
+    if not exploratory:
         ou_iv = play.get("conformal_ou25") or iv.get("conformal_ou25") or {}
         ah_iv = play.get("conformal_ah0") or iv.get("conformal_ah0") or {}
         blocked = _market_set_block(code, group, ou_iv, ah_iv)

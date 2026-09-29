@@ -25,6 +25,8 @@ data/raw/fd/
 data/raw/fixtures/
 data/processed/upcoming_predictions.json
 data/processed/telegram_alerts_sent.json
+data/processed/telegram_score_freeze.json
+data/processed/telegram_stale_settle_sent.json
 data/processed/notify_refresh.log
 data/processed/notify_refresh.lock
 data/processed/our_history.jsonl

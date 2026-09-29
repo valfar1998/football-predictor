@@ -30,11 +30,24 @@ def main() -> None:
     (ROOT / "data" / "models").mkdir(parents=True, exist_ok=True)
 
     try:
+        from modules.data_update.history import sync_freeze_state
+
+        info_freeze_start = sync_freeze_state()
+    except Exception as exc:
+        info_freeze_start = {"ok": False, "error": str(exc)}
+        print(f"freeze sync start: {exc}", flush=True)
+
+    try:
         rows = fetch_asian_odds(days=4, book="bet365")
     except Exception as exc:
         print(f"asian fetch fallito (continuo con cache): {exc}", flush=True)
         rows = []
-    info: dict = {"n_asian": len(rows), "cloud": True, "daily_learn": _daily_learn_enabled()}
+    info: dict = {
+        "n_asian": len(rows),
+        "cloud": True,
+        "daily_learn": _daily_learn_enabled(),
+        "freeze_sync_start": info_freeze_start,
+    }
     if rows:
         path = save_asian_odds(rows)
         info["asian_cache"] = str(path)
@@ -92,6 +105,12 @@ def main() -> None:
 
     alerts = dispatch_alerts(upcoming=upcoming)
     info.update({k: v for k, v in alerts.items() if k != "status"})
+    try:
+        from modules.data_update.history import sync_freeze_state
+
+        info["freeze_sync_end"] = sync_freeze_state()
+    except Exception as exc:
+        info["freeze_sync_end_error"] = str(exc)
     print(json.dumps(info, indent=2, default=str))
 
 

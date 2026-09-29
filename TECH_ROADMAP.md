@@ -1,12 +1,12 @@
 # Roadmap — stato e prossimi passi
 
-Allineato a `PROJECT_BRIEF_football.md`. **Aggiornato: 2026-09-14** (freeze voto Telegram per ROI).
+Allineato a `PROJECT_BRIEF_football.md`. **Aggiornato: 2026-09-15** (freeze journal GHA↔locale).
 
 **Regola d’oro:** live/contesto fragile → quadro/voto/no_bet; EV/Kelly solo da modelli/calibrazione su OOF o settled.
 
 **Apprendimento online:** fit solo su righe **trainable** (riche). Le ~679 live vecchie senza quota/EV/fattori sono **ignorate**. Live ricche ×5 + backfill synthetic ×4 nel fit.
 
-**Freeze alert:** notifica Telegram voto ≥8 → `score_locked` su storico; ROI usa voto/quota della notifica, non il ricalcolo pre-KO.
+**Freeze alert:** notifica Telegram voto ≥8 → `score_locked` + journal `telegram_score_freeze.json` (cache Actions + apply su archive/pull). ROI = notifica, non ricalcolo pre-KO.
 
 **Convenzione:** dopo ogni modifica al codice, aggiornare **questo file** e `PROJECT_BRIEF_football.md`.
 
@@ -51,8 +51,10 @@ Allineato a `PROJECT_BRIEF_football.md`. **Aggiornato: 2026-09-14** (freeze voto
 ### 1) Live ricche — **51 → 80+** (priorità operativa)
 
 - Routine pre-match: **Solo quote** / `--odds-update` ogni giorno.
-- **GHA `odds-prefresh.yml`**: 10:00 + 16:00 UTC (archivia pre-KO).
+- **GHA `odds-prefresh.yml`**: **4×/giorno** `0 8,12,16,20 * * *` UTC (~10/14/18/22 IT) — densità corner Kambi.
+- Coverage Big 5 corners: `scripts/report_corner_coverage.py` (loggato nel prefresh).
 - 80+ fixture con `quota_pick` + EV + fattori → paper/ROI indipendente dal backfill.
+- **Non toccare** `min_ev_play` / residual finché coverage corner Big 5 non è stabile.
 
 ### 2) Settle mercati secondari — ✅ FATTO (codice)
 
@@ -87,6 +89,7 @@ Allineato a `PROJECT_BRIEF_football.md`. **Aggiornato: 2026-09-14** (freeze voto
 - **Tipo consiglio allineato:** finish-early su tutti i gruppi (scorer lazy); pick primario = corner o miglior playable; `advice_groups`/`best_by_group` in calendario; filtro UI su pick o gruppi secondari; no_bet soft sugli esplorativi.
 - **Fix corner Solo quote:** `ensure_side_markets_on_prediction` (p MC corner/tiri sul reuse); no_bet non applica steam/residual 1X2 ai corner; linee 6.5–13.5.
 - **Kambi primario + tiri:** quote corner/tiri da Kambi betoffers (overwrite); λ/MC `shots_*`; pick focus `CORN*`; settle `SHOT*` via Sofascore. ROI paper già gated a voto unificato ≥8.
+- **Kambi Big 5 densificato:** listView per-lega (PL/LaLiga/SerieA/Bundesliga/Ligue1) + `lang=en_GB` + prefetch corners su betoffers; no Apify. Coverage report in odds-prefresh.
 - **Sofascore post-match primario:** `sofascore_postmatch.py` + hook in `settle_pending` (prima di FD/mondo); stats JSON per analisi; scorer Sofascore→FotMob.
 - Progresso `calendario N/M` durante **Aggiorna dati + modello** (95→99%, non più barra ferma).
 - **Bottoni quote leggeri:** `refresh_upcoming_odds` (EV/Kelly senza ML/MC); **Solo quote** = fd + Asian + Pinnacle/Betfair cache, niente mondiale/coppe/tipster/FBref; notify-refresh light.
@@ -100,10 +103,10 @@ Allineato a `PROJECT_BRIEF_football.md`. **Aggiornato: 2026-09-14** (freeze voto
 - **Solo quote fermo a 0%:** progresso in-process + `python -u` sugli CLI figli.
 - **Score pro:** pesi fonti, Unified+Confidence+Risk 0–100, Priorità calendario, override meteo/assenze, Bet Type Recommender (`pro_scores.py`).
 - **GHA Asian timeout:** `TimeoutError` su un giorno → skip (retry HTTP); `notify_cloud` non crasha se Asian è lento.
-- **Freeze voto Telegram:** `score_locked` + `score_live`/`quota_live`; ROI allineato alla notifica.
+- **Freeze voto Telegram:** `score_locked` + `score_live`/`quota_live` + journal `telegram_score_freeze.json` (GHA cache) → ROI allineato alla notifica anche da cloud.
 - **Settle secondari:** Sofascore primario + cards/corners FD fallback + scorer Sofascore/FotMob in `history.settle_pending`.
 - **Phasing-out backfill:** fit solo live quando `n_rich_live ≥ 150`.
-- **GHA pre-match:** workflow `odds-prefresh.yml` (2×/giorno `--odds-update`).
+- **GHA pre-match:** workflow `odds-prefresh.yml` (**4×/giorno** `--odds-update` + report corner coverage).
 - **Connettori:** `http_client` UA rotation; Betfair cache stale su errori CI.
 
 ---

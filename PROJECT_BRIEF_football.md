@@ -2,7 +2,7 @@
 
 Sintesi aggiornata del progetto **football-predictor**  
 Repo: [github.com/valfar1998/football-predictor](https://github.com/valfar1998/football-predictor) · branch `main`  
-Ultimo aggiornamento: **2026-09-14** — freeze voto Telegram → ROI; fix Solo quote side-market; Kambi; ROI voto≥8.
+Ultimo aggiornamento: **2026-09-17** — odds-prefresh 4×/giorno; Kambi Big 5 listView + corners prefetch; freeze journal; paper ROI.
 
 Scopo di questo file: dare a un altro modello / analista contesto sufficiente per suggerire miglioramenti **senza** dover leggere tutto il codice.
 
@@ -143,7 +143,7 @@ scorer Sofascore→FotMob      ─┘
               data_signal_weights (grid WF)
 ```
 
-**Importante:** il fit usa solo righe **trainable** (vedi §1.4). Le ~679 live vecchie senza quota/EV/fattori **non entrano** nel fit.
+**Importante:** il fit usa solo righe **trainable** / live ricche (vedi §1.4). Le live incomplete senza quota/EV/fattori (**169** oggi) **non entrano** nel fit.
 Stats Sofascore (`sofascore_stats` JSON + `sofascore_match_stats.json`) sono materiale per analisi future — **non** entrano in EV/Kelly.
 
 ### Cosa decide se “giocare” o no
@@ -180,34 +180,36 @@ Tutti i gate tecnici previsti dalla roadmap sono **sbloccati e operativi**:
 
 | Gate | Target | Valore attuale | Stato |
 |------|--------|----------------|--------|
-| Settled totali (voto storico) | ≥ 30 | **830** | ✅ |
-| Righe **trainable** | ≥ 80 | **151** | ✅ |
+| Settled totali (voto storico) | ≥ 30 | **807** | ✅ |
+| Righe **trainable** | ≥ 80 | **638** | ✅ |
+| Live ricche pre-match | ≥ 80 / phase-out 150 | **518** | ✅ (backfill escluso dal fit) |
+| Paper ROI @ quote (voto ≥8) | campione in crescita | **+25,3%** (n=6) | 🟡 campione piccolo |
 | Residual EV WF-RMSE | ≤ 0,55 | **≈ 0,53** | ✅ produzione |
 | `online_p_factor` | live ricche ≥ 30 | **30** (factor 1.005) | ✅ |
-| Pesi `data_signal` | fit operativo | **655** righe replicate | ✅ |
-| Apprendimento senza junk | escludere live incomplete | **679** escluse | ✅ |
+| Apprendimento senza junk | escludere live incomplete | **169** escluse | ✅ |
 
 Dettaglio operativo aggiornato: `TECH_ROADMAP.md`.
 
-### Roadmap operativa (dati live) — 🟡 in corso
+### Roadmap operativa (dati live) — 🟡 campione ROI
 
-Non richiede nuovo codice; richiede **routine quotidiana**:
+Non richiede nuovo codice; richiede **routine quotidiana** e più settle con voto ≥8:
 
 | Obiettivo | Ora | Target | Perché |
 |-----------|-----|--------|--------|
-| Live ricche pre-match | **51** | 80+ | Paper Kelly e ROI @ quote reali |
-| `quota_pick` live | **51** | crescere | Backfill synthetic non ha quote pre-match reali |
+| Live ricche pre-match | **518** | mantenere / qualità | Fit già solo-live (≥150) |
+| Paper ROI @ quote voto≥8 | **+25,3%** (n=6) | n≥30–40 | Validazione economica credibile |
+| `score_locked` (freeze Telegram) | **3** (Como/Inter/Gaziantep 14/09 backfill) | crescere | Journal GHA + apply su archive |
 
 **Routine consigliata:**
 
 ```text
-Solo quote (pre-match)  →  settle automatico  →  Apprendi da partite chiuse
+Solo quote (pre-match)  →  alert Telegram + freeze  →  settle  →  Apprendi da partite chiuse
 ```
 
-Il **backfill synthetic (100 righe)** ha già fatto da bootstrap per bins/residual/pesi.  
-Da ora il sistema **impara soprattutto** da: live ricche (×5 nel fit) + backfill (×4), ignorando lo storico live incompleto.
+Il **backfill synthetic** ha fatto da bootstrap; con **518 live ricche** (≥150) è **auto-escluso dal fit**.  
+Il paper ROI (voto ≥8) è ancora su **campione piccolo** (6 esiti) — utile come segnale, non ancora come prova statistica.
 
-**Conclusione:** il progetto è **pronto all’uso**; la validazione economica live (paper ROI credibile) migliora man mano che crescono le archiviazioni pre-match su Top leghe.
+**Conclusione:** il progetto è **pronto all’uso**; la metrica guida economica è il **ROI @ quote su voto ≥8** (oggi **+25,3%**, flat **+33,3%**, hit **4/6**).
 
 ---
 
@@ -236,7 +238,7 @@ Il **FeatureEngineer** trasforma `matches.csv` in ~63k righe feature (forma 5 pa
 |--------|---------------------|
 | **football-data.co.uk** fixtures | Elenco partite + quote medie book |
 | **AsianBetSoccer** | Quote Asian, steam linee, spread score |
-| **The Odds API (Pinnacle)** | Quote sharp (cache ~20h, 1 call/giorno) |
+| **The Odds API (Codere IT)** | Quote book IT (cache ~20h, 1 call/giorno; ex-Pinnacle) |
 | **Betfair** | Exchange (soft-fail se 403; cache) |
 | **Understat / FotMob xG rolling** | λ gol in `MatchPredictor` + Poisson |
 | **FBref / StatsBomb / Sofascore** | Contesto tattico → **quadro**, non EV grezzo |
@@ -321,16 +323,16 @@ Una riga è **trainable** (e entra nel fit) solo se, oltre a `hit` settled, ha *
 |-----------|---------|----------|----------------|
 | **Live ricca** | archivio pre-match con quote+EV+fattori | ✅ sì | **×5** |
 | **Backfill synthetic** | `--backfill-history`, `synthetic_backfill=1` | ✅ sì | **×4** |
-| **Live vecchia incompleta** | settled senza quota o fattori (~679) | ❌ no | — |
+| **Live vecchia incompleta** | settled senza quota o fattori (**169**) | ❌ no | — |
 | **N/D o solo quadro** | partita fuori modello | ❌ no | — |
 
 Implementazione: `modules/advisor/learn_policy.py` — `is_rich()`, `is_trainable()`, `replicate_for_fit()`.
 
 Con `aggressive_learn: true` (default in `calibration.json`):
 
-- Fit bins / residual / pesi su **151 trainable** → **655 righe replicate** (51×5 + 100×4)
+- Fit bins / residual / pesi su **live ricche** (518; backfill escluso a ≥150) con replicate live ×6
 - `online_p_factor`: priorità chunk **live ricche** (≥30); fallback pool trainable (≥60)
-- ROI per `min_ev_play`: prima live ricche; poi tutto il trainable
+- ROI per `min_ev_play`: prima live ricche; poi tutto il trainable — **solo voto ≥8**
 - Blend bin online più aggressivo (68% vs 40% conservativo)
 
 ```powershell
@@ -339,19 +341,20 @@ python main.py --odds-update                            # Solo quote pre-match (
 # dopo settle → learn_from_settled() automatico o bottone Apprendi in UI
 ```
 
-### Snapshot storico (2026-08-22, post-backfill + learn)
+### Snapshot storico (2026-09-15)
 
 | Metrica | Valore |
 |---------|--------|
-| Righe in SQLite | **3 952** |
-| Settled totali | **830** |
-| **Trainable** (fit apprendimento) | **151** ✅ |
-| — live ricche | **51** |
-| — backfill synthetic | **100** |
-| Skipped (live incomplete) | **679** |
-| Residual EV | **produzione** — n=620 fit, WF-RMSE ≈ **0,53** |
+| Righe in SQLite | **1 449** |
+| Settled totali | **807** |
+| **Trainable** (ricche settled) | **638** ✅ |
+| — live ricche | **518** |
+| — backfill synthetic | **120** (escluso dal fit: live ≥150) |
+| Skipped (live incomplete) | **169** |
+| **Paper ROI @ quote (voto ≥8)** | **+25,3%** · n=6 · flat **+33,3%** · hit 4/6 |
+| Residual EV | **produzione** — WF-RMSE ≈ **0,53** |
 | `online_p_factor` | **1,005** (30 live ricche 1X2) |
-| Pesi data_signal | Brier ≈ **0,25** su 655 replicate |
+| Freeze Telegram (`score_locked`) | **3** locked (journal `telegram_score_freeze.json`) |
 
 Lo storico entra nel **voto unificato** (peso ~15%) quando ≥ 30 settled globali e ≥ 6 per squadra (`history.py`).  
 Le righe incomplete restano in SQLite per il voto, ma **non inquinano** calibrazione/residual/pesi.
@@ -479,7 +482,18 @@ Ridge WF + cluster; gate **n≥80** settled con EV; `adj_ev`, soft Kelly, primar
 ### 5.7 Paper trading
 Flat, ROI @ quota, Kelly equity, max DD, Sharpe, WF ROI, breakdown.  
 **Filtro fisso:** solo partite con **voto unificato ≥ 8** (`ROI_MIN_SCORE` in `learn_policy.py`).  
-**Freeze Telegram:** al primo alert voto (GIOCA / da guardare) si congelano `score_unified`, pick, action e `quota_pick` (`score_locked=1`). I refresh successivi aggiornano solo `score_live` / `quota_live`; il ROI resta allineato alla notifica.
+**Freeze Telegram:** al primo alert voto (GIOCA / da guardare) si congelano `score_unified`, pick, action e `quota_pick` (`score_locked=1`). Snapshot anche in `telegram_score_freeze.json` (cache GHA + riapplicazione su archive/pull), così il freeze non si perde sul runner effimero. I refresh aggiornano solo `score_live` / `quota_live`.
+
+**Snapshot 2026-09-15** (`paper_trading_report`, trainable + voto ≥8):
+
+| Metrica | Valore |
+|---------|--------|
+| n / odds_n | **6** / **6** (tutte live) |
+| Hit rate | **66,7%** (4/6) |
+| Flat ROI | **+33,3%** |
+| **ROI @ quote** | **+25,3%** (pnl +1,52 u) |
+| Kelly ¼ (bank 100) | **→ 108,16** |
+| `score_locked` nel pool | **3** backfill alert 14/09 (corner hit in attesa stats) |
 
 ### 5.8 Online learning (`online_learn.py` + `learn_policy.py`)
 Dopo settle / bottone **Apprendi da partite chiuse**: fit **solo su righe trainable** (live ricche + backfill synthetic); live incomplete escluse. Aggiorna reliability bins (blend fino 68% se aggressive), `online_p_factor`, `min_ev_play`, residual fit, pesi data_signal.  
@@ -574,10 +588,10 @@ Oggi il **codice** è al massimo (residual, pesi, online learn, pro_scores, GHA)
 
 | Limite | Impatto |
 |--------|---------|
-| **Live ricche pre-match ridotte** | **51 / 80+** target — paper Kelly e ROI restano parzialmente legati al backfill synthetic |
+| **Campione paper ROI voto≥8** | Solo **n=6** (+25,3% @ quote) — segnale positivo, non ancora stabile |
+| **Campione paper ROI voto≥8** | Solo **n=6** (+25,3% @ quote) — segnale positivo, non ancora stabile; + freeze journal da 15/09 |
 | **Settle mercati esplorativi** | Cards/corner: Sofascore statistics → FD (`HY/HC/…`); marcatori: Sofascore incidents → FotMob — **codice ✅**, copertura dati 🟡 |
 | **Connettori fragili** | API non ufficiali / scraping (403 Betfair in CI, rotazioni hash Asian, cambi FotMob/FBref) → soft-fail, cache, skip giorno |
-| **Backfill synthetic ancora nel fit** | Bootstrap utile; **auto-escluso dal fit quando live ricche ≥ 150** (`learn_policy.backfill_excluded`) |
 
 Altri limiti minori: conformal O/U–AH fallback Poisson; quote book su marcatori rare; leghe minori con fallback Elo.
 
@@ -587,12 +601,14 @@ Altri limiti minori: conformal O/U–AH fallback Poisson; quote book su marcator
 
 Ordine consigliato (solo dati/operatività — il codice core è chiuso):
 
-### 1) Live ricche ≥ 80 (priorità assoluta)
+### 1) Campione paper ROI voto≥8 (priorità assoluta)
 
-- Routine **quotidiana pre-match**: UI **Solo quote** o `python main.py --odds-update` (archive con `quota_pick`, `ev_cons`/`ev_sharp`, `data_factors`, `agree_share`).
-- **GHA** `.github/workflows/odds-prefresh.yml` — 10:00 e 16:00 UTC (2×/giorno pre-KO).
-- Ogni fixture archiviata **prima del KO** + settle post-match → fit sempre più credibile **senza** dipendere dal synthetic.
-- Target: **80+ live ricche** → validazione ROI e paper trading indipendente dal backfill.
+- Live ricche già **518** (target 80+ ✅; phase-out backfill ✅).
+- Routine **quotidiana pre-match**: UI **Solo quote** / `python main.py --odds-update` + alert Telegram (freeze) → settle.
+- **GHA** `.github/workflows/odds-prefresh.yml` — **4×/giorno** UTC (`8,12,16,20`) + report `scripts/report_corner_coverage.py`.
+- **Kambi:** listView Big 5 per-lega + prefetch Total Corners (no Apify). Non alzare filtri EV/residual finché coverage corner non è alta.
+- **Odds API:** bookmaker default **Codere IT** (`codere_it`, non Pinnacle; Unibet=Kambi duplicato). Corner/tiri principalmente da **Kambi**.
+- Target: **n≥30–40** settled con voto ≥8 (idealmente `score_locked`) per ROI @ quote stabile.
 
 ### 2) Settle mercati secondari (`history.py`) — ✅ implementato
 
@@ -608,14 +624,13 @@ Ordine consigliato (solo dati/operatività — il codice core è chiuso):
 - AsianBetSoccer: retry + skip giorno (GHA non crasha più su timeout).
 - FotMob/FBref: fallback cache + Big 5 only; monitorare rotture schema.
 
-### 4) Phasing-out backfill synthetic — ✅ gate automatico
+### 4) Phasing-out backfill synthetic — ✅ fatto (live ≥150)
 
-- Quando **≥ 150 live ricche**: `replicate_for_fit` esclude righe `synthetic_backfill=1` (residual, online_p_factor, pesi data_signal).
+- Con **518 live ricche**, `replicate_for_fit` esclude `synthetic_backfill=1`.
 
-### 5) Paper Kelly credibile
+### 5) Paper Kelly / ROI @ quote
 
-- Con 80+ live con `quota_pick`: tab Valutazione → equity/Sharpe/ROI @ quote reali come metrica principale (non solo trainable totale 151).
-
+- Tab Valutazione: equity/Sharpe/**ROI @ quote voto≥8** come metrica guida (oggi **+25,3%**, n=6).
 ---
 
 ## 11. Stato roadmap (checklist)
@@ -641,11 +656,11 @@ Ordine consigliato (solo dati/operatività — il codice core è chiuso):
 
 | Area | Stato | Target 10/10 |
 |------|--------|----------------|
-| Trainable totali | **151 / 80** ✅ | mantenere; spostare peso su live |
-| Live ricche pre-match | **51 / 80+** 🟡 | **≥ 80** con `--odds-update` quotidiano |
-| Paper Kelly @ quote reali | **parziale** | ROI su solo live ricche |
+| Trainable / live ricche | **638 / 518** ✅ | qualità continua con `--odds-update` |
+| Backfill nel fit | **escluso** (live ≥150) ✅ | — |
+| Paper ROI @ quote voto≥8 | **+25,3%** (n=6) 🟡 | **n≥30–40** settled locked |
+| Freeze → ROI allineato alert | **0 locked** 🟡 | freeze su ogni GIOCA/watch inviato |
 | Settle cards/corners/scorer | ✅ codice | copertura pick secondari |
-| Backfill nel fit | **100 righe** 🟡 | auto-escluso a **≥ 150 live** ✅ |
 | Connettori (Betfair/Asian/FotMob) | UA retry + cache stale ✅ | monitor rotture |
 
 Dettaglio gate e azioni: `TECH_ROADMAP.md`.
@@ -667,8 +682,9 @@ Dettaglio gate e azioni: `TECH_ROADMAP.md`.
 ## 13. Snapshot decisionale
 
 > **Sistema ibrido** (non un singolo algoritmo): ML cluster 1X2 + XGB O/U/AH + Poisson + MC multi-mercato → probabilità calibrate (bin OOF + blend online trainable-only + `online_p_factor`); edge da quote sharp/Asian; quadro tattico separato dall’EV; no_bet su filtri value/conformal/accordo/residual.  
-> **Apprendimento:** pre-match `archive_upcoming` → post-match `settle` → **Apprendi** aggiorna calibrazione/residual/pesi **senza** ritrenare XGB (ritrain GHA settimanale). Fit solo su **151 trainable** (51 live ricche + 100 backfill); **679 live incomplete ignorate**. Residual in produzione (WF-RMSE ≈ 0,53).  
-> **Roadmap codice:** ✅ chiusa. **Roadmap dati (10/10):** live ricche 51→80+ → settle mercati secondari → phasing-out backfill a 150+ live → connettori più stabili.
+> **Apprendimento:** pre-match `archive_upcoming` → alert+freeze → post-match `settle` → **Apprendi** aggiorna calibrazione/residual/pesi **senza** ritrenare XGB (ritrain GHA settimanale). Fit su **518 live ricche** (backfill escluso); **169 live incomplete ignorate**. Residual in produzione (WF-RMSE ≈ 0,53).  
+> **Paper ROI (voto ≥8):** **+25,3% @ quote** / **+33,3% flat** (n=6, 2026-09-15).  
+> **Roadmap codice:** ✅ chiusa. **Roadmap dati (10/10):** far crescere campione ROI locked (n≥30) → settle mercati secondari → connettori più stabili.
 
 ---
 

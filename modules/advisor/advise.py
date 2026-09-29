@@ -109,16 +109,23 @@ def _kelly_fraction(prob: float, odds: float) -> float:
 
 def _capped_kelly(prob: float, odds: float, cal: dict | None = None) -> float:
     cal = cal or load_calibration()
-    from modules.advisor.staking import kelly_risk_scale_from_history, quarter_kelly
+    from modules.advisor.staking import quarter_kelly
 
+    risk_scale = 1.0
+    try:
+        from modules.advisor.paper_stats import kelly_risk_scale_from_history
+
+        risk_scale = kelly_risk_scale_from_history(
+            kelly_frac=float(cal.get("kelly_fraction", 0.25)),
+        )
+    except Exception:
+        risk_scale = 1.0
     return quarter_kelly(
         prob,
         odds,
         fraction=float(cal.get("kelly_fraction", 0.25)),
         cap=float(cal.get("kelly_cap", KELLY_CAP)),
-        risk_scale=kelly_risk_scale_from_history(
-            kelly_frac=float(cal.get("kelly_fraction", 0.25)),
-        ),
+        risk_scale=risk_scale,
     )
 
 
@@ -360,17 +367,41 @@ def _grouped_from_odds(odds: dict[str, Any] | None) -> dict[str, list]:
     try:
         if not (o1 and ox and o2) or min(float(o1), float(ox), float(o2)) <= 1.0:
             return {}
-        i1, ix, i2 = 1.0 / float(o1), 1.0 / float(ox), 1.0 / float(o2)
+        f1, fx, f2 = float(o1), float(ox), float(o2)
+        i1, ix, i2 = 1.0 / f1, 1.0 / fx, 1.0 / f2
     except (TypeError, ValueError):
         return {}
     s = i1 + ix + i2
     if s <= 0:
         return {}
+
+    def row(code: str, name: str, odd: float, implied: float) -> dict[str, Any]:
+        p = implied / s
+        return {
+            "code": code,
+            "name": name,
+            "group": "1x2",
+            "probability": round(p, 4),
+            "p_cons": round(p, 4),
+            "p_market": round(p, 4),
+            "odds": odd,
+            "fair_odds": round(1.0 / max(p, 1e-6), 2),
+            "odds_real": True,
+            "odds_source": "book",
+            "ev": None,
+            "ev_cons": None,
+            "edge_pp": None,
+            "score": None,
+            "score_prob": None,
+            "score_value": None,
+            "kelly_quarter": None,
+        }
+
     return {
         "1x2": [
-            {"code": "1", "p_market": i1 / s},
-            {"code": "X", "p_market": ix / s},
-            {"code": "2", "p_market": i2 / s},
+            row("1", "1 (casa)", f1, i1),
+            row("X", "Pareggio", fx, ix),
+            row("2", "2 (trasferta)", f2, i2),
         ]
     }
 
@@ -931,9 +962,9 @@ def _actionable(m: dict[str, Any]) -> bool:
     if m.get("group") in {"dc", "dnb"}:
         return 0.52 <= p <= 0.88
     # Corner/tiri: fascia più ampia (Under bassi spesso value con p~0.35–0.40)
-    if m.get("group") in {"corners", "shots"}:
+    if m.get("group") in {"corners", "shots", "cards"}:
         return 0.32 <= p <= 0.82
-    if m.get("group") in {"ou", "btts", "team", "cards"}:
+    if m.get("group") in {"ou", "btts", "team"}:
         return 0.42 <= p <= 0.80
     if m.get("group") in {"multigol", "parity"}:
         return 0.22 <= p <= 0.72
@@ -955,9 +986,37 @@ def advise(
     """Mercati 1X2, DC, DNB, O/U, BTTS, multigol, exact, corner/card proxy, combo."""
     odds = odds or {}
     home, away = _split_match(prediction.get("match", "Casa vs Trasferta"))
+    if not home or home == "Casa":
+        home = str(prediction.get("home") or home)
+    if not away or away == "Trasferta":
+        away = str(prediction.get("away") or away)
     league = league or prediction.get("league")
-    mc = prediction["montecarlo"]
-    ml = prediction["model_probabilities"]
+    mc = prediction.get("montecarlo") if isinstance(prediction.get("montecarlo"), dict) else {}
+    ml = (
+        prediction.get("model_probabilities")
+        if isinstance(prediction.get("model_probabilities"), dict)
+        else {}
+    )
+    # Stub / Solo-quote: MC può avere solo corners/cards senza 1X2
+    p1 = mc.get("home_win")
+    px = mc.get("draw")
+    p2 = mc.get("away_win")
+    if p1 is None:
+        p1 = ml.get("home_win")
+    if px is None:
+        px = ml.get("draw")
+    if p2 is None:
+        p2 = ml.get("away_win")
+    if p1 is None or px is None or p2 is None:
+        return advise_uncovered(
+            home,
+            away,
+            odds=odds,
+            market_move=market_move,
+            prediction=prediction,
+            tipster=tipster,
+        )
+    p1, px, p2 = float(p1), float(px), float(p2)
     cal = load_calibration()
     book_src = "asianbetsoccer" if odds_from_asian else "book"
 
@@ -969,7 +1028,6 @@ def advise(
     rr_1x2 = _overround_1x2(o1, ox, o2)
     rr_ou = _overround_pair(o_o25, o_u25)
 
-    p1, px, p2 = mc["home_win"], mc["draw"], mc["away_win"]
     ranked = sorted([p1, px, p2], reverse=True)
     dc_1x = float(mc.get("dc_1x", p1 + px))
     dc_12 = float(mc.get("dc_12", p1 + p2))
@@ -977,10 +1035,13 @@ def advise(
     dnb_1 = float(mc.get("dnb_1", p1 / max(p1 + p2, 1e-9)))
     dnb_2 = float(mc.get("dnb_2", p2 / max(p1 + p2, 1e-9)))
 
+    ml_p1 = float(ml["home_win"]) if ml.get("home_win") is not None else p1
+    ml_px = float(ml["draw"]) if ml.get("draw") is not None else px
+    ml_p2 = float(ml["away_win"]) if ml.get("away_win") is not None else p2
     markets_1x2 = [
-        _market("1", f"{home} vince", "1x2", p1, ranked[1], ml["home_win"], o1, baseline=0.333, odds_source=book_src),
-        _market("X", "Pareggio", "1x2", px, ranked[1], ml["draw"], ox, baseline=0.333, odds_source=book_src),
-        _market("2", f"{away} vince", "1x2", p2, ranked[1], ml["away_win"], o2, baseline=0.333, odds_source=book_src),
+        _market("1", f"{home} vince", "1x2", p1, ranked[1], ml_p1, o1, baseline=0.333, odds_source=book_src),
+        _market("X", "Pareggio", "1x2", px, ranked[1], ml_px, ox, baseline=0.333, odds_source=book_src),
+        _market("2", f"{away} vince", "1x2", p2, ranked[1], ml_p2, o2, baseline=0.333, odds_source=book_src),
     ]
 
     def derived(code, name, group, prob, complement, model_p, baseline, book_odd=None, source="stimata"):
@@ -1182,8 +1243,14 @@ def advise(
 
     markets_exact = []
     for row in (mc.get("most_likely_scores") or [])[:6]:
-        score = str(row.get("score") or "")
-        p = float(row.get("prob") or 0)
+        if isinstance(row, dict):
+            score = str(row.get("score") or "")
+            p = float(row.get("prob") or 0)
+        elif isinstance(row, (list, tuple)) and len(row) >= 3:
+            score = f"{row[0]}-{row[1]}"
+            p = float(row[2] or 0)
+        else:
+            continue
         if not score or p < 0.04:
             continue
         markets_exact.append(
@@ -1269,12 +1336,17 @@ def advise(
         edge = m.get("edge_pp")
         evn = m.get("ev_cons") if m.get("ev_cons") is not None else m.get("ev")
         base = float(m.get("score") or 0) + max(edge if edge is not None else evn or -0.05, -0.05) * 3
-        # Boost corner (obiettivo value-bet tattico)
-        if m.get("group") == "corners":
+        g = m.get("group")
+        # Boost tipi consiglio side (stesso trattamento corner su cards/shots)
+        if g == "corners":
             base += 1.25
             if m.get("odds_real") and odds.get("side_odds_source") == "kambi_unibet":
                 base += 0.35
-        elif m.get("group") == "shots":
+        elif g == "shots":
+            base += 0.45
+            if m.get("odds_real") and odds.get("side_odds_source") == "kambi_unibet":
+                base += 0.2
+        elif g == "cards":
             base += 0.35
         return base
 
@@ -1287,6 +1359,19 @@ def advise(
             return float(m["ev"])
         return None
 
+    def _slim_best(m: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "code": m.get("code"),
+            "name": m.get("name"),
+            "group": m.get("group"),
+            "probability": m.get("probability"),
+            "odds": m.get("odds"),
+            "odds_real": bool(m.get("odds_real")),
+            "ev_cons": m.get("ev_cons") if m.get("ev_cons") is not None else m.get("ev"),
+            "score": m.get("score"),
+        }
+
+    # Finish early tutti i tipi consiglio (scorer resta lazy: lineup/xG costoso)
     grouped = {
         "1x2": [_finish(m, rr_1x2) for m in markets_1x2],
         "dc": [_finish(m, rr_1x2) for m in markets_dc],
@@ -1294,15 +1379,14 @@ def advise(
         "ou": [_finish(m, rr_ou) for m in markets_ou],
         "btts": [_finish(m, rr_ou) for m in markets_btts],
         "team": [_finish(m, rr_ou) for m in markets_team],
-        "multigol": [],
-        "parity": [],
-        "exact": [],
-        "cards": [],
-        # Corner/tiri: finish subito così competono per il pick primario
+        "multigol": [_finish(m, rr_ou) for m in markets_multigol],
+        "parity": [_finish(m, rr_ou) for m in markets_parity],
+        "exact": [_finish(m, rr_combo) for m in markets_exact],
+        "cards": [_finish(m, rr_ou) for m in markets_cards],
         "corners": [_finish(m, rr_ou) for m in markets_corners],
         "shots": [_finish(m, rr_ou) for m in markets_shots],
         "scorer": [],
-        "combo": [],
+        "combo": [_finish(m, rr_combo) for m in markets_combo],
     }
     all_markets = [m for g in grouped.values() for m in g]
 
@@ -1314,17 +1398,25 @@ def advise(
         else None
     )
     with_odds_ou = [m for m in grouped["ou"] if m.get("odds_real")]
+    min_ev_play = float(cal.get("min_ev_play", MIN_EDGE))
+
+    best_by_group: dict[str, dict[str, Any]] = {}
+    playable_by_group: dict[str, list[dict[str, Any]]] = {}
+    for g, items in grouped.items():
+        with_odds = [m for m in items if m.get("odds_real") and _actionable(m)]
+        if with_odds:
+            best_by_group[g] = _slim_best(max(with_odds, key=_extra_key))
+        playable_by_group[g] = [
+            m for m in with_odds if (_market_ev(m) or -1.0) >= min_ev_play
+        ]
+
     with_odds_corners = [m for m in grouped["corners"] if m.get("odds_real") and _actionable(m)]
     with_odds_shots = [m for m in grouped["shots"] if m.get("odds_real") and _actionable(m)]
-    min_ev_play = float(cal.get("min_ev_play", MIN_EDGE))
-    playable_corners = [
-        m
-        for m in with_odds_corners
-        if (_market_ev(m) or -1.0) >= min_ev_play
-    ]
-    playable_shots = [
-        m for m in with_odds_shots if (_market_ev(m) or -1.0) >= min_ev_play
-    ]
+    playable_corners = playable_by_group.get("corners") or []
+    playable_shots = playable_by_group.get("shots") or []
+    playable_cards = playable_by_group.get("cards") or []
+    all_playable = [m for ms in playable_by_group.values() for m in ms]
+
     play_corner = None
     if with_odds_corners:
         best_corn = max(with_odds_corners, key=_extra_key)
@@ -1333,6 +1425,11 @@ def advise(
     if with_odds_shots:
         best_sh = max(with_odds_shots, key=_extra_key)
         play_shot = _pick_headline(best_sh, best_sh if best_sh.get("odds_real") else None)
+    play_cards = None
+    cards_odds = [m for m in grouped["cards"] if m.get("odds_real") and _actionable(m)]
+    if cards_odds:
+        best_cd = max(cards_odds, key=_extra_key)
+        play_cards = _pick_headline(best_cd, best_cd if best_cd.get("odds_real") else None)
 
     extras = [
         m
@@ -1340,8 +1437,15 @@ def advise(
         if m["group"] not in {"1x2", "corners"} and _actionable(m) and m.get("odds_real")
     ]
     play_alt = None
-    # Invalido solo se manca qualsiasi quota utile (corner / tiri / 1X2 / O/U)
-    invalid_no_odds = not (with_odds_1x2 or with_odds_ou or with_odds_corners or with_odds_shots)
+    # Invalido solo se manca qualsiasi quota utile su tipi consiglio principali
+    invalid_no_odds = not (
+        with_odds_1x2
+        or with_odds_ou
+        or with_odds_corners
+        or with_odds_shots
+        or bool(cards_odds)
+        or any(playable_by_group.get(g) for g in ("btts", "ah", "dc", "team"))
+    )
 
     if invalid_no_odds:
         play_1x2 = _analysis_play(
@@ -1352,7 +1456,7 @@ def advise(
         )
         play = play_1x2
     elif playable_corners:
-        # Priorità corner: migliore CORN* giocabile (quota + EV)
+        # Priorità corner (focus value-bet)
         best_playable = max(playable_corners, key=_extra_key)
         play = _pick_headline(best_playable, best_playable)
         play_1x2 = (
@@ -1368,6 +1472,28 @@ def advise(
         if extras:
             play_alt = max(extras, key=_extra_key)
             play_alt = _pick_headline(play_alt, play_alt if play_alt.get("odds_real") else None)
+    elif all_playable:
+        # Stesso controllo di corner: qualsiasi Tipo consiglio con quota reale + EV
+        best_playable = max(all_playable, key=_extra_key)
+        play = _pick_headline(best_playable, best_playable)
+        play_1x2 = (
+            _pick_headline(probable_1x2, best_value_1x2)
+            if with_odds_1x2
+            else _analysis_play(
+                action="no_bet",
+                kind="nessun_pick",
+                name="1X2 senza quota",
+                reason="pick primario su altro tipo consiglio",
+            )
+        )
+        if extras:
+            play_alt = max(
+                (m for m in extras if m.get("code") != play.get("code")),
+                key=_extra_key,
+                default=None,
+            )
+            if play_alt:
+                play_alt = _pick_headline(play_alt, play_alt if play_alt.get("odds_real") else None)
     else:
         play_1x2 = (
             _pick_headline(probable_1x2, best_value_1x2)
@@ -1376,15 +1502,13 @@ def advise(
                 action="invalido",
                 kind="invalido",
                 name="pick invalido (quote 1X2 assenti)",
-                reason="pick invalido: senza quote 1X2 e senza corner giocabile",
+                reason="pick invalido: senza quote 1X2 e senza altri tipi consiglio giocabili",
             )
         )
         if not with_odds_1x2 and with_odds_ou:
-            # Fallback O/U se manca 1X2 ma ci sono totals
             best_ou = max(with_odds_ou, key=_extra_key)
             play_1x2 = _pick_headline(best_ou, best_ou if best_ou.get("odds_real") else None)
         elif not with_odds_1x2 and with_odds_corners:
-            # Quote corner presenti ma EV sotto soglia: non invalidare la partita
             best_corn = max(with_odds_corners, key=_extra_key)
             play_1x2 = _pick_headline(best_corn, best_corn if best_corn.get("odds_real") else None)
         if extras:
@@ -1395,7 +1519,6 @@ def advise(
         alt_ev = _market_ev(play_alt)
         if play_alt and (alt_ev or 0) >= min_ev_play and play_alt["score"] >= play_1x2["score"]:
             play = play_alt
-        # Corner con quota ma EV sotto soglia: resta play_corner informativo, non forza il primario
 
     need_secondary = (
         not lazy_secondary
@@ -1403,7 +1526,10 @@ def advise(
         or play.get("action") == "gioca"
         or bool(playable_corners)
         or bool(playable_shots)
+        or bool(playable_cards)
     )
+    advice_groups = sorted(best_by_group.keys())
+    playable_groups = sorted(g for g, ms in playable_by_group.items() if ms)
     if need_secondary:
         try:
             from modules.advisor.scorers import anytime_probs
@@ -1458,24 +1584,36 @@ def advise(
                     )
         except Exception:
             markets_scorer = []
-        grouped["multigol"] = [_finish(m, rr_ou) for m in markets_multigol]
-        grouped["parity"] = [_finish(m, rr_ou) for m in markets_parity]
-        grouped["exact"] = [_finish(m, rr_combo) for m in markets_exact]
-        grouped["cards"] = [_finish(m, rr_ou) for m in markets_cards]
-        # corners già finiti sopra
+        # Solo scorer è lazy; gli altri tipi consiglio sono già finish-early
         grouped["scorer"] = [_finish(m, rr_ou) for m in markets_scorer]
-        grouped["combo"] = [_finish(m, rr_combo) for m in markets_combo]
         all_markets = [m for g in grouped.values() for m in g]
+        # Aggiorna best/playable dopo scorer
+        for g, items in grouped.items():
+            with_odds = [m for m in items if m.get("odds_real") and _actionable(m)]
+            if with_odds:
+                best_by_group[g] = _slim_best(max(with_odds, key=_extra_key))
+            playable_by_group[g] = [
+                m for m in with_odds if (_market_ev(m) or -1.0) >= min_ev_play
+            ]
+        scorer_playable = playable_by_group.get("scorer") or []
+        if scorer_playable and not invalid_no_odds:
+            best_sc = max(scorer_playable, key=_extra_key)
+            cur_ev = _market_ev(play) or -1.0
+            sc_ev = _market_ev(best_sc) or -1.0
+            if sc_ev > cur_ev and float(best_sc.get("score") or 0) >= float(play.get("score") or 0):
+                play = _pick_headline(best_sc, best_sc)
+        advice_groups = sorted(best_by_group.keys())
+        playable_groups = sorted(g for g, ms in playable_by_group.items() if ms)
 
     ml_for_play = play.get("model_probability")
     if ml_for_play is None and play.get("group") == "1x2":
         code = play.get("code")
         if code == "1":
-            ml_for_play = ml["home_win"]
+            ml_for_play = ml_p1
         elif code == "X":
-            ml_for_play = ml["draw"]
+            ml_for_play = ml_px
         elif code == "2":
-            ml_for_play = ml["away_win"]
+            ml_for_play = ml_p2
 
     alignment = None
     score_cap: int | None = None
@@ -1788,6 +1926,10 @@ def advise(
         "play_alt": play_alt,
         "play_corner": play_corner,
         "play_shot": play_shot,
+        "play_cards": play_cards,
+        "best_by_group": best_by_group,
+        "advice_groups": advice_groups,
+        "playable_groups": playable_groups,
         "most_probable": probable_1x2,
         "best_value": best_value_1x2,
         "markets": markets_1x2,
@@ -1798,10 +1940,23 @@ def advise(
         "most_likely_scores": mc.get("most_likely_scores", []),
         "has_odds": any(
             bool(m.get("odds_real"))
-            for m in (grouped.get("1x2") or [])
-            + (grouped.get("ou") or [])
-            + (grouped.get("corners") or [])
-            + (grouped.get("shots") or [])
+            for g in (
+                "1x2",
+                "ou",
+                "btts",
+                "ah",
+                "dc",
+                "team",
+                "cards",
+                "corners",
+                "shots",
+                "multigol",
+                "parity",
+                "exact",
+                "combo",
+                "scorer",
+            )
+            for m in (grouped.get(g) or [])
         ),
         "market_move": market_move,
         "market_align": alignment or {"agrees": [], "disagrees": [], "delta": 0, "label": "n/d"},

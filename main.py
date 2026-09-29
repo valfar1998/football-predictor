@@ -101,21 +101,24 @@ def refresh_odds_pipeline(*, asian: bool = True, on_progress=None) -> dict:
         rows = fetch_asian_odds(days=14, book="bet365", on_progress=span(0.12, 0.55))
         path = save_asian_odds(rows)
         asian_info = {"n_asian": len(rows), "asian_cache": str(path)}
-    # Pinnacle da The Odds API (1 chiamata/giorno, cache 20h)
+    # Pinnacle/Codere da The Odds API (1 chiamata/giorno, cache 20h)
     try:
-        from modules.data_update.odds_api import fetch_pinnacle_odds
-        p(0.58, "Quote Pinnacle (cache 20h)…")
+        from modules.data_update.odds_api import fetch_pinnacle_odds, _bookmaker_label
+
+        label = _bookmaker_label()
+        p(0.58, f"Quote {label} Odds API (cache 20h)…")
         pinn = fetch_pinnacle_odds()
         asian_info["pinnacle_events"] = pinn.get("n_events", 0)
         asian_info["pinnacle_remaining"] = pinn.get("remaining")
         asian_info["pinnacle_from_cache"] = pinn.get("from_cache", False)
+        asian_info["odds_api_bookmaker"] = pinn.get("bookmaker")
         if not pinn.get("ok") and pinn.get("error"):
             asian_info["pinnacle_error"] = pinn["error"]
         if pinn.get("from_cache"):
-            print("Pinnacle: cache fresca, skip fetch", flush=True)
+            print(f"{label}: cache fresca, skip fetch", flush=True)
     except Exception as exc:
         asian_info["pinnacle_error"] = str(exc)
-        print(f"skip Pinnacle odds: {exc}", flush=True)
+        print(f"skip Odds API odds: {exc}", flush=True)
     try:
         from modules.data_update.betfair import fetch_betfair_odds
         p(0.62, "Quote Betfair (cache 6h)…")
@@ -154,7 +157,7 @@ def refresh_odds_pipeline(*, asian: bool = True, on_progress=None) -> dict:
     p(1.0, f"OK · {len(upcoming)} partite")
     return {
         "n_upcoming": len(upcoming),
-        "source": "football-data.co.uk + asianbetsoccer + pinnacle/betfair/kambi cache",
+        "source": "football-data.co.uk + asianbetsoccer + codere/betfair/kambi cache",
         "reuse_predictions": True,
         "light": True,
         **asian_info,

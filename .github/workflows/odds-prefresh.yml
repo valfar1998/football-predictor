@@ -1,11 +1,10 @@
 # Pre-match: archivia quote ricche (quota_pick + EV + fattori) prima del KO.
-# 10:00 e 16:00 UTC ≈ 12:00 e 18:00 IT (leggero shift ora solare).
+# 4×/giorno UTC ≈ 10:00 / 14:00 / 18:00 / 22:00 IT (CEST) — intercetta corner quando escono.
 name: Pre-match odds archive
 
 on:
   schedule:
-    - cron: "0 10 * * *"
-    - cron: "0 16 * * *"
+    - cron: "0 8,12,16,20 * * *"
   workflow_dispatch:
 
 jobs:
@@ -34,6 +33,7 @@ jobs:
             data/processed/our_history.sqlite-wal
             data/processed/our_history.sqlite-shm
             data/processed/upcoming_predictions.json
+            data/processed/telegram_score_freeze.json
           key: cloud-history-v2
           restore-keys: |
             cloud-history-v2
@@ -121,6 +121,8 @@ jobs:
           BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
           BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
           PYTHONUTF8: "1"
+          KAMBI_PREFETCH_CORNERS: "1"
+          KAMBI_LANG: "en_GB"
         run: |
           python main.py --odds-update
           python - <<'PY'
@@ -133,6 +135,7 @@ jobs:
           target = hs.get("n_rich_live_target", 80)
           print(f"live ricche pre-match: {live}/{target}")
           PY
+          python scripts/report_corner_coverage.py
 
       - uses: actions/cache/save@v4
         if: always() && hashFiles('data/processed/our_history.sqlite') != ''
@@ -142,6 +145,7 @@ jobs:
             data/processed/our_history.sqlite-wal
             data/processed/our_history.sqlite-shm
             data/processed/upcoming_predictions.json
+            data/processed/telegram_score_freeze.json
           key: cloud-history-v2
 
       - uses: actions/cache/save@v4
