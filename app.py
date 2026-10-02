@@ -2688,9 +2688,87 @@ with tab_eval:
             st.caption("Ancora nessun esito voto ≥8 settled: il ROI si riempie dopo archive + settle.")
         if _n_pend_sc:
             st.caption(
-                f"In coda al settle: **{_n_pend_sc}** partite con voto ≥{_min_sc} "
-                f"(di cui **{_n_lock_pend}** freeze Telegram) — non ancora nel ROI."
+                f"In coda al settle: **{_n_pend_sc}** partite GIOCA freeze "
+                f"(di cui **{_n_lock_pend}** freeze Telegram totali pending) — non ancora nel ROI."
             )
+
+        st.subheader("Paper ROI (Asian Spread Raro · giocabilità)")
+        from modules.advisor.spread_paper import spread_paper_report
+
+        _sp_rep = spread_paper_report()
+        if not _sp_rep.get("ok"):
+            st.caption(_sp_rep.get("error") or "Report spread non disponibile")
+        elif not _sp_rep.get("n_journal"):
+            st.caption(
+                _sp_rep.get("note")
+                or "Nessun alert Spread Raro congelato: si riempie al prossimo invio Telegram."
+            )
+        else:
+            st.caption(
+                "Campione separato dal ROI GIOCA: solo alert **Spread Raro** inviati su Telegram. "
+                "Settle su gol da storico; ROI @ quote unitario sul lato *Segui* (1/2/O/U). "
+                "AH senza quota → solo hit rate."
+            )
+            s1, s2, s3, s4, s5 = st.columns(5)
+            _sn = int(_sp_rep.get("n") or 0)
+            _spn = int(_sp_rep.get("n_pending") or 0)
+            _sroi = _sp_rep.get("odds_roi")
+            _shr = _sp_rep.get("hit_rate")
+            s1.metric(
+                "Campione spread",
+                f"{_sn} ({_spn})",
+                help="Settled (pending); journal totale in nota sotto.",
+            )
+            s2.metric(
+                "ROI @ quote",
+                "n/d" if _sroi is None else f"{_sroi:+.1%}",
+                delta=f"flat {_sp_rep.get('flat_roi', 0):+.1%}" if _sn else None,
+            )
+            s3.metric(
+                "Hit rate",
+                "—" if _shr is None else f"{_shr:.0%}",
+                delta=f"{_sp_rep.get('hits', 0)}/{_sn}",
+            )
+            s4.metric("Push", f"{int(_sp_rep.get('n_push') or 0)}")
+            s5.metric("In journal", f"{int(_sp_rep.get('n_journal') or 0)}")
+            _sv = _sp_rep.get("by_vote") or {}
+            sv8, sv9, sv10 = st.columns(3)
+            for _col, _vote in ((sv8, "8"), (sv9, "9"), (sv10, "10")):
+                _vs = _sv.get(_vote) or {}
+                _vroi = _vs.get("odds_roi")
+                _col.metric(
+                    f"ROI giocab. {_vote}",
+                    "n/d" if _vroi is None else f"{_vroi:+.1%}",
+                    delta=f"n={int(_vs.get('n') or 0)} ({int(_vs.get('pending') or 0)})",
+                )
+            if _sp_rep.get("by_market"):
+                with st.expander("Spread ROI per mercato (bet)", expanded=False):
+                    st.dataframe(
+                        pd.DataFrame(_sp_rep["by_market"]),
+                        width="stretch",
+                        hide_index=True,
+                    )
+            if _sp_rep.get("recent"):
+                with st.expander("Ultime spread settled", expanded=False):
+                    st.dataframe(
+                        pd.DataFrame(
+                            [
+                                {
+                                    "Data": r.get("date"),
+                                    "Partita": f"{r.get('home')} vs {r.get('away')}",
+                                    "Giocab.": r.get("playability"),
+                                    "Segui": r.get("bet_label") or r.get("follow"),
+                                    "Quota": r.get("odds"),
+                                    "Hit": r.get("hit"),
+                                    "Push": r.get("push"),
+                                    "PnL": r.get("pnl"),
+                                }
+                                for r in _sp_rep["recent"]
+                            ]
+                        ),
+                        width="stretch",
+                        hide_index=True,
+                    )
 
         with st.expander("Sync settle locali → cloud (apprendimento)", expanded=False):
             st.caption(

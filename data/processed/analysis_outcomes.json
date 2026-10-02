@@ -1,23 +1,23 @@
 {
   "ok": true,
-  "updated_at": "2026-10-01T20:33:58.031195+00:00",
+  "updated_at": "2026-10-02T06:21:58.012588+00:00",
   "filters": {
     "live_only": false,
     "trainable_only": false,
     "require_score_unified": false
   },
-  "n_settled_total": 1291,
-  "n_in_pool": 1291,
-  "n_with_score_unified": 1291,
-  "n_with_score": 643,
+  "n_settled_total": 1293,
+  "n_in_pool": 1293,
+  "n_with_score_unified": 1293,
+  "n_with_score": 644,
   "overall_hits": 273,
-  "overall_hit_rate": 0.2115,
+  "overall_hit_rate": 0.2111,
   "gioca": {
-    "n": 282,
-    "hits": 115,
-    "misses": 167,
-    "hit_rate": 0.4078,
-    "label": "115/282",
+    "n": 275,
+    "hits": 111,
+    "misses": 164,
+    "hit_rate": 0.4036,
+    "label": "111/275",
     "trend": "in miglioramento",
     "last_10": {
       "n": 10,
@@ -27,15 +27,15 @@
     },
     "last_20": {
       "n": 20,
-      "hits": 10,
-      "hit_rate": 0.5,
-      "label": "10/20"
+      "hits": 8,
+      "hit_rate": 0.4,
+      "label": "8/20"
     },
     "before_last_10": {
-      "n": 272,
-      "hits": 109,
-      "hit_rate": 0.4007,
-      "label": "109/272"
+      "n": 265,
+      "hits": 105,
+      "hit_rate": 0.3962,
+      "label": "105/265"
     },
     "by_week": [
       {
@@ -80,14 +80,56 @@
       },
       {
         "key": "2026-W40",
-        "n": 8,
-        "hits": 4,
-        "misses": 4,
-        "hit_rate": 0.5,
-        "label": "4/8"
+        "n": 1,
+        "hits": 0,
+        "misses": 1,
+        "hit_rate": 0.0,
+        "label": "0/1"
       }
     ],
     "cumulative": [
+      {
+        "n": 216,
+        "date": "2026-09-02",
+        "hit_rate": 0.3889,
+        "label": "84/216"
+      },
+      {
+        "n": 217,
+        "date": "2026-09-02",
+        "hit_rate": 0.3871,
+        "label": "84/217"
+      },
+      {
+        "n": 218,
+        "date": "2026-09-02",
+        "hit_rate": 0.3899,
+        "label": "85/218"
+      },
+      {
+        "n": 219,
+        "date": "2026-09-02",
+        "hit_rate": 0.3927,
+        "label": "86/219"
+      },
+      {
+        "n": 220,
+        "date": "2026-09-02",
+        "hit_rate": 0.3909,
+        "label": "86/220"
+      },
+      {
+        "n": 221,
+        "date": "2026-09-02",
+        "hit_rate": 0.3937,
+        "label": "87/221"
+      },
+      {
+        "n": 222,
+        "date": "2026-09-02",
+        "hit_rate": 0.3919,
+        "label": "87/222"
+      },
       {
         "n": 223,
         "date": "2026-09-03",
@@ -405,48 +447,6 @@
         "date": "2026-09-29",
         "hit_rate": 0.4036,
         "label": "111/275"
-      },
-      {
-        "n": 276,
-        "date": "2026-09-29",
-        "hit_rate": 0.4022,
-        "label": "111/276"
-      },
-      {
-        "n": 277,
-        "date": "2026-09-30",
-        "hit_rate": 0.4043,
-        "label": "112/277"
-      },
-      {
-        "n": 278,
-        "date": "2026-09-30",
-        "hit_rate": 0.4029,
-        "label": "112/278"
-      },
-      {
-        "n": 279,
-        "date": "2026-09-30",
-        "hit_rate": 0.405,
-        "label": "113/279"
-      },
-      {
-        "n": 280,
-        "date": "2026-09-30",
-        "hit_rate": 0.4071,
-        "label": "114/280"
-      },
-      {
-        "n": 281,
-        "date": "2026-09-30",
-        "hit_rate": 0.4093,
-        "label": "115/281"
-      },
-      {
-        "n": 282,
-        "date": "2026-09-30",
-        "hit_rate": 0.4078,
-        "label": "115/282"
       }
     ],
     "high_vote": {
@@ -460,7 +460,7 @@
     }
   },
   "highlights": [
-    "Giocate consigliate: 115/282 (41%) · trend in miglioramento",
+    "Giocate consigliate: 111/275 (40%) · trend in miglioramento",
     "Ultime 10 giocate: 6/10 (60%)",
     "Giocate voto ≥8: 11/25 (44%) · ROI -1%",
     "Voto unificato 9: 1/2 prese (50%)",
@@ -497,59 +497,59 @@
     },
     {
       "key": "7",
-      "n": 8,
-      "hits": 3,
+      "n": 7,
+      "hits": 2,
       "misses": 5,
-      "hit_rate": 0.375,
-      "label": "3/8"
+      "hit_rate": 0.2857,
+      "label": "2/7"
     },
     {
       "key": "6",
-      "n": 53,
-      "hits": 21,
+      "n": 52,
+      "hits": 20,
       "misses": 32,
-      "hit_rate": 0.3962,
-      "label": "21/53"
+      "hit_rate": 0.3846,
+      "label": "20/52"
     },
     {
       "key": "5",
-      "n": 63,
-      "hits": 28,
-      "misses": 35,
-      "hit_rate": 0.4444,
-      "label": "28/63"
+      "n": 61,
+      "hits": 27,
+      "misses": 34,
+      "hit_rate": 0.4426,
+      "label": "27/61"
     },
     {
       "key": "4",
-      "n": 199,
-      "hits": 83,
-      "misses": 116,
-      "hit_rate": 0.4171,
-      "label": "83/199"
+      "n": 197,
+      "hits": 84,
+      "misses": 113,
+      "hit_rate": 0.4264,
+      "label": "84/197"
     },
     {
       "key": "3",
-      "n": 125,
-      "hits": 52,
-      "misses": 73,
-      "hit_rate": 0.416,
-      "label": "52/125"
+      "n": 132,
+      "hits": 53,
+      "misses": 79,
+      "hit_rate": 0.4015,
+      "label": "53/132"
     },
     {
       "key": "2",
-      "n": 166,
+      "n": 167,
       "hits": 54,
-      "misses": 112,
-      "hit_rate": 0.3253,
-      "label": "54/166"
+      "misses": 113,
+      "hit_rate": 0.3234,
+      "label": "54/167"
     },
     {
       "key": "1",
       "n": 652,
-      "hits": 21,
-      "misses": 631,
-      "hit_rate": 0.0322,
-      "label": "21/652"
+      "hits": 22,
+      "misses": 630,
+      "hit_rate": 0.0337,
+      "label": "22/652"
     }
   ],
   "by_score": [
@@ -571,19 +571,19 @@
     },
     {
       "key": "6",
-      "n": 178,
-      "hits": 75,
-      "misses": 103,
-      "hit_rate": 0.4213,
-      "label": "75/178"
+      "n": 171,
+      "hits": 71,
+      "misses": 100,
+      "hit_rate": 0.4152,
+      "label": "71/171"
     },
     {
       "key": "5",
-      "n": 74,
-      "hits": 23,
-      "misses": 51,
-      "hit_rate": 0.3108,
-      "label": "23/74"
+      "n": 84,
+      "hits": 27,
+      "misses": 57,
+      "hit_rate": 0.3214,
+      "label": "27/84"
     },
     {
       "key": "4",
@@ -595,11 +595,11 @@
     },
     {
       "key": "3",
-      "n": 86,
+      "n": 85,
       "hits": 37,
-      "misses": 49,
-      "hit_rate": 0.4302,
-      "label": "37/86"
+      "misses": 48,
+      "hit_rate": 0.4353,
+      "label": "37/85"
     },
     {
       "key": "2",
@@ -611,21 +611,21 @@
     },
     {
       "key": "1",
-      "n": 25,
+      "n": 24,
       "hits": 12,
-      "misses": 13,
-      "hit_rate": 0.48,
-      "label": "12/25"
+      "misses": 12,
+      "hit_rate": 0.5,
+      "label": "12/24"
     }
   ],
   "by_action": [
     {
       "key": "gioca",
-      "n": 282,
-      "hits": 115,
-      "misses": 167,
-      "hit_rate": 0.4078,
-      "label": "115/282"
+      "n": 275,
+      "hits": 111,
+      "misses": 164,
+      "hit_rate": 0.4036,
+      "label": "111/275"
     },
     {
       "key": "invalido",
@@ -637,29 +637,29 @@
     },
     {
       "key": "n/d",
-      "n": 178,
+      "n": 179,
       "hits": 0,
-      "misses": 178,
+      "misses": 179,
       "hit_rate": 0.0,
-      "label": "0/178"
+      "label": "0/179"
     },
     {
       "key": "no_bet",
-      "n": 361,
-      "hits": 158,
-      "misses": 203,
-      "hit_rate": 0.4377,
-      "label": "158/361"
+      "n": 369,
+      "hits": 162,
+      "misses": 207,
+      "hit_rate": 0.439,
+      "label": "162/369"
     }
   ],
   "by_market": [
     {
       "key": "1x2",
-      "n": 1088,
+      "n": 1087,
       "hits": 183,
-      "misses": 905,
-      "hit_rate": 0.1682,
-      "label": "183/1088"
+      "misses": 904,
+      "hit_rate": 0.1684,
+      "label": "183/1087"
     },
     {
       "key": "corners",
@@ -671,11 +671,11 @@
     },
     {
       "key": "ou",
-      "n": 198,
+      "n": 201,
       "hits": 87,
-      "misses": 111,
-      "hit_rate": 0.4394,
-      "label": "87/198"
+      "misses": 114,
+      "hit_rate": 0.4328,
+      "label": "87/201"
     }
   ],
   "by_quadro_consensus": [
@@ -793,11 +793,11 @@
     },
     {
       "key": "2/9",
-      "n": 4,
+      "n": 5,
       "hits": 0,
-      "misses": 4,
+      "misses": 5,
       "hit_rate": 0.0,
-      "label": "0/4"
+      "label": "0/5"
     },
     {
       "key": "3/10",
@@ -897,11 +897,11 @@
     },
     {
       "key": "5/9",
-      "n": 9,
+      "n": 8,
       "hits": 2,
-      "misses": 7,
-      "hit_rate": 0.2222,
-      "label": "2/9"
+      "misses": 6,
+      "hit_rate": 0.25,
+      "label": "2/8"
     },
     {
       "key": "6/10",
@@ -1083,19 +1083,19 @@
     },
     {
       "key": "1|n/d",
-      "n": 135,
+      "n": 136,
       "hits": 0,
-      "misses": 135,
+      "misses": 136,
       "hit_rate": 0.0,
-      "label": "0/135"
+      "label": "0/136"
     },
     {
       "key": "1|no_bet",
-      "n": 49,
-      "hits": 21,
-      "misses": 28,
-      "hit_rate": 0.4286,
-      "label": "21/49"
+      "n": 48,
+      "hits": 22,
+      "misses": 26,
+      "hit_rate": 0.4583,
+      "label": "22/48"
     },
     {
       "key": "2|gioca",
@@ -1123,19 +1123,19 @@
     },
     {
       "key": "2|no_bet",
-      "n": 111,
+      "n": 112,
       "hits": 49,
-      "misses": 62,
-      "hit_rate": 0.4414,
-      "label": "49/111"
+      "misses": 63,
+      "hit_rate": 0.4375,
+      "label": "49/112"
     },
     {
       "key": "3|gioca",
       "n": 34,
-      "hits": 19,
-      "misses": 15,
-      "hit_rate": 0.5588,
-      "label": "19/34"
+      "hits": 18,
+      "misses": 16,
+      "hit_rate": 0.5294,
+      "label": "18/34"
     },
     {
       "key": "3|invalido",
@@ -1147,43 +1147,43 @@
     },
     {
       "key": "3|no_bet",
-      "n": 90,
-      "hits": 33,
-      "misses": 57,
-      "hit_rate": 0.3667,
-      "label": "33/90"
+      "n": 97,
+      "hits": 35,
+      "misses": 62,
+      "hit_rate": 0.3608,
+      "label": "35/97"
     },
     {
       "key": "4|gioca",
-      "n": 108,
-      "hits": 35,
-      "misses": 73,
-      "hit_rate": 0.3241,
-      "label": "35/108"
+      "n": 103,
+      "hits": 34,
+      "misses": 69,
+      "hit_rate": 0.3301,
+      "label": "34/103"
     },
     {
       "key": "4|no_bet",
-      "n": 91,
-      "hits": 48,
-      "misses": 43,
-      "hit_rate": 0.5275,
-      "label": "48/91"
+      "n": 94,
+      "hits": 50,
+      "misses": 44,
+      "hit_rate": 0.5319,
+      "label": "50/94"
     },
     {
       "key": "5|gioca",
-      "n": 48,
-      "hits": 24,
+      "n": 47,
+      "hits": 23,
       "misses": 24,
-      "hit_rate": 0.5,
-      "label": "24/48"
+      "hit_rate": 0.4894,
+      "label": "23/47"
     },
     {
       "key": "5|no_bet",
-      "n": 15,
+      "n": 14,
       "hits": 4,
-      "misses": 11,
-      "hit_rate": 0.2667,
-      "label": "4/15"
+      "misses": 10,
+      "hit_rate": 0.2857,
+      "label": "4/14"
     },
     {
       "key": "6|gioca",
@@ -1195,19 +1195,19 @@
     },
     {
       "key": "6|no_bet",
-      "n": 5,
-      "hits": 3,
+      "n": 4,
+      "hits": 2,
       "misses": 2,
-      "hit_rate": 0.6,
-      "label": "3/5"
+      "hit_rate": 0.5,
+      "label": "2/4"
     },
     {
       "key": "7|gioca",
-      "n": 8,
-      "hits": 3,
+      "n": 7,
+      "hits": 2,
       "misses": 5,
-      "hit_rate": 0.375,
-      "label": "3/8"
+      "hit_rate": 0.2857,
+      "label": "2/7"
     },
     {
       "key": "8|gioca",
@@ -1227,6 +1227,36 @@
     }
   ],
   "recent": [
+    {
+      "date": "2026-10-01",
+      "match": "Man City – Real Madrid",
+      "pick": "O2.5",
+      "action": "no_bet",
+      "quota": 1.9,
+      "score_unified": 1,
+      "score": 5,
+      "hit": 0,
+      "result": "X",
+      "scoreline": "1-1",
+      "live": true,
+      "quadro": null,
+      "trainable": true
+    },
+    {
+      "date": "2026-10-01",
+      "match": "Guinea – Kenya",
+      "pick": "—",
+      "action": "n/d",
+      "quota": null,
+      "score_unified": 1,
+      "score": null,
+      "hit": 0,
+      "result": "1",
+      "scoreline": "1-0",
+      "live": true,
+      "quadro": null,
+      "trainable": false
+    },
     {
       "date": "2026-09-29",
       "match": "Halifax – Boston Utd",
@@ -1276,10 +1306,10 @@
       "date": "2026-09-30",
       "match": "Sturm Graz – Wolfsburg",
       "pick": "O2.5",
-      "action": "gioca",
+      "action": "no_bet",
       "quota": 1.83,
-      "score_unified": 4,
-      "score": 6,
+      "score_unified": 3,
+      "score": 5,
       "hit": 0,
       "result": "2",
       "scoreline": "0-2",
@@ -1291,10 +1321,10 @@
       "date": "2026-09-30",
       "match": "Sociedad – Hearts",
       "pick": "O2.5",
-      "action": "gioca",
+      "action": "no_bet",
       "quota": 1.85,
-      "score_unified": 4,
-      "score": 6,
+      "score_unified": 3,
+      "score": 5,
       "hit": 1,
       "result": "1",
       "scoreline": "4-0",
@@ -1321,10 +1351,10 @@
       "date": "2026-09-30",
       "match": "Roma – Barcelona",
       "pick": "O2.5",
-      "action": "gioca",
+      "action": "no_bet",
       "quota": 1.9,
-      "score_unified": 7,
-      "score": 6,
+      "score_unified": 4,
+      "score": 5,
       "hit": 1,
       "result": "2",
       "scoreline": "0-6",
@@ -1336,10 +1366,10 @@
       "date": "2026-09-30",
       "match": "Rangers – Hammarby",
       "pick": "O2.5",
-      "action": "gioca",
+      "action": "no_bet",
       "quota": 1.9,
-      "score_unified": 5,
-      "score": 6,
+      "score_unified": 3,
+      "score": 5,
       "hit": 1,
       "result": "2",
       "scoreline": "0-3",
@@ -1396,10 +1426,10 @@
       "date": "2026-09-30",
       "match": "Lyon – Chelsea",
       "pick": "O2.5",
-      "action": "gioca",
+      "action": "no_bet",
       "quota": 1.98,
-      "score_unified": 4,
-      "score": 6,
+      "score_unified": 3,
+      "score": 5,
       "hit": 0,
       "result": "X",
       "scoreline": "0-0",
@@ -1413,7 +1443,7 @@
       "pick": "2",
       "action": "no_bet",
       "quota": 2.6,
-      "score_unified": 6,
+      "score_unified": 4,
       "score": 4,
       "hit": 1,
       "result": "2",
@@ -1500,11 +1530,11 @@
     {
       "date": "2026-09-30",
       "match": "Brann – HJK",
-      "pick": "2",
+      "pick": "O2.5",
       "action": "no_bet",
-      "quota": 13.0,
-      "score_unified": 1,
-      "score": 1,
+      "quota": 1.98,
+      "score_unified": 2,
+      "score": 4,
       "hit": 0,
       "result": "1",
       "scoreline": "4-0",
@@ -1516,10 +1546,10 @@
       "date": "2026-09-30",
       "match": "Benfica – Bayern Munich",
       "pick": "O2.5",
-      "action": "gioca",
+      "action": "no_bet",
       "quota": 1.98,
-      "score_unified": 3,
-      "score": 6,
+      "score_unified": 1,
+      "score": 5,
       "hit": 1,
       "result": "2",
       "scoreline": "0-3",
@@ -1560,69 +1590,39 @@
     {
       "date": "2026-09-29",
       "match": "Yamaga – Albirex Niigata",
-      "pick": "2",
+      "pick": "X",
       "action": "no_bet",
-      "quota": 2.2,
-      "score_unified": 1,
-      "score": 3,
+      "quota": 3.3,
+      "score_unified": 2,
+      "score": 5,
       "hit": 0,
       "result": "1",
       "scoreline": "1-0",
       "live": true,
-      "quadro": "5/9",
-      "trainable": true
-    },
-    {
-      "date": "2026-09-29",
-      "match": "Wuxi Wugou – Ningbo Professional",
-      "pick": "—",
-      "action": "invalido",
-      "quota": null,
-      "score_unified": 1,
-      "score": null,
-      "hit": 0,
-      "result": "1",
-      "scoreline": "1-0",
-      "live": true,
-      "quadro": null,
-      "trainable": false
-    },
-    {
-      "date": "2026-09-29",
-      "match": "Woking – Solihull",
-      "pick": "U2.5",
-      "action": "gioca",
-      "quota": 2.12,
-      "score_unified": 4,
-      "score": 4,
-      "hit": 0,
-      "result": "2",
-      "scoreline": "2-4",
-      "live": true,
-      "quadro": "9/9",
+      "quadro": "2/9",
       "trainable": true
     }
   ],
   "live_summary": {
     "ok": true,
-    "updated_at": "2026-10-01T20:33:58.273167+00:00",
+    "updated_at": "2026-10-02T06:21:58.264585+00:00",
     "filters": {
       "live_only": true,
       "trainable_only": false,
       "require_score_unified": false
     },
-    "n_settled_total": 1291,
-    "n_in_pool": 1171,
-    "n_with_score_unified": 1171,
-    "n_with_score": 523,
+    "n_settled_total": 1293,
+    "n_in_pool": 1173,
+    "n_with_score_unified": 1173,
+    "n_with_score": 524,
     "overall_hits": 221,
-    "overall_hit_rate": 0.1887,
+    "overall_hit_rate": 0.1884,
     "gioca": {
-      "n": 227,
-      "hits": 94,
-      "misses": 133,
-      "hit_rate": 0.4141,
-      "label": "94/227",
+      "n": 220,
+      "hits": 90,
+      "misses": 130,
+      "hit_rate": 0.4091,
+      "label": "90/220",
       "trend": "in miglioramento",
       "last_10": {
         "n": 10,
@@ -1632,15 +1632,15 @@
       },
       "last_20": {
         "n": 20,
-        "hits": 10,
-        "hit_rate": 0.5,
-        "label": "10/20"
+        "hits": 8,
+        "hit_rate": 0.4,
+        "label": "8/20"
       },
       "before_last_10": {
-        "n": 217,
-        "hits": 88,
-        "hit_rate": 0.4055,
-        "label": "88/217"
+        "n": 210,
+        "hits": 84,
+        "hit_rate": 0.4,
+        "label": "84/210"
       },
       "by_week": [
         {
@@ -1677,14 +1677,56 @@
         },
         {
           "key": "2026-W40",
-          "n": 8,
-          "hits": 4,
-          "misses": 4,
-          "hit_rate": 0.5,
-          "label": "4/8"
+          "n": 1,
+          "hits": 0,
+          "misses": 1,
+          "hit_rate": 0.0,
+          "label": "0/1"
         }
       ],
       "cumulative": [
+        {
+          "n": 161,
+          "date": "2026-09-02",
+          "hit_rate": 0.3913,
+          "label": "63/161"
+        },
+        {
+          "n": 162,
+          "date": "2026-09-02",
+          "hit_rate": 0.3889,
+          "label": "63/162"
+        },
+        {
+          "n": 163,
+          "date": "2026-09-02",
+          "hit_rate": 0.3926,
+          "label": "64/163"
+        },
+        {
+          "n": 164,
+          "date": "2026-09-02",
+          "hit_rate": 0.3963,
+          "label": "65/164"
+        },
+        {
+          "n": 165,
+          "date": "2026-09-02",
+          "hit_rate": 0.3939,
+          "label": "65/165"
+        },
+        {
+          "n": 166,
+          "date": "2026-09-02",
+          "hit_rate": 0.3976,
+          "label": "66/166"
+        },
+        {
+          "n": 167,
+          "date": "2026-09-02",
+          "hit_rate": 0.3952,
+          "label": "66/167"
+        },
         {
           "n": 168,
           "date": "2026-09-03",
@@ -2002,48 +2044,6 @@
           "date": "2026-09-29",
           "hit_rate": 0.4091,
           "label": "90/220"
-        },
-        {
-          "n": 221,
-          "date": "2026-09-29",
-          "hit_rate": 0.4072,
-          "label": "90/221"
-        },
-        {
-          "n": 222,
-          "date": "2026-09-30",
-          "hit_rate": 0.4099,
-          "label": "91/222"
-        },
-        {
-          "n": 223,
-          "date": "2026-09-30",
-          "hit_rate": 0.4081,
-          "label": "91/223"
-        },
-        {
-          "n": 224,
-          "date": "2026-09-30",
-          "hit_rate": 0.4107,
-          "label": "92/224"
-        },
-        {
-          "n": 225,
-          "date": "2026-09-30",
-          "hit_rate": 0.4133,
-          "label": "93/225"
-        },
-        {
-          "n": 226,
-          "date": "2026-09-30",
-          "hit_rate": 0.4159,
-          "label": "94/226"
-        },
-        {
-          "n": 227,
-          "date": "2026-09-30",
-          "hit_rate": 0.4141,
-          "label": "94/227"
         }
       ],
       "high_vote": {
@@ -2057,7 +2057,7 @@
       }
     },
     "highlights": [
-      "Giocate consigliate: 94/227 (41%) · trend in miglioramento",
+      "Giocate consigliate: 90/220 (41%) · trend in miglioramento",
       "Ultime 10 giocate: 6/10 (60%)",
       "Giocate voto ≥8: 11/25 (44%) · ROI -1%",
       "Voto unificato 9: 1/2 prese (50%)",
@@ -2094,59 +2094,59 @@
       },
       {
         "key": "7",
-        "n": 7,
-        "hits": 3,
+        "n": 6,
+        "hits": 2,
         "misses": 4,
-        "hit_rate": 0.4286,
-        "label": "3/7"
+        "hit_rate": 0.3333,
+        "label": "2/6"
       },
       {
         "key": "6",
-        "n": 47,
-        "hits": 18,
+        "n": 46,
+        "hits": 17,
         "misses": 29,
-        "hit_rate": 0.383,
-        "label": "18/47"
+        "hit_rate": 0.3696,
+        "label": "17/46"
       },
       {
         "key": "5",
-        "n": 48,
-        "hits": 21,
-        "misses": 27,
-        "hit_rate": 0.4375,
-        "label": "21/48"
+        "n": 46,
+        "hits": 20,
+        "misses": 26,
+        "hit_rate": 0.4348,
+        "label": "20/46"
       },
       {
         "key": "4",
-        "n": 163,
-        "hits": 70,
-        "misses": 93,
-        "hit_rate": 0.4294,
-        "label": "70/163"
+        "n": 161,
+        "hits": 71,
+        "misses": 90,
+        "hit_rate": 0.441,
+        "label": "71/161"
       },
       {
         "key": "3",
-        "n": 97,
-        "hits": 41,
-        "misses": 56,
-        "hit_rate": 0.4227,
-        "label": "41/97"
+        "n": 104,
+        "hits": 42,
+        "misses": 62,
+        "hit_rate": 0.4038,
+        "label": "42/104"
       },
       {
         "key": "2",
-        "n": 147,
+        "n": 148,
         "hits": 42,
-        "misses": 105,
-        "hit_rate": 0.2857,
-        "label": "42/147"
+        "misses": 106,
+        "hit_rate": 0.2838,
+        "label": "42/148"
       },
       {
         "key": "1",
         "n": 637,
-        "hits": 15,
-        "misses": 622,
-        "hit_rate": 0.0235,
-        "label": "15/637"
+        "hits": 16,
+        "misses": 621,
+        "hit_rate": 0.0251,
+        "label": "16/637"
       }
     ],
     "by_score": [
@@ -2168,19 +2168,19 @@
       },
       {
         "key": "6",
-        "n": 133,
-        "hits": 57,
-        "misses": 76,
-        "hit_rate": 0.4286,
-        "label": "57/133"
+        "n": 126,
+        "hits": 53,
+        "misses": 73,
+        "hit_rate": 0.4206,
+        "label": "53/126"
       },
       {
         "key": "5",
-        "n": 64,
-        "hits": 21,
-        "misses": 43,
-        "hit_rate": 0.3281,
-        "label": "21/64"
+        "n": 74,
+        "hits": 25,
+        "misses": 49,
+        "hit_rate": 0.3378,
+        "label": "25/74"
       },
       {
         "key": "4",
@@ -2192,11 +2192,11 @@
       },
       {
         "key": "3",
-        "n": 78,
+        "n": 77,
         "hits": 34,
-        "misses": 44,
-        "hit_rate": 0.4359,
-        "label": "34/78"
+        "misses": 43,
+        "hit_rate": 0.4416,
+        "label": "34/77"
       },
       {
         "key": "2",
@@ -2208,21 +2208,21 @@
       },
       {
         "key": "1",
-        "n": 21,
+        "n": 20,
         "hits": 11,
-        "misses": 10,
-        "hit_rate": 0.5238,
-        "label": "11/21"
+        "misses": 9,
+        "hit_rate": 0.55,
+        "label": "11/20"
       }
     ],
     "by_action": [
       {
         "key": "gioca",
-        "n": 227,
-        "hits": 94,
-        "misses": 133,
-        "hit_rate": 0.4141,
-        "label": "94/227"
+        "n": 220,
+        "hits": 90,
+        "misses": 130,
+        "hit_rate": 0.4091,
+        "label": "90/220"
       },
       {
         "key": "invalido",
@@ -2234,29 +2234,29 @@
       },
       {
         "key": "n/d",
-        "n": 178,
+        "n": 179,
         "hits": 0,
-        "misses": 178,
+        "misses": 179,
         "hit_rate": 0.0,
-        "label": "0/178"
+        "label": "0/179"
       },
       {
         "key": "no_bet",
-        "n": 296,
-        "hits": 127,
-        "misses": 169,
-        "hit_rate": 0.4291,
-        "label": "127/296"
+        "n": 304,
+        "hits": 131,
+        "misses": 173,
+        "hit_rate": 0.4309,
+        "label": "131/304"
       }
     ],
     "by_market": [
       {
         "key": "1x2",
-        "n": 1004,
+        "n": 1003,
         "hits": 146,
-        "misses": 858,
-        "hit_rate": 0.1454,
-        "label": "146/1004"
+        "misses": 857,
+        "hit_rate": 0.1456,
+        "label": "146/1003"
       },
       {
         "key": "corners",
@@ -2268,11 +2268,11 @@
       },
       {
         "key": "ou",
-        "n": 162,
+        "n": 165,
         "hits": 72,
-        "misses": 90,
-        "hit_rate": 0.4444,
-        "label": "72/162"
+        "misses": 93,
+        "hit_rate": 0.4364,
+        "label": "72/165"
       }
     ],
     "by_quadro_consensus": [
@@ -2390,11 +2390,11 @@
       },
       {
         "key": "2/9",
-        "n": 4,
+        "n": 5,
         "hits": 0,
-        "misses": 4,
+        "misses": 5,
         "hit_rate": 0.0,
-        "label": "0/4"
+        "label": "0/5"
       },
       {
         "key": "3/10",
@@ -2494,11 +2494,11 @@
       },
       {
         "key": "5/9",
-        "n": 9,
+        "n": 8,
         "hits": 2,
-        "misses": 7,
-        "hit_rate": 0.2222,
-        "label": "2/9"
+        "misses": 6,
+        "hit_rate": 0.25,
+        "label": "2/8"
       },
       {
         "key": "6/10",
@@ -2680,19 +2680,19 @@
       },
       {
         "key": "1|n/d",
-        "n": 135,
+        "n": 136,
         "hits": 0,
-        "misses": 135,
+        "misses": 136,
         "hit_rate": 0.0,
-        "label": "0/135"
+        "label": "0/136"
       },
       {
         "key": "1|no_bet",
-        "n": 34,
-        "hits": 15,
-        "misses": 19,
-        "hit_rate": 0.4412,
-        "label": "15/34"
+        "n": 33,
+        "hits": 16,
+        "misses": 17,
+        "hit_rate": 0.4848,
+        "label": "16/33"
       },
       {
         "key": "2|gioca",
@@ -2720,19 +2720,19 @@
       },
       {
         "key": "2|no_bet",
-        "n": 95,
+        "n": 96,
         "hits": 40,
-        "misses": 55,
-        "hit_rate": 0.4211,
-        "label": "40/95"
+        "misses": 56,
+        "hit_rate": 0.4167,
+        "label": "40/96"
       },
       {
         "key": "3|gioca",
         "n": 27,
-        "hits": 16,
-        "misses": 11,
-        "hit_rate": 0.5926,
-        "label": "16/27"
+        "hits": 15,
+        "misses": 12,
+        "hit_rate": 0.5556,
+        "label": "15/27"
       },
       {
         "key": "3|invalido",
@@ -2744,43 +2744,43 @@
       },
       {
         "key": "3|no_bet",
-        "n": 69,
-        "hits": 25,
-        "misses": 44,
-        "hit_rate": 0.3623,
-        "label": "25/69"
+        "n": 76,
+        "hits": 27,
+        "misses": 49,
+        "hit_rate": 0.3553,
+        "label": "27/76"
       },
       {
         "key": "4|gioca",
-        "n": 85,
-        "hits": 30,
-        "misses": 55,
-        "hit_rate": 0.3529,
-        "label": "30/85"
+        "n": 80,
+        "hits": 29,
+        "misses": 51,
+        "hit_rate": 0.3625,
+        "label": "29/80"
       },
       {
         "key": "4|no_bet",
-        "n": 78,
-        "hits": 40,
-        "misses": 38,
-        "hit_rate": 0.5128,
-        "label": "40/78"
+        "n": 81,
+        "hits": 42,
+        "misses": 39,
+        "hit_rate": 0.5185,
+        "label": "42/81"
       },
       {
         "key": "5|gioca",
-        "n": 33,
-        "hits": 17,
+        "n": 32,
+        "hits": 16,
         "misses": 16,
-        "hit_rate": 0.5152,
-        "label": "17/33"
+        "hit_rate": 0.5,
+        "label": "16/32"
       },
       {
         "key": "5|no_bet",
-        "n": 15,
+        "n": 14,
         "hits": 4,
-        "misses": 11,
-        "hit_rate": 0.2667,
-        "label": "4/15"
+        "misses": 10,
+        "hit_rate": 0.2857,
+        "label": "4/14"
       },
       {
         "key": "6|gioca",
@@ -2792,19 +2792,19 @@
       },
       {
         "key": "6|no_bet",
-        "n": 5,
-        "hits": 3,
+        "n": 4,
+        "hits": 2,
         "misses": 2,
-        "hit_rate": 0.6,
-        "label": "3/5"
+        "hit_rate": 0.5,
+        "label": "2/4"
       },
       {
         "key": "7|gioca",
-        "n": 7,
-        "hits": 3,
+        "n": 6,
+        "hits": 2,
         "misses": 4,
-        "hit_rate": 0.4286,
-        "label": "3/7"
+        "hit_rate": 0.3333,
+        "label": "2/6"
       },
       {
         "key": "8|gioca",
@@ -2824,6 +2824,36 @@
       }
     ],
     "recent": [
+      {
+        "date": "2026-10-01",
+        "match": "Man City – Real Madrid",
+        "pick": "O2.5",
+        "action": "no_bet",
+        "quota": 1.9,
+        "score_unified": 1,
+        "score": 5,
+        "hit": 0,
+        "result": "X",
+        "scoreline": "1-1",
+        "live": true,
+        "quadro": null,
+        "trainable": true
+      },
+      {
+        "date": "2026-10-01",
+        "match": "Guinea – Kenya",
+        "pick": "—",
+        "action": "n/d",
+        "quota": null,
+        "score_unified": 1,
+        "score": null,
+        "hit": 0,
+        "result": "1",
+        "scoreline": "1-0",
+        "live": true,
+        "quadro": null,
+        "trainable": false
+      },
       {
         "date": "2026-09-29",
         "match": "Halifax – Boston Utd",
@@ -2873,10 +2903,10 @@
         "date": "2026-09-30",
         "match": "Sturm Graz – Wolfsburg",
         "pick": "O2.5",
-        "action": "gioca",
+        "action": "no_bet",
         "quota": 1.83,
-        "score_unified": 4,
-        "score": 6,
+        "score_unified": 3,
+        "score": 5,
         "hit": 0,
         "result": "2",
         "scoreline": "0-2",
@@ -2888,10 +2918,10 @@
         "date": "2026-09-30",
         "match": "Sociedad – Hearts",
         "pick": "O2.5",
-        "action": "gioca",
+        "action": "no_bet",
         "quota": 1.85,
-        "score_unified": 4,
-        "score": 6,
+        "score_unified": 3,
+        "score": 5,
         "hit": 1,
         "result": "1",
         "scoreline": "4-0",
@@ -2918,10 +2948,10 @@
         "date": "2026-09-30",
         "match": "Roma – Barcelona",
         "pick": "O2.5",
-        "action": "gioca",
+        "action": "no_bet",
         "quota": 1.9,
-        "score_unified": 7,
-        "score": 6,
+        "score_unified": 4,
+        "score": 5,
         "hit": 1,
         "result": "2",
         "scoreline": "0-6",
@@ -2933,10 +2963,10 @@
         "date": "2026-09-30",
         "match": "Rangers – Hammarby",
         "pick": "O2.5",
-        "action": "gioca",
+        "action": "no_bet",
         "quota": 1.9,
-        "score_unified": 5,
-        "score": 6,
+        "score_unified": 3,
+        "score": 5,
         "hit": 1,
         "result": "2",
         "scoreline": "0-3",
@@ -2993,10 +3023,10 @@
         "date": "2026-09-30",
         "match": "Lyon – Chelsea",
         "pick": "O2.5",
-        "action": "gioca",
+        "action": "no_bet",
         "quota": 1.98,
-        "score_unified": 4,
-        "score": 6,
+        "score_unified": 3,
+        "score": 5,
         "hit": 0,
         "result": "X",
         "scoreline": "0-0",
@@ -3010,7 +3040,7 @@
         "pick": "2",
         "action": "no_bet",
         "quota": 2.6,
-        "score_unified": 6,
+        "score_unified": 4,
         "score": 4,
         "hit": 1,
         "result": "2",
@@ -3097,11 +3127,11 @@
       {
         "date": "2026-09-30",
         "match": "Brann – HJK",
-        "pick": "2",
+        "pick": "O2.5",
         "action": "no_bet",
-        "quota": 13.0,
-        "score_unified": 1,
-        "score": 1,
+        "quota": 1.98,
+        "score_unified": 2,
+        "score": 4,
         "hit": 0,
         "result": "1",
         "scoreline": "4-0",
@@ -3113,10 +3143,10 @@
         "date": "2026-09-30",
         "match": "Benfica – Bayern Munich",
         "pick": "O2.5",
-        "action": "gioca",
+        "action": "no_bet",
         "quota": 1.98,
-        "score_unified": 3,
-        "score": 6,
+        "score_unified": 1,
+        "score": 5,
         "hit": 1,
         "result": "2",
         "scoreline": "0-3",
@@ -3157,70 +3187,40 @@
       {
         "date": "2026-09-29",
         "match": "Yamaga – Albirex Niigata",
-        "pick": "2",
+        "pick": "X",
         "action": "no_bet",
-        "quota": 2.2,
-        "score_unified": 1,
-        "score": 3,
+        "quota": 3.3,
+        "score_unified": 2,
+        "score": 5,
         "hit": 0,
         "result": "1",
         "scoreline": "1-0",
         "live": true,
-        "quadro": "5/9",
-        "trainable": true
-      },
-      {
-        "date": "2026-09-29",
-        "match": "Wuxi Wugou – Ningbo Professional",
-        "pick": "—",
-        "action": "invalido",
-        "quota": null,
-        "score_unified": 1,
-        "score": null,
-        "hit": 0,
-        "result": "1",
-        "scoreline": "1-0",
-        "live": true,
-        "quadro": null,
-        "trainable": false
-      },
-      {
-        "date": "2026-09-29",
-        "match": "Woking – Solihull",
-        "pick": "U2.5",
-        "action": "gioca",
-        "quota": 2.12,
-        "score_unified": 4,
-        "score": 4,
-        "hit": 0,
-        "result": "2",
-        "scoreline": "2-4",
-        "live": true,
-        "quadro": "9/9",
+        "quadro": "2/9",
         "trainable": true
       }
     ]
   },
   "trainable_summary": {
     "ok": true,
-    "updated_at": "2026-10-01T20:33:58.417166+00:00",
+    "updated_at": "2026-10-02T06:21:58.418586+00:00",
     "filters": {
       "live_only": false,
       "trainable_only": true,
       "require_score_unified": false
     },
-    "n_settled_total": 1291,
-    "n_in_pool": 650,
-    "n_with_score_unified": 650,
-    "n_with_score": 626,
+    "n_settled_total": 1293,
+    "n_in_pool": 651,
+    "n_with_score_unified": 651,
+    "n_with_score": 627,
     "overall_hits": 268,
-    "overall_hit_rate": 0.4123,
+    "overall_hit_rate": 0.4117,
     "gioca": {
-      "n": 265,
-      "hits": 110,
-      "misses": 155,
-      "hit_rate": 0.4151,
-      "label": "110/265",
+      "n": 258,
+      "hits": 106,
+      "misses": 152,
+      "hit_rate": 0.4109,
+      "label": "106/258",
       "trend": "in miglioramento",
       "last_10": {
         "n": 10,
@@ -3230,15 +3230,15 @@
       },
       "last_20": {
         "n": 20,
-        "hits": 12,
-        "hit_rate": 0.6,
-        "label": "12/20"
+        "hits": 11,
+        "hit_rate": 0.55,
+        "label": "11/20"
       },
       "before_last_10": {
-        "n": 255,
-        "hits": 104,
-        "hit_rate": 0.4078,
-        "label": "104/255"
+        "n": 248,
+        "hits": 100,
+        "hit_rate": 0.4032,
+        "label": "100/248"
       },
       "by_week": [
         {
@@ -3275,14 +3275,56 @@
         },
         {
           "key": "2026-W40",
-          "n": 8,
-          "hits": 4,
-          "misses": 4,
-          "hit_rate": 0.5,
-          "label": "4/8"
+          "n": 1,
+          "hits": 0,
+          "misses": 1,
+          "hit_rate": 0.0,
+          "label": "0/1"
         }
       ],
       "cumulative": [
+        {
+          "n": 199,
+          "date": "2026-09-01",
+          "hit_rate": 0.392,
+          "label": "78/199"
+        },
+        {
+          "n": 200,
+          "date": "2026-09-01",
+          "hit_rate": 0.39,
+          "label": "78/200"
+        },
+        {
+          "n": 201,
+          "date": "2026-09-01",
+          "hit_rate": 0.393,
+          "label": "79/201"
+        },
+        {
+          "n": 202,
+          "date": "2026-09-01",
+          "hit_rate": 0.396,
+          "label": "80/202"
+        },
+        {
+          "n": 203,
+          "date": "2026-09-01",
+          "hit_rate": 0.399,
+          "label": "81/203"
+        },
+        {
+          "n": 204,
+          "date": "2026-09-01",
+          "hit_rate": 0.3971,
+          "label": "81/204"
+        },
+        {
+          "n": 205,
+          "date": "2026-09-01",
+          "hit_rate": 0.3951,
+          "label": "81/205"
+        },
         {
           "n": 206,
           "date": "2026-09-02",
@@ -3600,48 +3642,6 @@
           "date": "2026-09-29",
           "hit_rate": 0.4109,
           "label": "106/258"
-        },
-        {
-          "n": 259,
-          "date": "2026-09-29",
-          "hit_rate": 0.4093,
-          "label": "106/259"
-        },
-        {
-          "n": 260,
-          "date": "2026-09-30",
-          "hit_rate": 0.4115,
-          "label": "107/260"
-        },
-        {
-          "n": 261,
-          "date": "2026-09-30",
-          "hit_rate": 0.41,
-          "label": "107/261"
-        },
-        {
-          "n": 262,
-          "date": "2026-09-30",
-          "hit_rate": 0.4122,
-          "label": "108/262"
-        },
-        {
-          "n": 263,
-          "date": "2026-09-30",
-          "hit_rate": 0.4144,
-          "label": "109/263"
-        },
-        {
-          "n": 264,
-          "date": "2026-09-30",
-          "hit_rate": 0.4167,
-          "label": "110/264"
-        },
-        {
-          "n": 265,
-          "date": "2026-09-30",
-          "hit_rate": 0.4151,
-          "label": "110/265"
         }
       ],
       "high_vote": {
@@ -3655,7 +3655,7 @@
       }
     },
     "highlights": [
-      "Giocate consigliate: 110/265 (42%) · trend in miglioramento",
+      "Giocate consigliate: 106/258 (41%) · trend in miglioramento",
       "Ultime 10 giocate: 6/10 (60%)",
       "Giocate voto ≥8: 6/8 (75%) · ROI +47%",
       "Voto unificato 8: 5/7 prese (71%)",
@@ -3683,59 +3683,59 @@
       },
       {
         "key": "7",
-        "n": 8,
-        "hits": 3,
+        "n": 7,
+        "hits": 2,
         "misses": 5,
-        "hit_rate": 0.375,
-        "label": "3/8"
+        "hit_rate": 0.2857,
+        "label": "2/7"
       },
       {
         "key": "6",
-        "n": 53,
-        "hits": 21,
+        "n": 52,
+        "hits": 20,
         "misses": 32,
-        "hit_rate": 0.3962,
-        "label": "21/53"
+        "hit_rate": 0.3846,
+        "label": "20/52"
       },
       {
         "key": "5",
-        "n": 63,
-        "hits": 28,
-        "misses": 35,
-        "hit_rate": 0.4444,
-        "label": "28/63"
+        "n": 61,
+        "hits": 27,
+        "misses": 34,
+        "hit_rate": 0.4426,
+        "label": "27/61"
       },
       {
         "key": "4",
-        "n": 199,
-        "hits": 83,
-        "misses": 116,
-        "hit_rate": 0.4171,
-        "label": "83/199"
+        "n": 197,
+        "hits": 84,
+        "misses": 113,
+        "hit_rate": 0.4264,
+        "label": "84/197"
       },
       {
         "key": "3",
-        "n": 124,
-        "hits": 52,
-        "misses": 72,
-        "hit_rate": 0.4194,
-        "label": "52/124"
+        "n": 131,
+        "hits": 53,
+        "misses": 78,
+        "hit_rate": 0.4046,
+        "label": "53/131"
       },
       {
         "key": "2",
-        "n": 122,
+        "n": 123,
         "hits": 54,
-        "misses": 68,
-        "hit_rate": 0.4426,
-        "label": "54/122"
+        "misses": 69,
+        "hit_rate": 0.439,
+        "label": "54/123"
       },
       {
         "key": "1",
-        "n": 73,
-        "hits": 21,
-        "misses": 52,
-        "hit_rate": 0.2877,
-        "label": "21/73"
+        "n": 72,
+        "hits": 22,
+        "misses": 50,
+        "hit_rate": 0.3056,
+        "label": "22/72"
       }
     ],
     "by_score": [
@@ -3749,19 +3749,19 @@
       },
       {
         "key": "6",
-        "n": 178,
-        "hits": 75,
-        "misses": 103,
-        "hit_rate": 0.4213,
-        "label": "75/178"
+        "n": 171,
+        "hits": 71,
+        "misses": 100,
+        "hit_rate": 0.4152,
+        "label": "71/171"
       },
       {
         "key": "5",
-        "n": 74,
-        "hits": 23,
-        "misses": 51,
-        "hit_rate": 0.3108,
-        "label": "23/74"
+        "n": 84,
+        "hits": 27,
+        "misses": 57,
+        "hit_rate": 0.3214,
+        "label": "27/84"
       },
       {
         "key": "4",
@@ -3773,11 +3773,11 @@
       },
       {
         "key": "3",
-        "n": 86,
+        "n": 85,
         "hits": 37,
-        "misses": 49,
-        "hit_rate": 0.4302,
-        "label": "37/86"
+        "misses": 48,
+        "hit_rate": 0.4353,
+        "label": "37/85"
       },
       {
         "key": "2",
@@ -3789,21 +3789,21 @@
       },
       {
         "key": "1",
-        "n": 25,
+        "n": 24,
         "hits": 12,
-        "misses": 13,
-        "hit_rate": 0.48,
-        "label": "12/25"
+        "misses": 12,
+        "hit_rate": 0.5,
+        "label": "12/24"
       }
     ],
     "by_action": [
       {
         "key": "gioca",
-        "n": 265,
-        "hits": 110,
-        "misses": 155,
-        "hit_rate": 0.4151,
-        "label": "110/265"
+        "n": 258,
+        "hits": 106,
+        "misses": 152,
+        "hit_rate": 0.4109,
+        "label": "106/258"
       },
       {
         "key": "invalido",
@@ -3815,29 +3815,29 @@
       },
       {
         "key": "no_bet",
-        "n": 361,
-        "hits": 158,
-        "misses": 203,
-        "hit_rate": 0.4377,
-        "label": "158/361"
+        "n": 369,
+        "hits": 162,
+        "misses": 207,
+        "hit_rate": 0.439,
+        "label": "162/369"
       }
     ],
     "by_market": [
       {
         "key": "1x2",
-        "n": 456,
+        "n": 454,
         "hits": 182,
-        "misses": 274,
-        "hit_rate": 0.3991,
-        "label": "182/456"
+        "misses": 272,
+        "hit_rate": 0.4009,
+        "label": "182/454"
       },
       {
         "key": "ou",
-        "n": 194,
+        "n": 197,
         "hits": 86,
-        "misses": 108,
-        "hit_rate": 0.4433,
-        "label": "86/194"
+        "misses": 111,
+        "hit_rate": 0.4365,
+        "label": "86/197"
       }
     ],
     "by_quadro_consensus": [
@@ -3955,11 +3955,11 @@
       },
       {
         "key": "2/9",
-        "n": 4,
+        "n": 5,
         "hits": 0,
-        "misses": 4,
+        "misses": 5,
         "hit_rate": 0.0,
-        "label": "0/4"
+        "label": "0/5"
       },
       {
         "key": "3/10",
@@ -4059,11 +4059,11 @@
       },
       {
         "key": "5/9",
-        "n": 9,
+        "n": 8,
         "hits": 2,
-        "misses": 7,
-        "hit_rate": 0.2222,
-        "label": "2/9"
+        "misses": 6,
+        "hit_rate": 0.25,
+        "label": "2/8"
       },
       {
         "key": "6/10",
@@ -4245,11 +4245,11 @@
       },
       {
         "key": "1|no_bet",
-        "n": 49,
-        "hits": 21,
-        "misses": 28,
-        "hit_rate": 0.4286,
-        "label": "21/49"
+        "n": 48,
+        "hits": 22,
+        "misses": 26,
+        "hit_rate": 0.4583,
+        "label": "22/48"
       },
       {
         "key": "2|gioca",
@@ -4269,59 +4269,59 @@
       },
       {
         "key": "2|no_bet",
-        "n": 111,
+        "n": 112,
         "hits": 49,
-        "misses": 62,
-        "hit_rate": 0.4414,
-        "label": "49/111"
+        "misses": 63,
+        "hit_rate": 0.4375,
+        "label": "49/112"
       },
       {
         "key": "3|gioca",
         "n": 34,
-        "hits": 19,
-        "misses": 15,
-        "hit_rate": 0.5588,
-        "label": "19/34"
+        "hits": 18,
+        "misses": 16,
+        "hit_rate": 0.5294,
+        "label": "18/34"
       },
       {
         "key": "3|no_bet",
-        "n": 90,
-        "hits": 33,
-        "misses": 57,
-        "hit_rate": 0.3667,
-        "label": "33/90"
+        "n": 97,
+        "hits": 35,
+        "misses": 62,
+        "hit_rate": 0.3608,
+        "label": "35/97"
       },
       {
         "key": "4|gioca",
-        "n": 108,
-        "hits": 35,
-        "misses": 73,
-        "hit_rate": 0.3241,
-        "label": "35/108"
+        "n": 103,
+        "hits": 34,
+        "misses": 69,
+        "hit_rate": 0.3301,
+        "label": "34/103"
       },
       {
         "key": "4|no_bet",
-        "n": 91,
-        "hits": 48,
-        "misses": 43,
-        "hit_rate": 0.5275,
-        "label": "48/91"
+        "n": 94,
+        "hits": 50,
+        "misses": 44,
+        "hit_rate": 0.5319,
+        "label": "50/94"
       },
       {
         "key": "5|gioca",
-        "n": 48,
-        "hits": 24,
+        "n": 47,
+        "hits": 23,
         "misses": 24,
-        "hit_rate": 0.5,
-        "label": "24/48"
+        "hit_rate": 0.4894,
+        "label": "23/47"
       },
       {
         "key": "5|no_bet",
-        "n": 15,
+        "n": 14,
         "hits": 4,
-        "misses": 11,
-        "hit_rate": 0.2667,
-        "label": "4/15"
+        "misses": 10,
+        "hit_rate": 0.2857,
+        "label": "4/14"
       },
       {
         "key": "6|gioca",
@@ -4333,19 +4333,19 @@
       },
       {
         "key": "6|no_bet",
-        "n": 5,
-        "hits": 3,
+        "n": 4,
+        "hits": 2,
         "misses": 2,
-        "hit_rate": 0.6,
-        "label": "3/5"
+        "hit_rate": 0.5,
+        "label": "2/4"
       },
       {
         "key": "7|gioca",
-        "n": 8,
-        "hits": 3,
+        "n": 7,
+        "hits": 2,
         "misses": 5,
-        "hit_rate": 0.375,
-        "label": "3/8"
+        "hit_rate": 0.2857,
+        "label": "2/7"
       },
       {
         "key": "8|gioca",
@@ -4357,6 +4357,21 @@
       }
     ],
     "recent": [
+      {
+        "date": "2026-10-01",
+        "match": "Man City – Real Madrid",
+        "pick": "O2.5",
+        "action": "no_bet",
+        "quota": 1.9,
+        "score_unified": 1,
+        "score": 5,
+        "hit": 0,
+        "result": "X",
+        "scoreline": "1-1",
+        "live": true,
+        "quadro": null,
+        "trainable": true
+      },
       {
         "date": "2026-09-29",
         "match": "Halifax – Boston Utd",
@@ -4391,10 +4406,10 @@
         "date": "2026-09-30",
         "match": "Sturm Graz – Wolfsburg",
         "pick": "O2.5",
-        "action": "gioca",
+        "action": "no_bet",
         "quota": 1.83,
-        "score_unified": 4,
-        "score": 6,
+        "score_unified": 3,
+        "score": 5,
         "hit": 0,
         "result": "2",
         "scoreline": "0-2",
@@ -4406,10 +4421,10 @@
         "date": "2026-09-30",
         "match": "Sociedad – Hearts",
         "pick": "O2.5",
-        "action": "gioca",
+        "action": "no_bet",
         "quota": 1.85,
-        "score_unified": 4,
-        "score": 6,
+        "score_unified": 3,
+        "score": 5,
         "hit": 1,
         "result": "1",
         "scoreline": "4-0",
@@ -4421,10 +4436,10 @@
         "date": "2026-09-30",
         "match": "Roma – Barcelona",
         "pick": "O2.5",
-        "action": "gioca",
+        "action": "no_bet",
         "quota": 1.9,
-        "score_unified": 7,
-        "score": 6,
+        "score_unified": 4,
+        "score": 5,
         "hit": 1,
         "result": "2",
         "scoreline": "0-6",
@@ -4436,10 +4451,10 @@
         "date": "2026-09-30",
         "match": "Rangers – Hammarby",
         "pick": "O2.5",
-        "action": "gioca",
+        "action": "no_bet",
         "quota": 1.9,
-        "score_unified": 5,
-        "score": 6,
+        "score_unified": 3,
+        "score": 5,
         "hit": 1,
         "result": "2",
         "scoreline": "0-3",
@@ -4466,10 +4481,10 @@
         "date": "2026-09-30",
         "match": "Lyon – Chelsea",
         "pick": "O2.5",
-        "action": "gioca",
+        "action": "no_bet",
         "quota": 1.98,
-        "score_unified": 4,
-        "score": 6,
+        "score_unified": 3,
+        "score": 5,
         "hit": 0,
         "result": "X",
         "scoreline": "0-0",
@@ -4483,7 +4498,7 @@
         "pick": "2",
         "action": "no_bet",
         "quota": 2.6,
-        "score_unified": 6,
+        "score_unified": 4,
         "score": 4,
         "hit": 1,
         "result": "2",
@@ -4510,11 +4525,11 @@
       {
         "date": "2026-09-30",
         "match": "Brann – HJK",
-        "pick": "2",
+        "pick": "O2.5",
         "action": "no_bet",
-        "quota": 13.0,
-        "score_unified": 1,
-        "score": 1,
+        "quota": 1.98,
+        "score_unified": 2,
+        "score": 4,
         "hit": 0,
         "result": "1",
         "scoreline": "4-0",
@@ -4526,10 +4541,10 @@
         "date": "2026-09-30",
         "match": "Benfica – Bayern Munich",
         "pick": "O2.5",
-        "action": "gioca",
+        "action": "no_bet",
         "quota": 1.98,
-        "score_unified": 3,
-        "score": 6,
+        "score_unified": 1,
+        "score": 5,
         "hit": 1,
         "result": "2",
         "scoreline": "0-3",
@@ -4555,16 +4570,16 @@
       {
         "date": "2026-09-29",
         "match": "Yamaga – Albirex Niigata",
-        "pick": "2",
+        "pick": "X",
         "action": "no_bet",
-        "quota": 2.2,
-        "score_unified": 1,
-        "score": 3,
+        "quota": 3.3,
+        "score_unified": 2,
+        "score": 5,
         "hit": 0,
         "result": "1",
         "scoreline": "1-0",
         "live": true,
-        "quadro": "5/9",
+        "quadro": "2/9",
         "trainable": true
       },
       {
@@ -4573,7 +4588,7 @@
         "pick": "U2.5",
         "action": "gioca",
         "quota": 2.12,
-        "score_unified": 4,
+        "score_unified": 3,
         "score": 4,
         "hit": 0,
         "result": "2",
@@ -4585,11 +4600,11 @@
       {
         "date": "2026-09-29",
         "match": "San Lorenzo – Aldosivi",
-        "pick": "2",
+        "pick": "U2.5",
         "action": "no_bet",
-        "quota": 3.6,
+        "quota": 1.73,
         "score_unified": 2,
-        "score": 4,
+        "score": 5,
         "hit": 0,
         "result": "1",
         "scoreline": "3-2",
@@ -4648,7 +4663,7 @@
         "pick": "2",
         "action": "no_bet",
         "quota": 2.95,
-        "score_unified": 5,
+        "score_unified": 4,
         "score": 5,
         "hit": 0,
         "result": "1",
@@ -4663,7 +4678,7 @@
         "pick": "1",
         "action": "no_bet",
         "quota": 4.8,
-        "score_unified": 1,
+        "score_unified": 2,
         "score": 2,
         "hit": 0,
         "result": "2",
@@ -4678,7 +4693,7 @@
         "pick": "2",
         "action": "no_bet",
         "quota": 1.81,
-        "score_unified": 2,
+        "score_unified": 3,
         "score": 4,
         "hit": 0,
         "result": "2",
@@ -4706,30 +4721,15 @@
         "date": "2026-09-29",
         "match": "Fylde – Carlisle",
         "pick": "O2.5",
-        "action": "gioca",
+        "action": "no_bet",
         "quota": 2.02,
-        "score_unified": 4,
-        "score": 6,
+        "score_unified": 3,
+        "score": 5,
         "hit": 0,
         "result": "2",
         "scoreline": "0-2",
         "live": true,
         "quadro": "8/9",
-        "trainable": true
-      },
-      {
-        "date": "2026-09-29",
-        "match": "Forest Green – Wealdstone",
-        "pick": "U2.5",
-        "action": "no_bet",
-        "quota": 2.28,
-        "score_unified": 2,
-        "score": 3,
-        "hit": 0,
-        "result": "X",
-        "scoreline": "1-1",
-        "live": true,
-        "quadro": "1/9",
         "trainable": true
       }
     ]

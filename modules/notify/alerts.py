@@ -2,6 +2,7 @@
 
 Al primo invio di un alert voto (gioca/watch) il score_unified e la quota vengono
 congelati in our_history: i refresh successivi non li sovrascrivono (ROI = notifica).
+Gli alert Spread Raro congelano follow/giocabilità in telegram_spread_freeze.json (ROI dedicato).
 """
 
 from __future__ import annotations
@@ -427,6 +428,9 @@ def _rare_from_move(row: dict, move: dict | None) -> dict | None:
         "sort": -score * 100 - line,
         "score": score,
         "verdict": verdict,
+        "follow": playab.get("follow"),
+        "playab": playab,
+        "row": row,
     }
 
 
@@ -514,6 +518,7 @@ def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False
 
     sent_n = 0
     freeze_info: dict = {}
+    spread_freeze: dict = {}
     if dry_run:
         for msg, _ids in messages:
             print(msg)
@@ -552,6 +557,19 @@ def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False
                 except Exception as exc:
                     freeze_info = {"ok": False, "error": str(exc)}
                     print(f"telegram freeze voto skip: {exc}")
+            to_spread = [a for a in fresh_spread if a.get("id") in set(sent_alert_ids)]
+            if to_spread:
+                try:
+                    from modules.advisor.spread_paper import record_spread_freezes
+
+                    spread_freeze = record_spread_freezes(to_spread)
+                    print(
+                        f"telegram freeze spread: {spread_freeze.get('added', 0)} nuovi, "
+                        f"{spread_freeze.get('skipped', 0)} già in journal"
+                    )
+                except Exception as exc:
+                    spread_freeze = {"ok": False, "error": str(exc)}
+                    print(f"telegram freeze spread skip: {exc}")
 
     info = {
         "n_gioca": found["n_gioca"],
@@ -565,6 +583,7 @@ def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False
         "n_messages": len(messages),
         "n_sent": sent_n,
         "score_freeze": freeze_info,
+        "spread_freeze": spread_freeze,
         "dry_run": dry_run,
         "status": telegram_status(),
     }

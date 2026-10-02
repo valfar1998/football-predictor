@@ -35,23 +35,23 @@ Se il report dice “servono ≥25 righe trainable”, l’algoritmo sta ancora 
 
 ## Ultimo aggiornamento automatico
 
-# Digest apprendimento — 2026-10-01 11:28 UTC
+# Digest apprendimento — 2026-10-02 05:07 UTC
 
 - Esito fit: **OK**
-- Momento: `2026-10-01T11:28:30.167168+00:00`
-- Partite chiuse totali: **642**
-- Usabili per imparare (ricche): **562** (live 442 + backfill 120)
+- Momento: `2026-10-02T05:07:45.718135+00:00`
+- Partite chiuse totali: **640**
+- Usabili per imparare (ricche): **560** (live 440 + backfill 120)
 - Escluse (storico incompleto): **80**
 
 ## In cosa sta migliorando / correggendo
 
 - **ROI recente** (ultime 24 giocate, voto ≥8): -5.0% (PnL -1.2 u)
-- **CLV medio:** 0.0008 · beat close +0.0%
+- **CLV medio:** 0.0007 · beat close +0.0%
 - **Soglia EV minima:** da `0.0305` a `0.036` (più severa, usa anche CLV)
 - **Calibrazione probabilità:** aggiornata (8 bin, blend max 0.72).
-- **Fattore p online:** `0.9622` (errore medio p−hit 0.0485)
-- **Residual EV:** ok su 2207 sample (RMSE 0.478, WF 0.484)
-- **Pesi data-signal:** aggiornati (hit rate +39.8%, ROI -15.8%, metodo `walk_forward_brier_roi`).
+- **Fattore p online:** `0.9629` (errore medio p−hit 0.0476)
+- **Residual EV:** ok su 2195 sample (RMSE 0.478, WF 0.485)
+- **Pesi data-signal:** aggiornati (hit rate +39.8%, ROI -15.9%, metodo `walk_forward_brier_roi`).
 
 ## Come leggerlo in pratica
 

@@ -156,6 +156,7 @@ jobs:
           name: telegram-freeze-${{ github.run_id }}
           path: |
             data/processed/telegram_score_freeze.json
+            data/processed/telegram_spread_freeze.json
             data/processed/telegram_alerts_sent.json
           if-no-files-found: ignore
           retention-days: 30
@@ -166,6 +167,7 @@ jobs:
           path: |
             data/processed/telegram_alerts_sent.json
             data/processed/telegram_score_freeze.json
+            data/processed/telegram_spread_freeze.json
           key: telegram-sent-${{ github.run_id }}
 
       - uses: actions/cache/save@v4
