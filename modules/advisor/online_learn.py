@@ -99,28 +99,41 @@ def _recent_roi(
     if min_score is None:
         min_score = ROI_MIN_SCORE
     from modules.advisor.learn_policy import is_live, roi_settled
+    from modules.advisor.paper_stats import _kelly_of, _odds_of
 
     pool = roi_settled(rows, min_score=min_score)
     if live_only:
         pool = [r for r in pool if is_live(r)]
     chunk = pool[-last_n:]
+    stake_sum = 0.0
     pnl = 0.0
     n = 0
     for r in chunk:
-        q = _f(r.get("quota_pick"))
-        if q is None or q < 1.01:
+        q = _odds_of(r)
+        stake = _kelly_of(r)
+        if q is None or q < 1.01 or stake is None or stake <= 0:
             continue
         n += 1
-        pnl += (q - 1.0) if int(r.get("hit") or 0) == 1 else -1.0
-    if n < min_n:
-        return {"ok": False, "n": n, "live_only": live_only, "min_score": min_score}
+        ret = (q - 1.0) if int(r.get("hit") or 0) == 1 else -1.0
+        stake_sum += stake
+        pnl += stake * ret
+    if n < min_n or stake_sum <= 0:
+        return {
+            "ok": False,
+            "n": n,
+            "live_only": live_only,
+            "min_score": min_score,
+            "mode": "telegram_kelly",
+        }
     return {
         "ok": True,
         "n": n,
-        "roi": round(pnl / n, 4),
-        "pnl": round(pnl, 2),
+        "roi": round(pnl / stake_sum, 4),
+        "pnl": round(pnl, 4),
+        "stake_sum": round(stake_sum, 4),
         "live_only": live_only,
         "min_score": min_score,
+        "mode": "telegram_kelly",
     }
 
 

@@ -96,10 +96,11 @@ _EXTRA_COLS = {
     "pick_label": "TEXT",
     "sofascore_match_id": "INTEGER",
     "sofascore_stats": "TEXT",
-    # Congelamento voto/quota al primo alert Telegram (ROI allineato alla notifica)
+    # Congelamento voto/quota/Kelly al primo alert Telegram (ROI allineato alla notifica)
     "score_locked": "INTEGER",
     "score_live": "INTEGER",
     "quota_live": "REAL",
+    "kelly_quarter": "REAL",
     "alert_frozen_at": "TEXT",
     "alert_kind": "TEXT",
 }
@@ -262,6 +263,7 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
         ("score_locked", 0),
         ("score_live", None),
         ("quota_live", None),
+        ("kelly_quarter", None),
         ("alert_frozen_at", None),
         ("alert_kind", None),
     ):
@@ -289,6 +291,7 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
             "pick",
             "action",
             "quota_pick",
+            "kelly_quarter",
             "ev_cons",
             "probability",
             "pick_group",
@@ -311,7 +314,7 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
             context_partial, synthetic_backfill, clv, quota_close, beat_close,
             quadro_agree_n, quadro_votes_n,
             fotmob_match_id, pick_label, sofascore_match_id, sofascore_stats,
-            score_locked, score_live, quota_live, alert_frozen_at, alert_kind
+            score_locked, score_live, quota_live, kelly_quarter, alert_frozen_at, alert_kind
         ) VALUES (
             :match_key, :date, :time, :home, :away, :league, :country, :pick, :action,
             :score, :score_unified, :ev_cons, :probability, :odds_source, :skip_reason,
@@ -321,7 +324,7 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
             :context_partial, :synthetic_backfill, :clv, :quota_close, :beat_close,
             :quadro_agree_n, :quadro_votes_n,
             :fotmob_match_id, :pick_label, :sofascore_match_id, :sofascore_stats,
-            :score_locked, :score_live, :quota_live, :alert_frozen_at, :alert_kind
+            :score_locked, :score_live, :quota_live, :kelly_quarter, :alert_frozen_at, :alert_kind
         )
         ON CONFLICT(match_key) DO UPDATE SET
             time=excluded.time, league=excluded.league, country=excluded.country,
@@ -343,6 +346,10 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
             quota_pick=CASE
                 WHEN matches.score_locked=1 THEN matches.quota_pick
                 ELSE COALESCE(excluded.quota_pick, matches.quota_pick)
+            END,
+            kelly_quarter=CASE
+                WHEN matches.score_locked=1 THEN matches.kelly_quarter
+                ELSE COALESCE(excluded.kelly_quarter, matches.kelly_quarter)
             END,
             agree_share=COALESCE(excluded.agree_share, matches.agree_share),
             data_edge=COALESCE(excluded.data_edge, matches.data_edge),
@@ -1421,6 +1428,7 @@ def apply_freeze_journal(conn: sqlite3.Connection | None = None) -> dict[str, An
                     "saved_at": now,
                     "settled_at": None,
                     "quota_pick": quota_f,
+                    "kelly_quarter": _float_or_none(entry.get("kelly_quarter")),
                     "agree_share": None,
                     "data_edge": None,
                     "move_rank": None,
@@ -1484,6 +1492,7 @@ def apply_freeze_journal(conn: sqlite3.Connection | None = None) -> dict[str, An
                     pick=COALESCE(?, pick),
                     action=COALESCE(?, action),
                     quota_pick=COALESCE(?, quota_pick),
+                    kelly_quarter=COALESCE(?, kelly_quarter),
                     ev_cons=COALESCE(?, ev_cons),
                     probability=COALESCE(?, probability),
                     pick_group=COALESCE(?, pick_group),
@@ -1502,6 +1511,7 @@ def apply_freeze_journal(conn: sqlite3.Connection | None = None) -> dict[str, An
                     pick,
                     action,
                     quota_f,
+                    _float_or_none(entry.get("kelly_quarter")),
                     entry.get("ev_cons"),
                     entry.get("probability"),
                     entry.get("pick_group"),
@@ -1564,6 +1574,7 @@ def export_locked_to_freeze_journal(conn: sqlite3.Connection | None = None) -> d
                 "score": prev["score"],
                 "score_unified": prev["score_unified"],
                 "quota_pick": prev["quota_pick"],
+                "kelly_quarter": prev["kelly_quarter"] if "kelly_quarter" in prev.keys() else None,
                 "ev_cons": prev["ev_cons"],
                 "probability": prev["probability"],
                 "pick_group": prev["pick_group"],
@@ -1638,6 +1649,7 @@ def freeze_score_at_alert(
         return {"ok": False, "error": f"voto fuori range: {su}"}
 
     quota = _quota_from_row(row, pick=row.get("pick"))
+    kelly = _float_or_none(row.get("kelly_quarter"))
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     kind_s = str(kind or "gioca").strip().lower()
     if kind_s not in {"gioca", "watch"}:
@@ -1665,6 +1677,7 @@ def freeze_score_at_alert(
                     "score": prev["score"],
                     "score_unified": prev["score_unified"],
                     "quota_pick": prev["quota_pick"],
+                    "kelly_quarter": prev["kelly_quarter"] if "kelly_quarter" in prev.keys() else None,
                     "ev_cons": prev["ev_cons"],
                     "probability": prev["probability"],
                     "pick_group": prev["pick_group"],
@@ -1713,6 +1726,9 @@ def freeze_score_at_alert(
             "saved_at": now,
             "settled_at": prev["settled_at"] if prev else None,
             "quota_pick": quota if quota is not None else (prev["quota_pick"] if prev else None),
+            "kelly_quarter": kelly
+            if kelly is not None
+            else (prev["kelly_quarter"] if prev and "kelly_quarter" in prev.keys() else None),
             "agree_share": row.get("agree_share")
             if row.get("agree_share") is not None
             else (prev["agree_share"] if prev else None),
@@ -1757,6 +1773,7 @@ def freeze_score_at_alert(
                 pick=COALESCE(?, pick),
                 action=COALESCE(?, action),
                 quota_pick=COALESCE(?, quota_pick),
+                kelly_quarter=COALESCE(?, kelly_quarter),
                 ev_cons=COALESCE(?, ev_cons),
                 probability=COALESCE(?, probability),
                 pick_group=COALESCE(?, pick_group),
@@ -1774,6 +1791,7 @@ def freeze_score_at_alert(
                 rec["pick"],
                 rec["action"],
                 rec["quota_pick"],
+                rec.get("kelly_quarter"),
                 rec["ev_cons"],
                 rec["probability"],
                 rec["pick_group"],
@@ -1800,6 +1818,7 @@ def freeze_score_at_alert(
                 "score": sc_int,
                 "score_unified": su,
                 "quota_pick": rec["quota_pick"],
+                "kelly_quarter": rec.get("kelly_quarter"),
                 "ev_cons": rec["ev_cons"],
                 "probability": rec["probability"],
                 "pick_group": rec["pick_group"],

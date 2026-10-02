@@ -29,8 +29,8 @@ LIVE_1X2_MIN_AGGRESSIVE = 30
 TRAINABLE_1X2_MIN = 60
 LIVE_ROI_MIN = 8
 TRAINABLE_ROI_MIN = 15
-# ROI (paper + min_ev) solo su voto unificato ≥8 — le giocate che si seguono davvero.
-# Se score_locked=1 (alert Telegram), score_unified resta quello della notifica.
+# ROI paper: solo freeze Telegram GIOCA; peso ∝ Kelly del messaggio.
+# Se score_locked=1, score_unified/quota/kelly restano quelli della notifica.
 ROI_MIN_SCORE = 8
 
 # Obiettivi campione paper ROI (roadmap): sblocchi progressivi, non gate codice.
@@ -113,21 +113,28 @@ def _has_roi_quota(rec: dict[str, Any]) -> bool:
 
 
 def is_roi_eligible(rec: dict[str, Any], *, min_score: int = ROI_MIN_SCORE) -> bool:
-    """Campione paper / ROI recente: settled + voto ≥8 + quota.
+    """Campione paper ROI: solo giocata Telegram congelata (quota+Kelly del messaggio).
 
-    - Freeze Telegram (`score_locked=1`): entra sempre (è la giocata notificata).
-    - Altrimenti: serve riga *rich* (esclude storico live incompleto).
-    L'apprendimento ML (bins/residual/pesi) resta su `is_trainable` / `is_rich`.
+    Requisiti:
+    - settled (hit noto)
+    - score_locked=1 (alert inviato)
+    - alert_kind/action = gioca (esclude watch/no-bet)
+    - quota_pick reale
+    - voto unificato ≥ min_score (di solito già garantito dall'alert)
     """
     if rec.get("hit") is None:
         return False
+    if int(rec.get("score_locked") or 0) != 1:
+        return False
+    kind = str(rec.get("alert_kind") or "").strip().lower()
+    action = str(rec.get("action") or "").strip().lower()
+    if kind == "watch" or action in {"no_bet", "invalido", "n/d"}:
+        return False
+    if kind != "gioca" and action != "gioca":
+        return False
     if not meets_roi_score(rec, min_score=min_score):
         return False
-    if not _has_roi_quota(rec):
-        return False
-    if int(rec.get("score_locked") or 0) == 1:
-        return True
-    return is_rich(rec)
+    return _has_roi_quota(rec)
 
 
 def roi_settled(rows: list[dict[str, Any]], *, min_score: int = ROI_MIN_SCORE) -> list[dict[str, Any]]:

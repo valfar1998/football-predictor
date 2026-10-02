@@ -140,6 +140,29 @@ def _pct(val: float | None) -> str | None:
     return f"{float(val):+.0%}"
 
 
+def _fmt_odd(val) -> str:
+    """Quota per tabelle display: sempre str (mai float + '—' nella stessa colonna → Arrow)."""
+    if val is None:
+        return "—"
+    try:
+        if pd.isna(val):
+            return "—"
+        return f"{float(val):.2f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _fmt_score(val) -> str:
+    if val is None:
+        return "—"
+    try:
+        if pd.isna(val):
+            return "—"
+        return str(int(val))
+    except (TypeError, ValueError):
+        return "—"
+
+
 def _as_frac(val) -> float:
     """Converte EV/edge/prob in frazione float (0.05 = 5%). Accetta anche stringhe '+5%'."""
     if val is None:
@@ -631,6 +654,10 @@ def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
     for col in ("ev_cons", "edge_pp", "ev_sharp", "kelly_quarter", "clv", "probability"):
         if col in show.columns:
             show[col] = _frac_series(show[col])
+    # Quote/voti: solo float o NaN (mai "—" / object misto → ArrowInvalid su st.dataframe)
+    for col in ("quota_pick", "fair_odds", "odd_1", "odd_x", "odd_2", "odd_over_25", "odd_under_25", "score"):
+        if col in show.columns:
+            show[col] = pd.to_numeric(show[col], errors="coerce")
     if "odds_real" in show.columns:
         show["odds_real"] = show["odds_real"].map(lambda x: "Sì" if bool(x) else "No")
     if "action" in show.columns:
@@ -782,14 +809,14 @@ def _table(markets: list[dict]) -> None:
                 "Prob.": f"{prob:.0%}" if isinstance(prob, (int, float)) else "—",
                 "P cons.": f"{m['p_cons']:.0%}" if m.get("p_cons") is not None else "—",
                 "P mercato": f"{m['p_market']:.0%}" if real and m.get("p_market") is not None else "—",
-                "Quota book": m.get("odds") if m.get("odds") is not None else "—",
-                "Quota equa": m.get("fair_odds") if m.get("fair_odds") is not None else "—",
+                "Quota book": _fmt_odd(m.get("odds")),
+                "Quota equa": _fmt_odd(m.get("fair_odds")),
                 "Edge pp": _pct(m.get("edge_pp")) if real else "—",
                 "EV cons.": _pct(m.get("ev_cons")) if real else "—",
                 "EV sharp": _pct(m.get("ev_sharp")) if real else "—",
-                "Voto prob.": m.get("score_prob") if m.get("score_prob") is not None else "—",
-                "Voto value": m.get("score_value") if real and m.get("score_value") is not None else "—",
-                "Voto finale": m.get("score") if m.get("score") is not None else "—",
+                "Voto prob.": _fmt_score(m.get("score_prob")),
+                "Voto value": _fmt_score(m.get("score_value") if real else None),
+                "Voto finale": _fmt_score(m.get("score")),
                 "Kelly ¼": f"{m['kelly_quarter']:.1%}" if m.get("kelly_quarter") is not None else "—",
                 "Fonte": m.get("odds_source") or "—",
             }
@@ -1221,25 +1248,29 @@ try:
     if _home_roi.get("ok"):
         _hn = int(_home_roi.get("n") or 0)
         _hp = int(_home_roi.get("n_pending_score") or 0)
-        _hroi = _home_roi.get("odds_roi")
+        _hroi = _home_roi.get("kelly_roi")
+        if _hroi is None:
+            _hroi = _home_roi.get("odds_roi")
         _hvotes = _home_roi.get("by_vote") or {}
         hc1, hc2, hc3, hc4, hc5 = st.columns(5)
         hc1.metric(
             "Campione ROI",
             f"{_hn} ({_hp})",
             help=(
-                "Settled nel campione paper (voto ≥8 rich, oppure freeze Telegram). "
-                "Tra parentesi: ancora in attesa di settle."
+                "Solo alert Telegram GIOCA settled (quota+Kelly freeze). "
+                "Tra parentesi: freeze ancora in attesa di settle."
             ),
         )
         hc2.metric(
-            "ROI @ quote",
+            "ROI Kelly-pesato",
             "n/d" if _hroi is None else f"{_hroi:+.1%}",
             delta=f"hit {_home_roi.get('hit_rate', 0):.0%}" if _hn else None,
         )
         for _col, _vote in ((hc3, "8"), (hc4, "9"), (hc5, "10")):
             _vs = _hvotes.get(_vote) or {}
-            _vroi = _vs.get("odds_roi")
+            _vroi = _vs.get("kelly_roi")
+            if _vroi is None:
+                _vroi = _vs.get("odds_roi")
             _vn = int(_vs.get("n") or 0)
             _vp = int(_vs.get("pending") or 0)
             _col.metric(
@@ -2349,7 +2380,8 @@ with tab_mkt:
                         "EV cons.": _pct(ev_cons),
                         "EV sharp": _pct(m.get("ev_sharp") if real else None),
                         "ev_num": ev_cons,
-                        "Voto value": voto_value if voto_value is not None else "—",
+                        # None (non "—") così la colonna resta numerica / Arrow-safe
+                        "Voto value": voto_value,
                         "Voto": m.get("score") or voto_value or m.get("score_prob"),
                         "Fonte": src or "—",
                         "match_source": match.get("odds_source") or "—",
@@ -2542,11 +2574,11 @@ with tab_eval:
     cal = load_calibration()
     summary = cal.get("backtest_summary") or {}
 
-    # --- Paper ROI in evidenza (voto ≥8) ---
+    # --- Paper ROI in evidenza (solo Telegram GIOCA, pesato Kelly freeze) ---
     from modules.advisor.paper_stats import paper_trading_report
 
     _roi_rep = paper_trading_report()
-    st.subheader("Paper ROI (voto ≥8)")
+    st.subheader("Paper ROI (Telegram GIOCA · Kelly freeze)")
     if not _roi_rep.get("ok"):
         st.caption(_roi_rep.get("error") or "Report non disponibile")
     else:
@@ -2568,7 +2600,7 @@ with tab_eval:
             f"{_n_settled}",
             delta=None if _settled_pct is None else f"{_settled_pct:.0%} del DB",
         )
-        d3.metric("In attesa settle", f"{_n_pending}", delta=f"voto ≥{_min_sc}: {_n_pend_sc}")
+        d3.metric("In attesa settle", f"{_n_pending}", delta=f"GIOCA freeze: {_n_pend_sc}")
         d4.metric(
             "Freeze Telegram",
             f"{int(_roi_rep.get('n_locked_total') or 0)}",
@@ -2576,16 +2608,18 @@ with tab_eval:
         )
 
         r1, r2, r3, r4, r5 = st.columns(5)
-        _roi = _roi_rep.get("odds_roi")
+        _kroi = _roi_rep.get("kelly_roi")
+        _uroi = _roi_rep.get("odds_roi")
         r1.metric(
-            "ROI @ quote",
-            "n/d" if _roi is None else f"{_roi:+.1%}",
-            delta=f"flat {_roi_rep.get('flat_roi', 0):+.1%}" if _roi_rep.get("n") else None,
+            "ROI Kelly-pesato",
+            "n/d" if _kroi is None else f"{_kroi:+.1%}",
+            delta=f"unit {_uroi:+.1%}" if _uroi is not None else None,
+            help="Σ(Kelly×ritorno)/Σ(Kelly) su quota e Kelly congelati nel messaggio Telegram.",
         )
         r2.metric(
-            "PnL totale",
-            f"{_roi_rep.get('odds_pnl', 0):+.2f} u",
-            delta=f"flat {_roi_rep.get('flat_pnl', 0):+.1f} u" if _roi_rep.get("n") else None,
+            "PnL Kelly",
+            f"{_roi_rep.get('kelly_pnl', 0) or 0:+.3f}",
+            delta=f"unit {_roi_rep.get('odds_pnl', 0):+.2f} u" if _roi_rep.get("n") else None,
         )
         _hr = _roi_rep.get("hit_rate")
         r3.metric(
@@ -2602,7 +2636,7 @@ with tab_eval:
             "Campione ROI",
             f"{_n_now} ({_n_pend_sc})",
             delta=f"{_n_now}/{_target} · {_pct_tgt:.0f}%" if _pct_tgt is not None else f"{_n_now}/{_target}",
-            help="Settled voto ≥8; tra parentesi pending ancora da settle.",
+            help="Solo alert Telegram GIOCA settled; tra parentesi pending freeze.",
         )
         _clv = _roi_rep.get("mean_clv")
         r5.metric(
@@ -2615,7 +2649,9 @@ with tab_eval:
         v8, v9, v10 = st.columns(3)
         for _col, _vote in ((v8, "8"), (v9, "9"), (v10, "10")):
             _vs = _votes.get(_vote) or {}
-            _vroi = _vs.get("odds_roi")
+            _vroi = _vs.get("kelly_roi")
+            if _vroi is None:
+                _vroi = _vs.get("odds_roi")
             _vn = int(_vs.get("n") or 0)
             _vp = int(_vs.get("pending") or 0)
             _vhr = _vs.get("hit_rate")
@@ -3066,9 +3102,9 @@ with tab_eval:
         from modules.advisor.data_signal_weights import optimize_weights
 
         st.caption(
-            "Report su campione **ROI**: voto ≥8 *rich* **oppure** freeze Telegram. "
-            "Kelly con **drawdown guard**. CLV da quota archiviata vs close Asian/fd. "
-            "L’apprendimento ML (bins/residual) resta solo sulle righe rich."
+            "Report su **solo alert Telegram GIOCA** congelati: quota e Kelly del messaggio. "
+            "ROI principale = Σ(Kelly×ritorno)/Σ(Kelly). Equity Kelly usa lo stesso stake freeze. "
+            "L’apprendimento ML (bins/residual) resta sulle righe rich."
         )
         cbtn1, cbtn2, cbtn3 = st.columns(3)
         with cbtn1:
@@ -3092,15 +3128,19 @@ with tab_eval:
             m1, m2, m3, m4 = st.columns(4)
             min_sc = rep.get("min_score") or 8
             m1.metric(
-                "Trainable ≥8",
+                "Freeze GIOCA",
                 rep["n"],
                 delta=f"DB {rep.get('n_history', '—')} · settled {rep.get('n_settled_total', rep['n'])}",
             )
             m2.metric("Flat ROI", f"{rep.get('flat_roi', 0):.1%}", delta=f"voto ≥{min_sc}")
             m3.metric(
-                "ROI @ quote",
-                "n/d" if rep.get("odds_roi") is None else f"{rep.get('odds_roi'):.1%}",
-                delta=f"live n={rep.get('n_live_odds', rep.get('odds_n', 0))}",
+                "ROI Kelly-pesato",
+                "n/d" if rep.get("kelly_roi") is None else f"{rep.get('kelly_roi'):.1%}",
+                delta=(
+                    f"unit {rep.get('odds_roi'):.1%}"
+                    if rep.get("odds_roi") is not None
+                    else f"live n={rep.get('n_live_odds', rep.get('odds_n', 0))}"
+                ),
             )
             m4.metric(
                 "CLV medio",
