@@ -1,4 +1,4 @@
-"""Avvisi Telegram: GIOCA (voto ≥8 + action gioca), da guardare (voto ≥8 + no bet), spread Raro (giocabilità >8).
+"""Avvisi Telegram: GIOCA (voto ≥8 + action gioca), da guardare (voto ≥8 + no bet), spread Raro (giocabilità ≥8).
 
 Al primo invio di un alert voto (gioca/watch) il score_unified e la quota vengono
 congelati in our_history: i refresh successivi non li sovrascrivono (ROI = notifica).
@@ -20,7 +20,7 @@ UPCOMING = ROOT / "data" / "processed" / "upcoming_predictions.json"
 SENT = ROOT / "data" / "processed" / "telegram_alerts_sent.json"
 MIN_UNIFIED = 8
 RARE_LINE = 1.0
-MIN_SPREAD_PLAYABILITY = 9  # solo giocabilità > 8
+MIN_SPREAD_PLAYABILITY = 8  # giocabilità ≥ 8
 KEEP_DAYS = 21
 CHUNK = 10
 BRAND = "FOOTBALL PREDICTOR"
@@ -394,11 +394,14 @@ def _rare_from_move(row: dict, move: dict | None) -> dict | None:
     if score < MIN_SPREAD_PLAYABILITY:
         return None
     verdict = str(playab.get("verdict") or "")
+    follow = str(playab.get("follow") or "").strip()
     body = [
         _header(row),
         f"⭐ Giocabilità {score}/10 · {verdict}",
-        f"Spread Raro · linea AH/totale Δ {line:g} (≥1)",
+        f"Spread Raro · moneyway AsianBetSoccer · linea AH/totale Δ {line:g} (≥1)",
     ]
+    if follow and follow.lower() != "nessun lato chiaro":
+        body.append(f"Segui: {follow}")
     if ah_open is not None or ah_curr is not None:
         body.append(f"AH {_fmt_line(ah_open)} → {_fmt_line(ah_curr)}")
     if tot_open is not None or tot_curr is not None:
@@ -414,12 +417,34 @@ def _rare_from_move(row: dict, move: dict | None) -> dict | None:
     )
     if steam:
         body.append(f"Steam: {steam}")
+    # Quota del lato Segui (per allineare ROI alla notifica)
+    try:
+        from modules.advisor.spread_paper import snapshot_from_alert
+
+        snap = snapshot_from_alert(
+            {"row": row, "playab": playab, "score": score, "follow": follow, "verdict": verdict}
+        )
+        if snap and snap.get("odds") is not None:
+            q = _fmt_quota(_as_quota(snap.get("odds")))
+            if q:
+                label = str(snap.get("bet_label") or snap.get("bet") or "pick")
+                body.append(f"Quota {q} · {label} (AsianBetSoccer)")
+    except Exception:
+        pass
     reason = str(playab.get("reason") or "").strip()
     if reason:
         body.append(reason[:220])
     summary = str(move.get("movement_summary") or row.get("movement_summary") or "").strip()
     if summary:
         body.append(summary[:220])
+    try:
+        from modules.advisor.spread_paper import spread_outcome_phrase
+
+        hist = spread_outcome_phrase(playability=score) or spread_outcome_phrase()
+        if hist:
+            body.append(f"Storico moneyway giocab. {score}: {hist}")
+    except Exception:
+        pass
     key = f"spread|{_face_key(row)}"
     return {
         "id": key,
@@ -428,7 +453,7 @@ def _rare_from_move(row: dict, move: dict | None) -> dict | None:
         "sort": -score * 100 - line,
         "score": score,
         "verdict": verdict,
-        "follow": playab.get("follow"),
+        "follow": follow or playab.get("follow"),
         "playab": playab,
         "row": row,
     }
@@ -512,7 +537,7 @@ def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False
     messages = _pack(f"🎯 GIOCA · voto ≥{MIN_UNIFIED}", fresh_gioca)
     messages += _pack(f"👀 Da guardare · voto ≥{MIN_UNIFIED} · NO BET", fresh_watch)
     messages += _pack(
-        f"📈 AsianBetSoccer · spread Raro · giocabilità >8 (min {MIN_SPREAD_PLAYABILITY}/10)",
+        f"📈 AsianBetSoccer · moneyway / spread Raro · giocabilità ≥{MIN_SPREAD_PLAYABILITY} (min {MIN_SPREAD_PLAYABILITY}/10)",
         fresh_spread,
     )
 
@@ -641,5 +666,5 @@ def ping_bot() -> bool:
         "Bot collegato.\n"
         f"Avvisi: 🎯 GIOCA (voto ≥{MIN_UNIFIED} + action gioca), "
         f"👀 da guardare (voto ≥{MIN_UNIFIED} + no bet), "
-        f"spread Raro con giocabilità >8 (min {MIN_SPREAD_PLAYABILITY}/10)."
+        f"spread Raro / moneyway con giocabilità ≥{MIN_SPREAD_PLAYABILITY} (min {MIN_SPREAD_PLAYABILITY}/10)."
     )
