@@ -173,13 +173,22 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # Save path MUST match restore (/tmp/fp-telegram-cache), altrimenti freeze/sent
+      # non ripartono al run successivo e i pending GIOCA spariscono.
+      - name: Stage telegram cache for save
+        if: always() && hashFiles('data/processed/telegram_alerts_sent.json') != ''
+        run: |
+          mkdir -p /tmp/fp-telegram-cache
+          for f in telegram_alerts_sent.json telegram_score_freeze.json telegram_spread_freeze.json local_settles.json; do
+            if [ -f "data/processed/$f" ]; then
+              cp -f "data/processed/$f" "/tmp/fp-telegram-cache/$f"
+            fi
+          done
+
       - uses: actions/cache/save@v4
         if: always() && hashFiles('data/processed/telegram_alerts_sent.json') != ''
         with:
-          path: |
-            data/processed/telegram_alerts_sent.json
-            data/processed/telegram_score_freeze.json
-            data/processed/local_settles.json
+          path: /tmp/fp-telegram-cache
           key: telegram-sent-${{ github.run_id }}
 
       - uses: actions/cache/save@v4
