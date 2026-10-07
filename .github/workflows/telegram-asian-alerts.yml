@@ -110,6 +110,41 @@ jobs:
           restore-keys: |
             telegram-sent-
 
+      # Se la cache GHA è scaduta/evicted, ripristina l'ultimo artefatto freeze
+      # (altrimenti sent resta vuoto e i pending GIOCA spariscono).
+      - name: Fallback telegram cache from latest artifact
+        if: hashFiles('/tmp/fp-telegram-cache/telegram_alerts_sent.json') == '' && hashFiles('/tmp/fp-telegram-cache/telegram_score_freeze.json') == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/fp-telegram-cache
+          run_ids=$(gh run list --workflow "Telegram alerts" --status success --limit 8 --json databaseId --jq '.[].databaseId')
+          run_ids="$run_ids $(gh run list --workflow "Aggiorna dati e modello" --status success --limit 5 --json databaseId --jq '.[].databaseId')"
+          for run_id in $run_ids; do
+            arts=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --jq '.artifacts[].name' || true)
+            for art in $arts; do
+              case "$art" in
+                telegram-freeze-*)
+                  rm -rf /tmp/fp-tg-art
+                  if gh run download "$run_id" -n "$art" -D /tmp/fp-tg-art 2>/dev/null; then
+                    for f in telegram_alerts_sent.json telegram_score_freeze.json telegram_spread_freeze.json; do
+                      found=$(find /tmp/fp-tg-art -name "$f" -print -quit || true)
+                      if [ -n "$found" ]; then
+                        cp -f "$found" "/tmp/fp-telegram-cache/$f"
+                      fi
+                    done
+                    if [ -f /tmp/fp-telegram-cache/telegram_score_freeze.json ] || [ -f /tmp/fp-telegram-cache/telegram_alerts_sent.json ]; then
+                      echo "telegram cache da artefatto $art (run $run_id)"
+                      exit 0
+                    fi
+                  fi
+                ;;
+              esac
+            done
+          done
+          echo "Nessun artefatto telegram-freeze: userò data/bootstrap se presente"
+
       - name: Merge telegram cache (freeze + sent, no overwrite)
         run: python scripts/merge_telegram_cache.py /tmp/fp-telegram-cache
 
@@ -161,10 +196,10 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      # Save path MUST match restore (/tmp/fp-telegram-cache), altrimenti ogni run
-      # parte con freeze/sent vuoti e si perdono pending GIOCA (es. Aldershot 2026-10-03).
+      # Save path MUST match restore (/tmp/fp-telegram-cache). Salva anche se
+      # non ci sono nuovi alert (altrimenti un miss lascia la cache vuota per sempre).
       - name: Stage telegram cache for save
-        if: always() && hashFiles('data/processed/telegram_alerts_sent.json') != ''
+        if: always() && (hashFiles('data/processed/telegram_alerts_sent.json') != '' || hashFiles('data/processed/telegram_score_freeze.json') != '')
         run: |
           mkdir -p /tmp/fp-telegram-cache
           for f in telegram_alerts_sent.json telegram_score_freeze.json telegram_spread_freeze.json; do
@@ -174,7 +209,7 @@ jobs:
           done
 
       - uses: actions/cache/save@v4
-        if: always() && hashFiles('data/processed/telegram_alerts_sent.json') != ''
+        if: always() && (hashFiles('data/processed/telegram_alerts_sent.json') != '' || hashFiles('data/processed/telegram_score_freeze.json') != '')
         with:
           path: /tmp/fp-telegram-cache
           key: telegram-sent-${{ github.run_id }}

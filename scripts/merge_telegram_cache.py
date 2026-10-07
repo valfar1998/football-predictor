@@ -1,4 +1,10 @@
-"""Merge cache Telegram (sent + freeze) senza perdere chiavi già presenti in locale."""
+"""Merge cache Telegram (sent + freeze) senza perdere chiavi già presenti in locale.
+
+Ordine merge (prima freeze / sent vince sulle collisioni di timestamp):
+1. data/bootstrap/ (seed in repo, recovery se GHA cache/artifact spariscono)
+2. cache GHA (/tmp/fp-telegram-cache)
+3. file già presenti in data/processed
+"""
 from __future__ import annotations
 
 import json
@@ -10,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 
 CACHE_DIR = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/fp-telegram-cache")
 PROCESSED = ROOT / "data" / "processed"
+BOOTSTRAP = ROOT / "data" / "bootstrap"
 
 
 def _cache_file(name: str) -> Path | None:
@@ -17,6 +24,11 @@ def _cache_file(name: str) -> Path | None:
         if p.is_file():
             return p
     return None
+
+
+def _seed_file(name: str) -> Path | None:
+    p = BOOTSTRAP / name
+    return p if p.is_file() else None
 
 
 def _load_dict(path: Path) -> dict:
@@ -31,13 +43,14 @@ def _load_dict(path: Path) -> dict:
 
 def main() -> None:
     PROCESSED.mkdir(parents=True, exist_ok=True)
-    # Freeze journal: merge (prima freeze vince)
-    src_j = _cache_file("telegram_score_freeze.json")
-    if src_j is not None:
-        from modules.data_update.history import merge_freeze_journal_file, sync_freeze_state
+    from modules.data_update.history import merge_freeze_journal_file, sync_freeze_state
 
-        info = merge_freeze_journal_file(src_j)
-        print(f"freeze merge: {info}", flush=True)
+    # Freeze journal: bootstrap → cache GHA → (processed già su disco)
+    freeze_sources = [p for p in (_seed_file("telegram_score_freeze.json"), _cache_file("telegram_score_freeze.json")) if p]
+    if freeze_sources:
+        for src_j in freeze_sources:
+            info = merge_freeze_journal_file(src_j)
+            print(f"freeze merge ({src_j.name} via {src_j.parent.name}): {info}", flush=True)
         try:
             sync = sync_freeze_state()
             print(f"freeze sync: n_journal={sync.get('n_journal')}", flush=True)
@@ -64,23 +77,29 @@ def main() -> None:
         print(f"settle journal apply skip: {exc}", flush=True)
 
     # Sent ids: unione (mai perdere un alert già inviato)
-    src_s = _cache_file("telegram_alerts_sent.json")
     dst_s = PROCESSED / "telegram_alerts_sent.json"
-    incoming = _load_dict(src_s) if src_s else {}
+    seed_path = _seed_file("telegram_alerts_sent.json")
+    cache_path = _cache_file("telegram_alerts_sent.json")
+    seed_s = _load_dict(seed_path) if seed_path else {}
+    incoming = _load_dict(cache_path) if cache_path else {}
     local = _load_dict(dst_s)
-    merged = {**incoming, **local}
+    # seed < cache < local (local vince sulle stesse chiavi)
+    merged = {**seed_s, **incoming, **local}
     if merged:
         dst_s.write_text(json.dumps(merged, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"sent merge: n={len(merged)} (cache={len(incoming)} local={len(local)})", flush=True)
+        print(
+            f"sent merge: n={len(merged)} (bootstrap={len(seed_s)} cache={len(incoming)} local={len(local)})",
+            flush=True,
+        )
     else:
         print("sent cache: miss/empty", flush=True)
 
     # Spread Raro journal: merge (prima freeze vince)
     src_sp = _cache_file("telegram_spread_freeze.json")
+    seed_sp = _seed_file("telegram_spread_freeze.json")
     dst_sp = PROCESSED / "telegram_spread_freeze.json"
-    if src_sp is not None or dst_sp.is_file():
+    if src_sp is not None or seed_sp is not None or dst_sp.is_file():
         try:
-            from modules.advisor.spread_paper import JOURNAL as SP_JOURNAL
             from modules.advisor.spread_paper import _load_journal, _save_journal
 
             def _spreads(path: Path | None) -> dict:
@@ -101,14 +120,19 @@ def main() -> None:
                 return {}
 
             incoming_sp = _spreads(src_sp)
+            seed_spreads = _spreads(seed_sp)
             local_sp = _load_journal()
-            merged_sp = dict(incoming_sp)
+            merged_sp = dict(seed_spreads)
+            for k, v in incoming_sp.items():
+                if k not in merged_sp:
+                    merged_sp[k] = v
             for k, v in local_sp.items():
                 if k not in merged_sp:
                     merged_sp[k] = v
             _save_journal(merged_sp)
             print(
-                f"spread freeze merge: n={len(merged_sp)} (cache={len(incoming_sp)} local={len(local_sp)})",
+                f"spread freeze merge: n={len(merged_sp)} "
+                f"(bootstrap={len(seed_spreads)} cache={len(incoming_sp)} local={len(local_sp)})",
                 flush=True,
             )
         except Exception as exc:

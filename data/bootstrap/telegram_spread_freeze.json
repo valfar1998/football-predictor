@@ -1,0 +1,35 @@
+{
+  "updated_at": "2026-10-04T12:56:16Z",
+  "n": 1,
+  "spreads": {
+    "spread|2026-10-03|gateshead|worthing": {
+      "id": "spread|2026-10-03|gateshead|worthing",
+      "match_key": "2026-10-03|gateshead|worthing",
+      "date": "2026-10-03",
+      "home": "Gateshead",
+      "away": "Worthing",
+      "league": "National League",
+      "playability": 10,
+      "verdict": "GIOCA",
+      "follow": "2 e AH trasferta e Over",
+      "reason": "Segui: 2 e AH trasferta e Over (1X2 e handicap allineati; quota steam accorciata di 18 pp; modello d'accordo; modello no-bet)",
+      "line_move": 1.0,
+      "steam_1x2": "2",
+      "steam_ah": "away",
+      "steam_ou": "over",
+      "ah_curr": 1.75,
+      "total_curr": 3.25,
+      "bet": "2",
+      "bet_label": "2 (steam trasferta)",
+      "odds": 1.3,
+      "line": null,
+      "alert_frozen_at": "2026-10-03T11:11:57Z",
+      "hit": 1,
+      "push": 0,
+      "pnl": 0.3,
+      "settled_at": "2026-10-04T12:56:16Z",
+      "home_goals": 1,
+      "away_goals": 2
+    }
+  }
+}
