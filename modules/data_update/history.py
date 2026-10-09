@@ -2994,6 +2994,22 @@ def settle_pending(*, learn: bool = True, learn_only_if_settled: bool = False) -
     except Exception as exc:
         summary["analysis_outcomes_error"] = str(exc)
     try:
+        from modules.advisor.spread_paper import settle_spread_journal
+
+        sp = settle_spread_journal()
+        summary["spread_settle"] = {
+            "settled": sp.get("settled"),
+            "pending": sp.get("pending"),
+            "n": sp.get("n"),
+        }
+        if sp.get("settled"):
+            print(
+                f"telegram spread moneyway: {sp.get('settled')} chiusi, "
+                f"{sp.get('pending')} pending (journal {sp.get('n')})"
+            )
+    except Exception as exc:
+        summary["spread_settle_error"] = str(exc)
+    try:
         summary["plays_csv"] = export_plays_csv()
     except Exception as exc:
         summary["plays_csv_error"] = str(exc)

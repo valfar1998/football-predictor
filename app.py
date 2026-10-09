@@ -679,26 +679,39 @@ def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
             )
             for a, lk in zip(show["action"].tolist(), locked.reindex(show.index).fillna(False).tolist())
         ]
-    if "score_unified" in show.columns and "score_live" in view.columns:
-        # Nota live accanto al voto freeze, senza cambiare il voto ufficiale
-        live = view.reindex(show.index)["score_live"]
-        locked = (
-            view.reindex(show.index)["score_locked"].fillna(0).astype(int).eq(1)
-            if "score_locked" in view.columns
-            else pd.Series(False, index=show.index)
-        )
-        def _voto_cell(su, lv, lk):
-            if not lk or lv is None or (su is not None and str(su) == str(lv)):
-                return su
-            return f"{su} (live {lv})"
-        show["score_unified"] = [
-            _voto_cell(su, lv, bool(lk))
-            for su, lv, lk in zip(
-                show["score_unified"].tolist(),
-                live.tolist(),
-                locked.fillna(False).tolist(),
+    if "score_unified" in show.columns:
+        # Sempre testo (Arrow TextColumn): int misti a "8 (live 5)" → ArrowTypeError
+        if "score_live" in view.columns:
+            live = view.reindex(show.index)["score_live"]
+            locked = (
+                view.reindex(show.index)["score_locked"].fillna(0).astype(int).eq(1)
+                if "score_locked" in view.columns
+                else pd.Series(False, index=show.index)
             )
-        ]
+
+            def _voto_cell(su, lv, lk):
+                if su is None or (isinstance(su, float) and pd.isna(su)):
+                    base = ""
+                else:
+                    base = str(int(su)) if isinstance(su, (int, float)) and float(su) == int(su) else str(su)
+                if not lk or lv is None or (isinstance(lv, float) and pd.isna(lv)) or base == str(lv):
+                    return base
+                return f"{base} (live {lv})"
+
+            show["score_unified"] = [
+                _voto_cell(su, lv, bool(lk))
+                for su, lv, lk in zip(
+                    show["score_unified"].tolist(),
+                    live.tolist(),
+                    locked.fillna(False).tolist(),
+                )
+            ]
+        else:
+            show["score_unified"] = show["score_unified"].map(
+                lambda su: ""
+                if su is None or (isinstance(su, float) and pd.isna(su))
+                else (str(int(su)) if isinstance(su, (int, float)) and float(su) == int(su) else str(su))
+            )
     for drop_col in ("drop_1", "drop_x", "drop_2"):
         if drop_col in show.columns:
             show[drop_col] = pd.to_numeric(show[drop_col], errors="coerce")
@@ -1086,6 +1099,14 @@ def render_advice(
                 playab["verdict"],
             )
             st.caption(playab.get("reason") or playab.get("verdict_long") or "")
+            try:
+                from modules.advisor.spread_paper import spread_outcome_phrase
+
+                _mw_hist = spread_outcome_phrase(playability=int(playab["score"])) or spread_outcome_phrase()
+                if _mw_hist:
+                    st.caption(f"Storico moneyway giocab. {playab['score']}: {_mw_hist}")
+            except Exception:
+                pass
             comment = move.get("movement_comment") or move.get("movement_summary") or move.get("note")
             if comment:
                 st.info(comment)
@@ -1235,6 +1256,122 @@ def render_advice(
     )
 
 
+def _render_moneyway_roi_block(*, compact: bool = False) -> None:
+    """ROI alert Telegram moneyway / Spread Raro AsianBetSoccer (sempre visibile)."""
+    from modules.advisor.spread_paper import spread_outcome_phrase, spread_paper_report
+
+    try:
+        rep = spread_paper_report()
+    except Exception as exc:
+        st.warning(f"ROI moneyway non disponibile: {exc}")
+        return
+    if not rep.get("ok"):
+        st.caption(rep.get("error") or "Report moneyway non disponibile")
+        return
+
+    n_j = int(rep.get("n_journal") or 0)
+    n = int(rep.get("n") or 0)
+    n_pend = int(rep.get("n_pending") or 0)
+    roi = rep.get("odds_roi")
+    hr = rep.get("hit_rate")
+    votes = rep.get("by_vote") or {}
+
+    if not compact:
+        st.subheader("Paper ROI (moneyway AsianBetSoccer · Spread Raro)")
+    st.caption(
+        "Campione **separato** dal ROI analisi/GIOCA: solo alert Telegram **moneyway** "
+        "(Spread Raro AsianBetSoccer). Settle su gol da storico; ROI @ quote unitario sul lato *Segui*."
+    )
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric(
+        "Campione moneyway",
+        f"{n} ({n_pend})",
+        help="Settled (pending freeze). Journal totale nella metrica a destra.",
+    )
+    c2.metric(
+        "ROI @ quote",
+        "n/d" if roi is None else f"{roi:+.1%}",
+        delta=(f"hit {hr:.0%}" if hr is not None and n else None),
+    )
+    c3.metric(
+        "Hit rate",
+        "—" if hr is None else f"{hr:.0%}",
+        delta=f"{rep.get('hits', 0)}/{n}" if n else f"pending {n_pend}",
+    )
+    c4.metric("Push", f"{int(rep.get('n_push') or 0)}")
+    c5.metric("In journal", f"{n_j}")
+
+    v8, v9, v10 = st.columns(3)
+    for col, vote in ((v8, "8"), (v9, "9"), (v10, "10")):
+        vs = votes.get(vote) or {}
+        vroi = vs.get("odds_roi")
+        col.metric(
+            f"ROI giocab. {vote}",
+            "n/d" if vroi is None else f"{vroi:+.1%}",
+            delta=f"n={int(vs.get('n') or 0)} ({int(vs.get('pending') or 0)})",
+        )
+
+    if n_j == 0:
+        st.info(
+            rep.get("note")
+            or "Nessun alert moneyway ancora: parte dal prossimo invio Telegram Spread Raro."
+        )
+    elif n == 0 and n_pend:
+        st.info(
+            f"**{n_pend}** alert moneyway in attesa di settle (ROI ancora n/d finché non chiudono)."
+        )
+
+    hist = spread_outcome_phrase()
+    if hist:
+        st.caption(f"Storico moneyway complessivo: {hist}")
+
+    if not compact:
+        if rep.get("by_market"):
+            with st.expander("Moneyway ROI per mercato (bet)", expanded=False):
+                st.dataframe(pd.DataFrame(rep["by_market"]), width="stretch", hide_index=True)
+        pending_rows = rep.get("pending_rows") or []
+        if pending_rows:
+            with st.expander(f"Moneyway pending ({len(pending_rows)})", expanded=True):
+                st.dataframe(
+                    pd.DataFrame(
+                        [
+                            {
+                                "Data": r.get("date"),
+                                "Partita": f"{r.get('home')} vs {r.get('away')}",
+                                "Giocab.": r.get("playability"),
+                                "Segui": r.get("bet_label"),
+                                "Quota": r.get("odds"),
+                                "Freeze": r.get("alert_frozen_at"),
+                            }
+                            for r in pending_rows
+                        ]
+                    ),
+                    width="stretch",
+                    hide_index=True,
+                )
+        if rep.get("recent"):
+            with st.expander("Ultime moneyway settled", expanded=False):
+                st.dataframe(
+                    pd.DataFrame(
+                        [
+                            {
+                                "Data": r.get("date"),
+                                "Partita": f"{r.get('home')} vs {r.get('away')}",
+                                "Giocab.": r.get("playability"),
+                                "Segui": r.get("bet_label"),
+                                "Quota": r.get("odds"),
+                                "Hit": r.get("hit"),
+                                "Push": r.get("push"),
+                                "PnL": r.get("pnl"),
+                            }
+                            for r in rep["recent"]
+                        ]
+                    ),
+                    width="stretch",
+                    hide_index=True,
+                )
+
+
 st.title("Consiglio mercati")
 st.caption(
     "Tre livelli: **modello** (soldi: EV/Kelly/Gioca; ensemble XGB+Poisson), **voto unificato** (ordine in tabella), "
@@ -1252,7 +1389,8 @@ try:
         if _hroi is None:
             _hroi = _home_roi.get("odds_roi")
         _hvotes = _home_roi.get("by_vote") or {}
-        hc1, hc2, hc3, hc4, hc5 = st.columns(5)
+        st.caption("ROI analisi — alert Telegram GIOCA (voto freeze)")
+        hc1, hc2, hc3, hc4, hc5, hc6 = st.columns(6)
         hc1.metric(
             "Campione ROI",
             f"{_hn} ({_hp})",
@@ -1266,7 +1404,19 @@ try:
             "n/d" if _hroi is None else f"{_hroi:+.1%}",
             delta=f"hit {_home_roi.get('hit_rate', 0):.0%}" if _hn else None,
         )
-        for _col, _vote in ((hc3, "8"), (hc4, "9"), (hc5, "10")):
+        _h_br_pnl = _home_roi.get("bankroll_pnl_pct")
+        _h_stake_br = _home_roi.get("stake_pct_br")
+        hc3.metric(
+            "P&L bankroll",
+            "n/d" if _h_br_pnl is None else f"{_h_br_pnl:+.1%}",
+            delta=None if _h_stake_br is None else f"stake {_h_stake_br:.1%} BR",
+            delta_color="off",
+            help=(
+                "PnL in frazione della bankroll iniziale: Σ(Kelly×ritorno). "
+                "Delta = somma stake Kelly / bankroll (BR)."
+            ),
+        )
+        for _col, _vote in ((hc4, "8"), (hc5, "9"), (hc6, "10")):
             _vs = _hvotes.get(_vote) or {}
             _vroi = _vs.get("kelly_roi")
             if _vroi is None:
@@ -1278,8 +1428,11 @@ try:
                 "n/d" if _vroi is None else f"{_vroi:+.1%}",
                 delta=f"n={_vn} ({_vp})" if (_vn or _vp) else "n=0",
             )
-except Exception:
-    pass
+except Exception as _home_roi_exc:
+    st.caption(f"ROI analisi non disponibile: {_home_roi_exc}")
+
+st.caption("ROI moneyway — alert Telegram AsianBetSoccer Spread Raro (giocabilità)")
+_render_moneyway_roi_block(compact=True)
 with st.expander("Come funziona — cosa fa ogni pezzo", expanded=False):
     st.markdown(
         """
@@ -2607,7 +2760,7 @@ with tab_eval:
             delta=f"pending {_n_lock_pend}",
         )
 
-        r1, r2, r3, r4, r5 = st.columns(5)
+        r1, r2, r3, r4, r5, r6 = st.columns(6)
         _kroi = _roi_rep.get("kelly_roi")
         _uroi = _roi_rep.get("odds_roi")
         r1.metric(
@@ -2616,13 +2769,25 @@ with tab_eval:
             delta=f"unit {_uroi:+.1%}" if _uroi is not None else None,
             help="Σ(Kelly×ritorno)/Σ(Kelly) su quota e Kelly congelati nel messaggio Telegram.",
         )
+        _br_pnl = _roi_rep.get("bankroll_pnl_pct")
+        _stake_br = _roi_rep.get("stake_pct_br")
         r2.metric(
+            "P&L bankroll",
+            "n/d" if _br_pnl is None else f"{_br_pnl:+.1%}",
+            delta=None if _stake_br is None else f"stake {_stake_br:.1%} BR",
+            delta_color="off",
+            help=(
+                "PnL in frazione della bankroll iniziale: Σ(Kelly×ritorno). "
+                "Delta = somma stake Kelly / bankroll (BR)."
+            ),
+        )
+        r3.metric(
             "PnL Kelly",
             f"{_roi_rep.get('kelly_pnl', 0) or 0:+.3f}",
             delta=f"unit {_roi_rep.get('odds_pnl', 0):+.2f} u" if _roi_rep.get("n") else None,
         )
         _hr = _roi_rep.get("hit_rate")
-        r3.metric(
+        r4.metric(
             "Hit rate",
             "—" if _hr is None else f"{_hr:.0%}",
             delta=f"{_roi_rep.get('hits', 0)}/{_roi_rep.get('n', 0)}",
@@ -2632,14 +2797,14 @@ with tab_eval:
         _pct_tgt = _prog.get("pct_of_target")
         if _pct_tgt is None and _target:
             _pct_tgt = round(100.0 * _n_now / _target, 1)
-        r4.metric(
+        r5.metric(
             "Campione ROI",
             f"{_n_now} ({_n_pend_sc})",
             delta=f"{_n_now}/{_target} · {_pct_tgt:.0f}%" if _pct_tgt is not None else f"{_n_now}/{_target}",
             help="Solo alert Telegram GIOCA settled; tra parentesi pending freeze.",
         )
         _clv = _roi_rep.get("mean_clv")
-        r5.metric(
+        r6.metric(
             "CLV medio",
             "n/d" if _clv is None else f"{_clv:+.2%}",
             delta=f"voto ≥{_min_sc}",
@@ -2692,112 +2857,37 @@ with tab_eval:
                 f"(di cui **{_n_lock_pend}** freeze Telegram totali pending) — non ancora nel ROI."
             )
 
-        st.subheader("Paper ROI (Asian Spread Raro · giocabilità)")
-        from modules.advisor.spread_paper import spread_paper_report
+    # Sempre visibile (non annidato sotto ROI GIOCA)
+    _render_moneyway_roi_block(compact=False)
 
-        _sp_rep = spread_paper_report()
-        if not _sp_rep.get("ok"):
-            st.caption(_sp_rep.get("error") or "Report spread non disponibile")
-        elif not _sp_rep.get("n_journal"):
-            st.caption(
-                _sp_rep.get("note")
-                or "Nessun alert Spread Raro congelato: si riempie al prossimo invio Telegram."
-            )
-        else:
-            st.caption(
-                "Campione separato dal ROI GIOCA: solo alert **Spread Raro** inviati su Telegram. "
-                "Settle su gol da storico; ROI @ quote unitario sul lato *Segui* (1/2/O/U). "
-                "AH senza quota → solo hit rate."
-            )
-            s1, s2, s3, s4, s5 = st.columns(5)
-            _sn = int(_sp_rep.get("n") or 0)
-            _spn = int(_sp_rep.get("n_pending") or 0)
-            _sroi = _sp_rep.get("odds_roi")
-            _shr = _sp_rep.get("hit_rate")
-            s1.metric(
-                "Campione spread",
-                f"{_sn} ({_spn})",
-                help="Settled (pending); journal totale in nota sotto.",
-            )
-            s2.metric(
-                "ROI @ quote",
-                "n/d" if _sroi is None else f"{_sroi:+.1%}",
-                delta=f"flat {_sp_rep.get('flat_roi', 0):+.1%}" if _sn else None,
-            )
-            s3.metric(
-                "Hit rate",
-                "—" if _shr is None else f"{_shr:.0%}",
-                delta=f"{_sp_rep.get('hits', 0)}/{_sn}",
-            )
-            s4.metric("Push", f"{int(_sp_rep.get('n_push') or 0)}")
-            s5.metric("In journal", f"{int(_sp_rep.get('n_journal') or 0)}")
-            _sv = _sp_rep.get("by_vote") or {}
-            sv8, sv9, sv10 = st.columns(3)
-            for _col, _vote in ((sv8, "8"), (sv9, "9"), (sv10, "10")):
-                _vs = _sv.get(_vote) or {}
-                _vroi = _vs.get("odds_roi")
-                _col.metric(
-                    f"ROI giocab. {_vote}",
-                    "n/d" if _vroi is None else f"{_vroi:+.1%}",
-                    delta=f"n={int(_vs.get('n') or 0)} ({int(_vs.get('pending') or 0)})",
+    with st.expander("Sync settle locali → cloud (apprendimento)", expanded=False):
+        st.caption(
+            "Esporta le chiusure locali (voto ≥8 / freeze) in `local_settles.json`. "
+            "Dopo **commit + push**, il job cloud le applica prima di apprendere."
+        )
+        c_sync1, c_sync2 = st.columns(2)
+        with c_sync1:
+            if st.button("Esporta journal settle", key="export_settle_journal"):
+                from modules.data_update.history import export_settle_journal
+
+                st.write(export_settle_journal(roi_only=True))
+        with c_sync2:
+            if st.button("Esporta + commit + push", key="push_settle_journal"):
+                import subprocess
+
+                proc = subprocess.run(
+                    [sys.executable, "scripts/push_local_settles.py", "--commit", "--push"],
+                    cwd=str(ROOT),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
                 )
-            if _sp_rep.get("by_market"):
-                with st.expander("Spread ROI per mercato (bet)", expanded=False):
-                    st.dataframe(
-                        pd.DataFrame(_sp_rep["by_market"]),
-                        width="stretch",
-                        hide_index=True,
-                    )
-            if _sp_rep.get("recent"):
-                with st.expander("Ultime spread settled", expanded=False):
-                    st.dataframe(
-                        pd.DataFrame(
-                            [
-                                {
-                                    "Data": r.get("date"),
-                                    "Partita": f"{r.get('home')} vs {r.get('away')}",
-                                    "Giocab.": r.get("playability"),
-                                    "Segui": r.get("bet_label") or r.get("follow"),
-                                    "Quota": r.get("odds"),
-                                    "Hit": r.get("hit"),
-                                    "Push": r.get("push"),
-                                    "PnL": r.get("pnl"),
-                                }
-                                for r in _sp_rep["recent"]
-                            ]
-                        ),
-                        width="stretch",
-                        hide_index=True,
-                    )
-
-        with st.expander("Sync settle locali → cloud (apprendimento)", expanded=False):
-            st.caption(
-                "Esporta le chiusure locali (voto ≥8 / freeze) in `local_settles.json`. "
-                "Dopo **commit + push**, il job cloud le applica prima di apprendere."
-            )
-            c_sync1, c_sync2 = st.columns(2)
-            with c_sync1:
-                if st.button("Esporta journal settle", key="export_settle_journal"):
-                    from modules.data_update.history import export_settle_journal
-
-                    st.write(export_settle_journal(roi_only=True))
-            with c_sync2:
-                if st.button("Esporta + commit + push", key="push_settle_journal"):
-                    import subprocess
-
-                    proc = subprocess.run(
-                        [sys.executable, "scripts/push_local_settles.py", "--commit", "--push"],
-                        cwd=str(ROOT),
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                    )
-                    st.code((proc.stdout or "") + (proc.stderr or ""))
-                    if proc.returncode != 0:
-                        st.error("Push fallito — controlla git remote / auth.")
-                    else:
-                        st.success("Journal pushato. Al prossimo job cloud i settle entreranno nel learn.")
+                st.code((proc.stdout or "") + (proc.stderr or ""))
+                if proc.returncode != 0:
+                    st.error("Push fallito — controlla git remote / auth.")
+                else:
+                    st.success("Journal pushato. Al prossimo job cloud i settle entreranno nel learn.")
 
     with st.expander("Settle manuale (pending ≥8 giorni)", expanded=False):
         from modules.data_update.history import list_stale_roi_pending, manual_settle
@@ -3235,11 +3325,20 @@ with tab_eval:
                 )
             ke = rep.get("kelly") or {}
             oe = rep.get("odds_equity") or {}
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Kelly bank end", ke.get("bankroll_end", "n/d"))
-            k2.metric("Kelly risk scale", ke.get("risk_scale", "n/d"))
-            k3.metric("Max DD (odds)", oe.get("max_drawdown", "n/d"))
-            k4.metric("Sharpe (odds)", oe.get("sharpe", "n/d"))
+            k1, k2, k3, k4, k5 = st.columns(5)
+            _brp = rep.get("bankroll_pnl_pct")
+            _sbr = rep.get("stake_pct_br")
+            k1.metric(
+                "P&L bankroll",
+                "n/d" if _brp is None else f"{_brp:+.1%}",
+                delta=None if _sbr is None else f"stake {_sbr:.1%} BR",
+                delta_color="off",
+                help="Σ(Kelly×ritorno) sulla bankroll iniziale; delta = Σ(Kelly)/BR.",
+            )
+            k2.metric("Kelly bank end", ke.get("bankroll_end", "n/d"))
+            k3.metric("Kelly risk scale", ke.get("risk_scale", "n/d"))
+            k4.metric("Max DD (odds)", oe.get("max_drawdown", "n/d"))
+            k5.metric("Sharpe (odds)", oe.get("sharpe", "n/d"))
             if rep.get("walk_forward_odds_roi"):
                 st.markdown("**Walk-forward ROI @ quote**")
                 st.dataframe(pd.DataFrame(rep["walk_forward_odds_roi"]), width="stretch", hide_index=True)

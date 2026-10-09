@@ -8,6 +8,8 @@ Allineato a `PROJECT_BRIEF_football.md`. **Aggiornato: 2026-09-15** (freeze jour
 
 **Freeze alert:** notifica Telegram voto ≥8 → `score_locked` + journal `telegram_score_freeze.json` (cache Actions + apply su archive/pull). ROI = notifica, non ricalcolo pre-KO.
 
+**ROI moneyway (Spread Raro):** alert AsianBetSoccer ≠ analisi → journal `telegram_spread_freeze.json`; settle in `settle_pending`; frase storico ROI nella notifica; metriche home separate dal ROI GIOCA.
+
 **Convenzione:** dopo ogni modifica al codice, aggiornare **questo file** e `PROJECT_BRIEF_football.md`.
 
 ---
@@ -85,6 +87,7 @@ Allineato a `PROJECT_BRIEF_football.md`. **Aggiornato: 2026-09-15** (freeze jour
 
 ## Chiusi (codice / recenti)
 
+- **ROI moneyway AsianBetSoccer:** freeze `telegram_spread_freeze.json` + settle in `settle_pending`; frase storico ROI nelle notifiche Spread Raro; metriche home separate dal ROI GIOCA/analisi.
 - **UI nascondi non giocabili:** default nasconde no-bet **e** N/D/invalidi (non solo no-bet).
 - **Tipo consiglio allineato:** finish-early su tutti i gruppi (scorer lazy); pick primario = corner o miglior playable; `advice_groups`/`best_by_group` in calendario; filtro UI su pick o gruppi secondari; no_bet soft sugli esplorativi.
 - **Fix corner Solo quote:** `ensure_side_markets_on_prediction` (p MC corner/tiri sul reuse); no_bet non applica steam/residual 1X2 ai corner; linee 6.5–13.5.

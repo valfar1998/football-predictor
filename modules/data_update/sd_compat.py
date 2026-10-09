@@ -1,10 +1,12 @@
-"""Compat soccerdata: stagioni non ambigue + warning di libreria silenziati.
+"""Compat soccerdata: stagioni non ambigue + warning/log di libreria silenziati.
 
 La dipendenza runtime è il tree locale ``soccerdata-master/`` (editable install).
 """
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 import warnings
 from contextlib import contextmanager
@@ -14,6 +16,18 @@ from typing import Iterator, Sequence
 
 # Root del fork locale (…/football-predictor/soccerdata-master)
 _LOCAL_SOCCERDATA_ROOT = Path(__file__).resolve().parents[2] / "soccerdata-master"
+
+# Logger rumorosi durante scrape (retry 403 Sofascore, TLS client, …).
+# soccerdata configura un logger di nome "root" (non il RootLogger standard).
+_QUIET_LOGGERS = (
+    "root",
+    "soccerdata",
+    "soccerdata._common",
+    "soccerdata._config",
+    "tls_requests",
+    "tls_requests.models",
+    "TLSLibrary",
+)
 
 
 def soccerdata_install_hint() -> str:
@@ -68,13 +82,56 @@ def season_codes(years: Sequence[int | str] | None = None) -> list[str]:
 
 @contextmanager
 def quiet_soccerdata() -> Iterator[None]:
-    """Nasconde UserWarning/FutureWarning emessi da soccerdata (pandas concat, stagioni)."""
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", module=r"soccerdata(\.|$)")
-        warnings.filterwarnings("ignore", message=r".*Season id .* is ambiguous.*")
-        warnings.filterwarnings(
-            "ignore",
-            message=r".*DataFrame concatenation with empty or all-NA entries.*",
-        )
-        warnings.filterwarnings("ignore", message=r".*Different columns found for.*")
-        yield
+    """Nasconde warning + log ERROR/INFO di soccerdata (retry 403 Sofascore, path install, …)."""
+    saved_levels: dict[str, int] = {}
+    saved_handlers: dict[int, tuple[logging.Handler, int]] = {}
+
+    def mute() -> None:
+        for name in _QUIET_LOGGERS:
+            log = logging.getLogger(name)
+            if name not in saved_levels:
+                saved_levels[name] = log.level
+            log.setLevel(logging.CRITICAL)
+            for h in list(log.handlers):
+                hid = id(h)
+                if hid not in saved_handlers:
+                    saved_handlers[hid] = (h, h.level)
+                h.setLevel(logging.CRITICAL)
+
+    prev_loglevel = os.environ.get("SOCCERDATA_LOGLEVEL")
+    os.environ["SOCCERDATA_LOGLEVEL"] = "CRITICAL"
+    mute()
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", module=r"soccerdata(\.|$)")
+            warnings.filterwarnings("ignore", message=r".*Season id .* is ambiguous.*")
+            warnings.filterwarnings(
+                "ignore",
+                message=r".*DataFrame concatenation with empty or all-NA entries.*",
+            )
+            warnings.filterwarnings("ignore", message=r".*Different columns found for.*")
+            warnings.filterwarnings(
+                "ignore",
+                message=r".*soccerdata caricato da.*",
+                category=UserWarning,
+            )
+            warnings.filterwarnings(
+                "ignore",
+                message=r".*No custom (team name|league dict).*",
+            )
+            # Import/dictConfig legge SOCCERDATA_LOGLEVEL; se già importato, ri-muta.
+            try:
+                import soccerdata  # noqa: F401
+            except ImportError:
+                pass
+            mute()
+            yield
+    finally:
+        if prev_loglevel is None:
+            os.environ.pop("SOCCERDATA_LOGLEVEL", None)
+        else:
+            os.environ["SOCCERDATA_LOGLEVEL"] = prev_loglevel
+        for h, level in saved_handlers.values():
+            h.setLevel(level)
+        for name, level in saved_levels.items():
+            logging.getLogger(name).setLevel(level)

@@ -165,6 +165,28 @@ def _equity_stats(pnls: list[float]) -> dict[str, Any]:
     }
 
 
+# Cache di processo: risk_scale è globale (non dipende da partita/mercato).
+# Senza cache, advise() richiamava load_history() ~120× a partita → ore di Solo quote.
+_KELLY_RISK_CACHE_KEY: tuple[float, float] | None = None
+_KELLY_RISK_CACHE_VAL: float = 1.0
+
+
+def _history_db_mtime() -> float:
+    try:
+        from modules.data_update.history import DB
+
+        return float(DB.stat().st_mtime) if DB.is_file() else 0.0
+    except OSError:
+        return 0.0
+
+
+def clear_kelly_risk_cache() -> None:
+    """Invalida la cache (es. dopo settle se serve un ricalcolo immediato)."""
+    global _KELLY_RISK_CACHE_KEY, _KELLY_RISK_CACHE_VAL
+    _KELLY_RISK_CACHE_KEY = None
+    _KELLY_RISK_CACHE_VAL = 1.0
+
+
 def kelly_equity_snapshot(
     *,
     kelly_frac: float = 0.25,
@@ -204,15 +226,26 @@ def kelly_equity_snapshot(
 
 
 def kelly_risk_scale_from_history(*, kelly_frac: float = 0.25) -> float:
+    """Scala rischio Kelly da equity paper. Cache per (frac, mtime DB): stesso valore per tutto il batch."""
+    global _KELLY_RISK_CACHE_KEY, _KELLY_RISK_CACHE_VAL
     from modules.advisor.staking import kelly_risk_scale
 
-    snap = kelly_equity_snapshot(kelly_frac=kelly_frac)
+    frac = float(kelly_frac)
+    key = (round(frac, 6), _history_db_mtime())
+    if _KELLY_RISK_CACHE_KEY == key:
+        return _KELLY_RISK_CACHE_VAL
+
+    snap = kelly_equity_snapshot(kelly_frac=frac)
     if not snap.get("ok"):
-        return 1.0
-    return kelly_risk_scale(
-        max_drawdown=snap.get("max_drawdown"),
-        sharpe=snap.get("sharpe"),
-    )
+        scale = 1.0
+    else:
+        scale = kelly_risk_scale(
+            max_drawdown=snap.get("max_drawdown"),
+            sharpe=snap.get("sharpe"),
+        )
+    _KELLY_RISK_CACHE_KEY = key
+    _KELLY_RISK_CACHE_VAL = float(scale)
+    return _KELLY_RISK_CACHE_VAL
 
 
 def paper_trading_report(
@@ -288,6 +321,8 @@ def paper_trading_report(
             "odds_pnl": 0.0,
             "odds_roi": None,
             "kelly_roi": None,
+            "bankroll_pnl_pct": None,
+            "stake_pct_br": None,
             "min_score": min_score,
             **db_stats,
             "by_vote": _by_unified_vote([], pending_score, kelly_frac=kelly_frac),
@@ -444,6 +479,9 @@ def paper_trading_report(
         "kelly_stake_sum": round(stake_sum, 4) if kelly_unit_rets else None,
         "kelly_pnl": round(kelly_weighted_pnl, 4) if kelly_unit_rets else None,
         "kelly_roi": round(kelly_roi, 3) if kelly_roi is not None else None,
+        # P&L / stake rispetto alla bankroll iniziale (=1): PnL = Σ(k·ret), stake = Σ(k)
+        "bankroll_pnl_pct": round(kelly_weighted_pnl, 4) if kelly_unit_rets else None,
+        "stake_pct_br": round(stake_sum, 4) if kelly_unit_rets else None,
         "mean_clv": round(sum(clv_all) / len(clv_all), 4) if clv_all else None,
         "flat_equity": _equity_stats(flat_pnls),
         "odds_equity": _equity_stats(odds_pnls),
@@ -451,6 +489,10 @@ def paper_trading_report(
         "kelly": {
             "bankroll_start": bankroll,
             "bankroll_end": round(bank, 2),
+            "bankroll_pnl_pct": round((bank - float(bankroll)) / float(bankroll), 4)
+            if bankroll
+            else None,
+            "stake_pct_br": round(stake_sum, 4) if kelly_unit_rets else None,
             "frac": kelly_frac,
             "risk_scale": round(risk_scale, 3),
             "n_staked": sum(1 for x in kelly_pnls if abs(x) > 1e-9),

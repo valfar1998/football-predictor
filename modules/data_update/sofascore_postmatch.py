@@ -198,19 +198,27 @@ def scorer_names_from_incidents(incidents: dict[str, Any] | list | None) -> dict
     }
 
 
+# Soft-fail cooldown: Sofascore 403 fa 5 retry rumorosi; non ripeti nello stesso settle.
+_SOFA_SCHED_FAIL_AT: float | None = None
+_SOFA_SCHED_COOLDOWN_S = 900.0
+
+
 def _schedule_finished(*, days_back: int = 7, seasons: list[str] | None = None) -> pd.DataFrame:
     """Schedule Big 5 FT recente via soccerdata."""
-    try:
-        sd = assert_soccerdata_available()
-    except Exception:
+    import time
+
+    global _SOFA_SCHED_FAIL_AT
+    if _SOFA_SCHED_FAIL_AT is not None and (time.time() - _SOFA_SCHED_FAIL_AT) < _SOFA_SCHED_COOLDOWN_S:
         return pd.DataFrame()
     seasons = season_codes(seasons)
     try:
         with quiet_soccerdata():
+            sd = assert_soccerdata_available()
             sofa = sd.Sofascore(leagues=SOFA_LEAGUES, seasons=seasons)
             raw = sofa.read_schedule(force_cache=False)
     except Exception as exc:
-        print(f"skip Sofascore schedule: {exc}")
+        _SOFA_SCHED_FAIL_AT = time.time()
+        # Soft-fail silenzioso (403 Sofascore è frequente); settle continua con FD/mondo.
         return pd.DataFrame()
     if raw is None or len(raw) == 0:
         return pd.DataFrame()

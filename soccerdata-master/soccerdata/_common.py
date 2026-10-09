@@ -523,7 +523,13 @@ class BaseRequestsReader(BaseReader):
                     with filepath.open(mode="wb") as fh:
                         fh.write(payload)
                 return io.BytesIO(payload)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                # 403 Softascore/Cloudflare: ritentare 5× sporca solo i log
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status is None and "403" in str(exc):
+                    status = 403
+                if status == 403:
+                    raise ConnectionError(f"Could not download {url}.") from exc
                 logger.exception(
                     "Error while scraping %s. Retrying... (attempt %d of 5).",
                     url,

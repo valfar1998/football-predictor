@@ -184,6 +184,7 @@ Tutti i gate tecnici previsti dalla roadmap sono **sbloccati e operativi**:
 | Righe **trainable** | ≥ 80 | **638** | ✅ |
 | Live ricche pre-match | ≥ 80 / phase-out 150 | **518** | ✅ (backfill escluso dal fit) |
 | Paper ROI @ quote (voto ≥8) | campione in crescita | **+25,3%** (n=6) | 🟡 campione piccolo |
+| Paper ROI moneyway (Spread Raro ABS) | campione separato | journal Telegram | 🟡 cresce con alert |
 | Residual EV WF-RMSE | ≤ 0,55 | **≈ 0,53** | ✅ produzione |
 | `online_p_factor` | live ricche ≥ 30 | **30** (factor 1.005) | ✅ |
 | Apprendimento senza junk | escludere live incomplete | **169** escluse | ✅ |

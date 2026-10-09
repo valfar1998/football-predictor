@@ -351,6 +351,49 @@ def settle_spread_journal() -> dict[str, Any]:
     }
 
 
+def _subset_roi(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Hit + ROI @ quote su un sottoinsieme decidibile (hit 0/1)."""
+    hits = sum(1 for r in rows if int(r.get("hit") or 0) == 1)
+    n = len(rows)
+    op: list[float] = []
+    for r in rows:
+        pnl = _f(r.get("pnl"))
+        od = _f(r.get("odds"))
+        if pnl is not None and od is not None and od > 1.01:
+            op.append(pnl)
+    return {
+        "n": n,
+        "hits": hits,
+        "hit_rate": round(hits / n, 3) if n else None,
+        "odds_n": len(op),
+        "odds_pnl": round(sum(op), 2) if op else 0.0,
+        "odds_roi": round(sum(op) / len(op), 3) if op else None,
+    }
+
+
+def spread_outcome_phrase(*, playability: int | None = None, min_n: int = 1) -> str | None:
+    """Es. '2/5 (40%) · ROI +8%' per giocabilità freeze (moneyway), senza re-settle."""
+    data = _load_journal()
+    rows = [r for r in data.values() if r.get("settled_at") and r.get("hit") is not None]
+    if playability is not None:
+        try:
+            pv = int(playability)
+        except (TypeError, ValueError):
+            return None
+        rows = [r for r in rows if int(r.get("playability") or 0) == pv]
+    stats = _subset_roi(rows)
+    n = int(stats["n"] or 0)
+    if n < min_n:
+        return None
+    hits = int(stats["hits"] or 0)
+    hr = stats.get("hit_rate")
+    label = f"{hits}/{n}" + (f" ({hr:.0%})" if hr is not None else "")
+    roi = stats.get("odds_roi")
+    if roi is not None:
+        return f"{label} · ROI {roi:+.0%}"
+    return label
+
+
 def spread_paper_report() -> dict[str, Any]:
     """Report ROI: unit stake sulle quote freeze (push esclusi dal ROI @ quote)."""
     settle_info = settle_spread_journal()
@@ -362,40 +405,18 @@ def spread_paper_report() -> dict[str, Any]:
     decidable = [r for r in settled if r.get("hit") is not None]
     pushes = [r for r in settled if int(r.get("push") or 0) == 1]
 
-    hits = sum(1 for r in decidable if int(r.get("hit") or 0) == 1)
-    n = len(decidable)
+    overall = _subset_roi(decidable)
+    hits = int(overall["hits"] or 0)
+    n = int(overall["n"] or 0)
     flat_pnl = float(hits - (n - hits)) if n else 0.0
-
-    odds_pnls: list[float] = []
-    for r in decidable:
-        pnl = _f(r.get("pnl"))
-        odds = _f(r.get("odds"))
-        if pnl is None:
-            continue
-        if odds is None or odds <= 1.01:
-            # flat già in flat_pnl; skip odds series
-            continue
-        odds_pnls.append(pnl)
 
     by_vote: dict[str, dict[str, Any]] = {}
     for v in (8, 9, 10):
         subset = [r for r in decidable if int(r.get("playability") or 0) == v]
-        h = sum(1 for r in subset if int(r.get("hit") or 0) == 1)
-        nn = len(subset)
-        op = []
-        for r in subset:
-            pnl = _f(r.get("pnl"))
-            od = _f(r.get("odds"))
-            if pnl is not None and od is not None and od > 1.01:
-                op.append(pnl)
+        stats = _subset_roi(subset)
         by_vote[str(v)] = {
             "vote": v,
-            "n": nn,
-            "hits": h,
-            "hit_rate": round(h / nn, 3) if nn else None,
-            "odds_n": len(op),
-            "odds_pnl": round(sum(op), 2) if op else 0.0,
-            "odds_roi": round(sum(op) / len(op), 3) if op else None,
+            **stats,
             "pending": sum(1 for r in pending if int(r.get("playability") or 0) == v),
         }
 
@@ -404,18 +425,24 @@ def spread_paper_report() -> dict[str, Any]:
         by_bet.setdefault(str(r.get("bet") or "n/d"), []).append(r)
     by_market = []
     for k, items in sorted(by_bet.items(), key=lambda t: -len(t[1])):
-        h = sum(1 for x in items if int(x.get("hit") or 0) == 1)
-        op = [float(x["pnl"]) for x in items if _f(x.get("odds")) and _f(x.get("pnl")) is not None]
-        by_market.append(
-            {
-                "key": k,
-                "n": len(items),
-                "hits": h,
-                "hit_rate": round(h / len(items), 3) if items else None,
-                "odds_n": len(op),
-                "odds_roi": round(sum(op) / len(op), 3) if op else None,
-            }
-        )
+        stats = _subset_roi(items)
+        by_market.append({"key": k, **stats})
+
+    def _row_view(r: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "date": r.get("date"),
+            "home": r.get("home"),
+            "away": r.get("away"),
+            "league": r.get("league"),
+            "playability": r.get("playability"),
+            "bet_label": r.get("bet_label") or r.get("follow"),
+            "odds": r.get("odds"),
+            "hit": r.get("hit"),
+            "push": r.get("push"),
+            "pnl": r.get("pnl"),
+            "settled_at": r.get("settled_at"),
+            "alert_frozen_at": r.get("alert_frozen_at"),
+        }
 
     return {
         "ok": True,
@@ -426,16 +453,21 @@ def spread_paper_report() -> dict[str, Any]:
         "n_pending": len(pending),
         "n_push": len(pushes),
         "hits": hits,
-        "hit_rate": round(hits / n, 3) if n else None,
+        "hit_rate": overall.get("hit_rate"),
         "flat_pnl": round(flat_pnl, 2),
         "flat_roi": round(flat_pnl / n, 3) if n else None,
-        "odds_n": len(odds_pnls),
-        "odds_pnl": round(sum(odds_pnls), 2) if odds_pnls else 0.0,
-        "odds_roi": round(sum(odds_pnls) / len(odds_pnls), 3) if odds_pnls else None,
+        "odds_n": overall.get("odds_n"),
+        "odds_pnl": overall.get("odds_pnl"),
+        "odds_roi": overall.get("odds_roi"),
         "by_vote": by_vote,
         "by_market": by_market,
+        "pending_rows": sorted(
+            (_row_view(r) for r in pending),
+            key=lambda r: str(r.get("date") or ""),
+            reverse=True,
+        )[:30],
         "recent": sorted(
-            settled,
+            (_row_view(r) for r in settled),
             key=lambda r: str(r.get("date") or ""),
             reverse=True,
         )[:15],
