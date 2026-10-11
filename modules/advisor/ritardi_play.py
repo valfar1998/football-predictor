@@ -377,16 +377,35 @@ def attach_ritardi_play(rows: list[dict[str, Any]], *, compute_missing: bool = F
 
 # --- Journal / Telegram freeze / ROI ---
 
+SENT_PATH = ROOT / "data" / "processed" / "telegram_alerts_sent.json"
 
-def snapshot_from_play(play: dict[str, Any]) -> dict[str, Any] | None:
+
+def _frozen_odds(entry: dict[str, Any]) -> float | None:
+    """Quota della notifica: odds_frozen ha priorità, poi odds (legacy)."""
+    od = _f(entry.get("odds_frozen"))
+    if od is not None and od > 1.01:
+        return od
+    od = _f(entry.get("odds"))
+    if od is not None and od > 1.01:
+        return od
+    return None
+
+
+def snapshot_from_play(
+    play: dict[str, Any],
+    *,
+    frozen_at: str | None = None,
+    force_id: str | None = None,
+) -> dict[str, Any] | None:
     day = str(play.get("date") or "")[:10]
     home = str(play.get("home") or "").strip()
     away = str(play.get("away") or "").strip()
     pick = str(play.get("pick") or "").strip()
     if not day or not home or not away or not pick:
         return None
+    odds = _f(play.get("odds"))
     return {
-        "id": str(play.get("id") or f"ritardi|{_face_key(day, home, away)}|{pick}"),
+        "id": str(force_id or play.get("id") or f"ritardi|{_face_key(day, home, away)}|{pick}"),
         "match_key": _face_key(day, home, away),
         "date": day,
         "home": home,
@@ -395,7 +414,8 @@ def snapshot_from_play(play: dict[str, Any]) -> dict[str, Any] | None:
         "pick": pick,
         "pick_label": play.get("pick_label") or pick,
         "family": play.get("family"),
-        "odds": _f(play.get("odds")),
+        "odds": odds,
+        "odds_frozen": odds,
         "line": _f(play.get("line")),
         "p_fair": _f(play.get("p_fair")),
         "ev": _f(play.get("ev")),
@@ -405,7 +425,7 @@ def snapshot_from_play(play: dict[str, Any]) -> dict[str, Any] | None:
         "detail": play.get("detail"),
         "kind": play.get("kind"),
         "team": play.get("team"),
-        "alert_frozen_at": _now(),
+        "alert_frozen_at": frozen_at or _now(),
         "hit": None,
         "push": None,
         "pnl": None,
@@ -418,11 +438,12 @@ def snapshot_from_play(play: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def record_ritardi_freezes(alerts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Prima notifica vince: pick + quota congelati nel journal (come moneyway)."""
     data = _load_journal()
     added = skipped = 0
     for alert in alerts:
         play = alert.get("play") if isinstance(alert.get("play"), dict) else alert
-        snap = snapshot_from_play(play)
+        snap = snapshot_from_play(play, force_id=str(alert.get("id") or "") or None)
         if not snap:
             skipped += 1
             continue
@@ -435,6 +456,194 @@ def record_ritardi_freezes(alerts: list[dict[str, Any]]) -> dict[str, Any]:
     if added:
         _save_journal(data)
     return {"ok": True, "added": added, "skipped": skipped, "n_journal": len(data), "path": str(JOURNAL)}
+
+
+def _parse_sent_ritardi_id(aid: str) -> dict[str, str] | None:
+    """ritardi|date|home|away|PICK|title…"""
+    parts = str(aid or "").split("|")
+    if len(parts) < 5 or parts[0] != "ritardi":
+        return None
+    return {
+        "id": aid,
+        "date": parts[1][:10],
+        "home_key": parts[2].strip().lower(),
+        "away_key": parts[3].strip().lower(),
+        "pick": parts[4].strip(),
+        "title": "|".join(parts[5:]).strip(),
+    }
+
+
+def _odds_for_pick(row: dict[str, Any], pick: str) -> tuple[float | None, float | None]:
+    """(odds, line) per un pick già inviato su Telegram."""
+    om = _odds_map(row)
+    p = str(pick or "").upper()
+    if p in {"O2.5", "OVER2.5"} or p.startswith("O2.5"):
+        return om.get("over_2.5"), 2.5
+    if p in {"U2.5", "UNDER2.5"} or p.startswith("U2.5"):
+        return om.get("under_2.5"), 2.5
+    m = re.match(r"CORNO(\d+(?:\.\d+)?)$", p, re.I)
+    if m:
+        line = float(m.group(1))
+        return om.get(f"corners_over_{line:g}") or om.get(f"corners_over_{m.group(1)}"), line
+    m = re.match(r"CORNU(\d+(?:\.\d+)?)$", p, re.I)
+    if m:
+        line = float(m.group(1))
+        return om.get(f"corners_under_{line:g}") or om.get(f"corners_under_{m.group(1)}"), line
+    m = re.match(r"CARDO(\d+(?:\.\d+)?)$", p, re.I)
+    if m:
+        line = float(m.group(1))
+        return om.get(f"cards_over_{line:g}") or om.get(f"cards_over_{m.group(1)}"), line
+    m = re.match(r"CARDU(\d+(?:\.\d+)?)$", p, re.I)
+    if m:
+        line = float(m.group(1))
+        return om.get(f"cards_under_{line:g}") or om.get(f"cards_under_{m.group(1)}"), line
+    return None, None
+
+
+def _play_for_sent_id(aid: str, row: dict[str, Any], meta: dict[str, str]) -> dict[str, Any] | None:
+    """Ricostruisce lo snapshot play per un alert già inviato (pick bloccato dall'id)."""
+    pick = meta["pick"]
+    title = meta.get("title") or ""
+    # preferisci la stessa anomalia del Telegram
+    for anom in _row_anomalies(row, compute_missing=True):
+        cand = evaluate_anomaly_on_row(row, anom)
+        if not cand:
+            continue
+        if str(cand.get("pick") or "").upper() != pick.upper():
+            continue
+        if title and title.lower() not in str(cand.get("title") or "").lower():
+            # titolo diverso: ok se pick matcha e severity alta
+            if (_f(cand.get("severity")) or 0) < MIN_ALERT_SEVERITY:
+                continue
+        cand["id"] = aid
+        return cand
+    # fallback: quota live sul pick dell'id
+    odd, line = _odds_for_pick(row, pick)
+    if odd is None:
+        return None
+    label = pick
+    family = "ou25_over"
+    if pick.upper().startswith("CORN"):
+        family = "corners_over"
+        label = f"Corner Over {line:g}" if line is not None else pick
+    elif pick.upper().startswith("CARD"):
+        family = "cards_over"
+        label = f"Card Over {line:g}" if line is not None else pick
+    elif pick.upper().startswith("O"):
+        label = "Over 2.5"
+    elif pick.upper().startswith("U"):
+        label = "Under 2.5"
+        family = "ou25_under"
+    day = str(row.get("date") or meta["date"])[:10]
+    return {
+        "date": day,
+        "home": str(row.get("home") or ""),
+        "away": str(row.get("away") or ""),
+        "league": row.get("league") or "",
+        "pick": pick,
+        "pick_label": label,
+        "family": family,
+        "odds": round(float(odd), 3),
+        "line": line,
+        "p_fair": None,
+        "ev": None,
+        "severity": None,
+        "playability": MIN_ALERT_SCORE,
+        "title": title or None,
+        "id": aid,
+        "match_key": _face_key(day, str(row.get("home") or ""), str(row.get("away") or "")),
+    }
+
+
+def backfill_ritardi_freezes_from_sent(
+    upcoming: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Congela ritardi già in telegram_alerts_sent ma assenti dal journal (quote attuali)."""
+    if not SENT_PATH.is_file():
+        return {"ok": True, "added": 0, "skipped": 0, "missing": 0, "n_journal": len(_load_journal())}
+    try:
+        sent_raw = json.loads(SENT_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"ok": False, "error": "sent unreadable", "added": 0}
+    if isinstance(sent_raw, list):
+        sent = {str(x): _now() for x in sent_raw}
+    elif isinstance(sent_raw, dict):
+        sent = {str(k): str(v) for k, v in sent_raw.items()}
+    else:
+        return {"ok": False, "error": "sent bad shape", "added": 0}
+
+    rows = upcoming
+    if rows is None:
+        rows = []
+        if UPCOMING_PATH.is_file():
+            try:
+                raw = json.loads(UPCOMING_PATH.read_text(encoding="utf-8"))
+                rows = raw if isinstance(raw, list) else []
+            except Exception:
+                rows = []
+    by_face: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        day = str(r.get("date") or "")[:10]
+        home = str(r.get("home") or "").strip().lower()
+        away = str(r.get("away") or "").strip().lower()
+        if day and home and away:
+            by_face[f"{day}|{home}|{away}"] = r
+
+    data = _load_journal()
+    added = skipped = missing = patched = 0
+    for aid, when in sent.items():
+        meta = _parse_sent_ritardi_id(aid)
+        if not meta:
+            continue
+        if aid in data and data[aid].get("alert_frozen_at"):
+            # garantisci odds_frozen su entry legacy
+            ent = data[aid]
+            if _f(ent.get("odds_frozen")) is None and _f(ent.get("odds")) is not None:
+                ent["odds_frozen"] = _f(ent.get("odds"))
+                data[aid] = ent
+                patched += 1
+            skipped += 1
+            continue
+        face = f"{meta['date']}|{meta['home_key']}|{meta['away_key']}"
+        row = by_face.get(face)
+        if not row:
+            missing += 1
+            continue
+        play = _play_for_sent_id(aid, row, meta)
+        if not play or _f(play.get("odds")) is None:
+            missing += 1
+            continue
+        frozen_at = when
+        if "T" not in str(frozen_at):
+            frozen_at = _now()
+        else:
+            # normalizza a Z
+            frozen_at = str(frozen_at).replace("+00:00", "Z")
+        snap = snapshot_from_play(play, frozen_at=frozen_at, force_id=aid)
+        if not snap:
+            missing += 1
+            continue
+        data[aid] = snap
+        added += 1
+    # anche entry già in journal ma senza odds_frozen (fuori da sent match)
+    for key, ent in list(data.items()):
+        if _f(ent.get("odds_frozen")) is None and _f(ent.get("odds")) is not None:
+            ent["odds_frozen"] = _f(ent.get("odds"))
+            data[key] = ent
+            patched += 1
+    if added or patched:
+        _save_journal(data)
+    return {
+        "ok": True,
+        "added": added,
+        "skipped": skipped,
+        "missing": missing,
+        "patched": patched,
+        "n_journal": len(data),
+        "path": str(JOURNAL),
+    }
 
 
 def _corners_from_hist(hist: dict[str, Any]) -> tuple[int | None, int | None]:
@@ -465,7 +674,7 @@ def _corners_from_hist(hist: dict[str, Any]) -> tuple[int | None, int | None]:
 
 def _settle_entry(entry: dict[str, Any], hist: dict[str, Any]) -> dict[str, Any] | None:
     pick = str(entry.get("pick") or "").upper()
-    odds = _f(entry.get("odds"))
+    odds = _frozen_odds(entry)
     try:
         hg = int(hist["home_goals"])
         ag = int(hist["away_goals"])
@@ -539,6 +748,11 @@ def _settle_entry(entry: dict[str, Any], hist: dict[str, Any]) -> dict[str, Any]
         pnl = -1.0
 
     out = dict(entry)
+    # non ricalcolare/aggiornare quote: restano quelle freezate alla notifica
+    if _f(out.get("odds_frozen")) is None and odds is not None:
+        out["odds_frozen"] = odds
+    if odds is not None:
+        out["odds"] = odds
     out.update(
         {
             "home_goals": hg,
@@ -596,9 +810,15 @@ def settle_ritardi_journal() -> dict[str, Any]:
 
 
 def _subset_roi(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Hit + ROI unitario sulle quote freeze (push esclusi se hit is None)."""
     hits = sum(1 for r in rows if int(r.get("hit") or 0) == 1)
     n = len(rows)
-    op = [float(r["pnl"]) for r in rows if _f(r.get("pnl")) is not None and _f(r.get("odds")) and float(r["odds"]) > 1.01]
+    op: list[float] = []
+    for r in rows:
+        pnl = _f(r.get("pnl"))
+        od = _frozen_odds(r)
+        if pnl is not None and od is not None and od > 1.01:
+            op.append(float(pnl))
     return {
         "n": n,
         "hits": hits,
@@ -609,30 +829,12 @@ def _subset_roi(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _is_strong_reco(row: dict[str, Any]) -> bool:
-    """Solo i consigli 'succulenti' (stessa barra del Telegram)."""
-    try:
-        score = int(row.get("playability") or 0)
-    except (TypeError, ValueError):
-        score = 0
-    sev = _f(row.get("severity")) or 0.0
-    ev = _f(row.get("ev")) or 0.0
-    if score < MIN_ALERT_SCORE:
-        return False
-    if sev < MIN_ALERT_SEVERITY:
-        return False
-    # EV può mancare su freeze vecchi: in quel caso basta score+severity
-    if row.get("ev") is not None and ev < MIN_ALERT_EV:
-        return False
-    return True
-
-
 def ritardi_alert_paper_report() -> dict[str, Any]:
-    """ROI journal: solo ritardi forti consigliati (Telegram / giocab.≥8)."""
+    """ROI journal Telegram ritardi: campione = freeze inviati, PnL su quote freezate."""
+    backfill = backfill_ritardi_freezes_from_sent()
     settle_info = settle_ritardi_journal()
     data = _load_journal()
-    all_rows = list(data.values())
-    rows = [r for r in all_rows if _is_strong_reco(r)]
+    rows = list(data.values())
     pending = [r for r in rows if not r.get("settled_at")]
     settled = [r for r in rows if r.get("settled_at") and r.get("hit") is not None]
     overall = _subset_roi(settled)
@@ -644,15 +846,36 @@ def ritardi_alert_paper_report() -> dict[str, Any]:
             **_subset_roi(subset),
             "pending": sum(1 for r in pending if int(r.get("playability") or 0) == v),
         }
+
+    def _row_view(r: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "date": r.get("date"),
+            "home": r.get("home"),
+            "away": r.get("away"),
+            "league": r.get("league"),
+            "pick": r.get("pick"),
+            "pick_label": r.get("pick_label") or r.get("pick"),
+            "odds": _frozen_odds(r),
+            "odds_frozen": _frozen_odds(r),
+            "playability": r.get("playability"),
+            "title": r.get("title"),
+            "hit": r.get("hit"),
+            "push": r.get("push"),
+            "pnl": r.get("pnl"),
+            "settled_at": r.get("settled_at"),
+            "alert_frozen_at": r.get("alert_frozen_at"),
+        }
+
     live = list_ritardi_playable(strong_only=True, compute_missing=False)
     return {
         "ok": True,
-        "roi_mode": "ritardi_alert_strong_only",
+        "roi_mode": "ritardi_telegram_freeze_odds",
         "min_playability": MIN_ALERT_SCORE,
         "min_severity": MIN_ALERT_SEVERITY,
         "min_ev": MIN_ALERT_EV,
+        "backfill": backfill,
         "settle": settle_info,
-        "n_journal": len(all_rows),
+        "n_journal": len(rows),
         "n_journal_strong": len(rows),
         "n": overall["n"],
         "n_pending": len(pending),
@@ -661,16 +884,23 @@ def ritardi_alert_paper_report() -> dict[str, Any]:
         "odds_roi": overall["odds_roi"],
         "odds_pnl": overall["odds_pnl"],
         "by_vote": by_score,
-        "pending_rows": sorted(pending, key=lambda r: str(r.get("date") or ""), reverse=True)[:30],
-        "recent": sorted(settled, key=lambda r: str(r.get("settled_at") or ""), reverse=True)[:15],
+        "pending_rows": sorted(
+            (_row_view(r) for r in pending),
+            key=lambda r: str(r.get("date") or ""),
+            reverse=True,
+        )[:30],
+        "recent": sorted(
+            (_row_view(r) for r in settled),
+            key=lambda r: str(r.get("settled_at") or ""),
+            reverse=True,
+        )[:15],
         "live_playable": live,
         "note": (
-            f"ROI solo sui ritardi forti consigliati (giocab.≥{MIN_ALERT_SCORE}, "
-            f"severity≥{MIN_ALERT_SEVERITY:.0%}, EV≥{MIN_ALERT_EV:.0%}) — gli stessi del Telegram. "
-            "Indipendente dal GIOCA freeze."
+            "ROI unitario sulle quote freeze Telegram (journal ritardi). "
+            "Campione = solo alert inviato e congelato; indipendente dal GIOCA."
             if rows
             else (
-                f"Nessun ritardo forte in journal: partono dal prossimo Telegram "
+                f"Nessun ritardo freeze in journal: partono dal prossimo Telegram "
                 f"(giocab.≥{MIN_ALERT_SCORE}, max {MAX_TELEGRAM_PER_RUN}/run)."
             )
         ),

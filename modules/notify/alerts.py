@@ -696,6 +696,23 @@ def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False
                     ritardi_freeze = {"ok": False, "error": str(exc)}
                     print(f"telegram freeze ritardi skip: {exc}")
 
+    # Allinea journal anche se freeze post-send è saltato (sent già popolato)
+    try:
+        from modules.advisor.ritardi_play import backfill_ritardi_freezes_from_sent
+
+        bf = backfill_ritardi_freezes_from_sent()
+        if bf.get("added"):
+            print(
+                f"telegram freeze ritardi backfill: {bf.get('added', 0)} da sent, "
+                f"journal={bf.get('n_journal', 0)}"
+            )
+            if not ritardi_freeze:
+                ritardi_freeze = bf
+            else:
+                ritardi_freeze = {**ritardi_freeze, "backfill": bf}
+    except Exception as exc:
+        print(f"telegram freeze ritardi backfill skip: {exc}")
+
     info = {
         "n_gioca": found["n_gioca"],
         "n_watch": found["n_watch"],

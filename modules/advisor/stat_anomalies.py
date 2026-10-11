@@ -23,8 +23,10 @@ MIN_SEVERITY = 0.35
 MAX_PER_MATCH = 6
 SEASON_START_N = 5
 STREAK_K = 5
-DROUGHT_M = 2
+DROUGHT_M = 3  # sotto 3 partite = rumore, non segnale
 DROUGHT_SEASON_MIN = 8
+# Bump quando cambiano soglie detector (invalida cache JSON)
+LOGIC_VERSION = 3
 
 
 def _norm(name: str) -> str:
@@ -38,9 +40,19 @@ def _clip01(x: float) -> float:
 
 
 def _is_bettable_anomaly(a: dict[str, Any]) -> bool:
-    """Esclude ritardi non scommettibili (es. xG)."""
+    """Esclude ritardi non scommettibili (es. xG) o sample troppo corto (n≤2)."""
     title = str(a.get("title") or "").lower()
     if "xg in ritardo" in title or title.endswith(": xg in ritardo"):
+        return False
+    try:
+        n = int(a.get("n") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    kind = str(a.get("kind") or "")
+    # drought / season_start: sotto 3 partite = ignora (anche cache vecchia)
+    if kind in {"rate_drought", "season_start"} and n < DROUGHT_M:
+        return False
+    if "in ritardo" in title and n and n < DROUGHT_M:
         return False
     return True
 
@@ -294,8 +306,8 @@ def _detect_season_start(team: str, games: pd.DataFrame, before: pd.Timestamp, s
     season = _season_label(before)
     cur = sub[sub["season"] == season].sort_values("date")
     n = len(cur)
-    if n < 2 or n > SEASON_START_N:
-        return out
+    if n < 3 or n > SEASON_START_N:
+        return out  # n≤2 = troppo poco, ignora
     wins = int(cur["won"].sum())
     scored = int(cur["scored"].sum())
     # baseline: win rate storica squadra (tutte le partite pre-kickoff)
@@ -661,20 +673,24 @@ def _match_key(date: str, home: str, away: str) -> str:
 
 def load_anomaly_cache() -> dict[str, Any]:
     if not CACHE_PATH.exists():
-        return {"ok": True, "matches": {}}
+        return {"ok": True, "matches": {}, "logic_version": LOGIC_VERSION}
     try:
         data = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
-            return {"ok": True, "matches": {}}
+            return {"ok": True, "matches": {}, "logic_version": LOGIC_VERSION}
         data.setdefault("matches", {})
+        if int(data.get("logic_version") or 0) != int(LOGIC_VERSION):
+            # soglie detector cambiate (es. DROUGHT_M) → scarta cache vecchia
+            return {"ok": True, "matches": {}, "logic_version": LOGIC_VERSION}
         return data
     except Exception:
-        return {"ok": True, "matches": {}}
+        return {"ok": True, "matches": {}, "logic_version": LOGIC_VERSION}
 
 
 def save_anomaly_cache(data: dict[str, Any]) -> None:
     PROCESSED.mkdir(parents=True, exist_ok=True)
     payload = dict(data)
+    payload["logic_version"] = LOGIC_VERSION
     payload["updated_at"] = pd.Timestamp.utcnow().isoformat()
     CACHE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=0), encoding="utf-8")
 
@@ -687,14 +703,23 @@ def attach_match_anomalies(
     tactical: dict[str, Any] | None = None,
     cache: dict[str, Any] | None = None,
     write_cache: bool = False,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Calcola (o riusa cache) anomalie per una partita."""
     day = str(kickoff or "")[:10]
     key = _match_key(day, home, away)
     store = cache if cache is not None else load_anomaly_cache()
+    if int(store.get("logic_version") or 0) != int(LOGIC_VERSION):
+        store["matches"] = {}
+        store["logic_version"] = LOGIC_VERSION
     matches = store.setdefault("matches", {})
     prev = matches.get(key)
-    if isinstance(prev, dict) and prev.get("items") is not None and prev.get("ready") is not None:
+    if (
+        not force
+        and isinstance(prev, dict)
+        and prev.get("items") is not None
+        and prev.get("ready") is not None
+    ):
         cleaned = sanitize_anomaly_block(prev)
         if cleaned.get("n") != (prev.get("n") if prev.get("n") is not None else len(prev.get("items") or [])):
             matches[key] = cleaned

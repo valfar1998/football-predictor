@@ -2010,7 +2010,7 @@ def _roi_total_triple() -> None:
 
     st.caption(
         "Paper ROI totali · dettagli nella tab **Paper ROI**. "
-        "Analisi = GIOCA freeze · Moneyway = Spread Raro · Ritardi = alert ritardi (indipendenti)."
+        "Analisi = GIOCA freeze · Moneyway = Spread Raro · Ritardi = Telegram ritardi (quote freeze)."
     )
     c1, c2, c3 = st.columns(3)
     # Analisi
@@ -2052,7 +2052,7 @@ def _roi_total_triple() -> None:
             "ROI ritardi",
             "n/d" if roi is None else f"{roi:+.1%}",
             delta=f"n={n} ({pend})" + (f" · hit {r.get('hit_rate'):.0%}" if r.get("hit_rate") is not None and n else ""),
-            help="Solo ritardi forti (giocab.≥8, sev≥80%, EV≥6%), stessi del Telegram — indipendenti dal GIOCA.",
+            help="Alert Telegram ritardi congelati · ROI unitario sulle quote freeze.",
         )
     else:
         c3.metric("ROI ritardi", "n/d")
@@ -2128,7 +2128,7 @@ def _render_ritardi_roi_panel(
                 "Quota": st.column_config.NumberColumn("Quota", format="%.2f"),
             },
         )
-        st.caption(f"**{len(rows)}** ritardi forti · stesso campione ROI/Telegram")
+        st.caption(f"**{len(rows)}** ritardi forti · candidati Telegram (ROI = quote freeze post-invio)")
 
 
 def _render_analisi_roi_detail() -> None:
@@ -2190,22 +2190,19 @@ def _render_ritardi_roi_detail() -> None:
     if not rep.get("ok"):
         st.caption(rep.get("error") or "Report ritardi non disponibile")
         return
-    st.subheader("ROI ritardi — solo consigli forti")
+    st.subheader("ROI ritardi — Telegram freeze")
     st.caption(rep.get("note") or "")
     n = int(rep.get("n") or 0)
     pend = int(rep.get("n_pending") or 0)
     roi = rep.get("odds_roi")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Campione forti", f"{n} ({pend})")
+    c1.metric("Campione freeze", f"{n} ({pend})")
     c2.metric(
-        "ROI @ quote",
+        "ROI @ quote freeze",
         "n/d" if roi is None else f"{roi:+.1%}",
         delta=f"hit {rep.get('hit_rate'):.0%}" if rep.get("hit_rate") is not None and n else None,
     )
-    c3.metric(
-        "Journal forti",
-        f"{int(rep.get('n_journal_strong') or 0)}/{int(rep.get('n_journal') or 0)}",
-    )
+    c3.metric("Journal freeze", f"{int(rep.get('n_journal') or 0)}")
     live = (rep.get("live_playable") or {}).get("n")
     c4.metric("Live forti", f"{int(live or 0)}")
     votes = rep.get("by_vote") or {}
@@ -2227,7 +2224,7 @@ def _render_ritardi_roi_detail() -> None:
                             "Data": r.get("date"),
                             "Partita": f"{r.get('home')} vs {r.get('away')}",
                             "Pick": r.get("pick_label") or r.get("pick"),
-                            "Quota": r.get("odds"),
+                            "Quota freeze": r.get("odds_frozen") or r.get("odds"),
                             "Giocab.": r.get("playability"),
                             "Ritardo": r.get("title"),
                         }
@@ -3394,7 +3391,7 @@ with tab_ritardi:
 with tab_roi:
     st.caption(
         "Dettaglio paper trading: **analisi** (GIOCA freeze), **moneyway** (Spread Raro), "
-        "**ritardi** (alert indipendenti severity+quota). In home restano solo i tre ROI totali."
+        "**ritardi** (Telegram freeze · ROI @ quote congelate). In home restano solo i tre ROI totali."
     )
     _render_analisi_roi_detail()
     st.divider()
