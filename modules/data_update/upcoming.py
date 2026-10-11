@@ -504,6 +504,7 @@ def _row_after_covered_advise(
             "markets": _slim_markets_from_advice(advice),
             "prediction": prediction,
             "data_signal": prediction.get("data_signal"),
+            "stat_anomalies": prediction.get("stat_anomalies"),
             "source_agreement": advice.get("source_agreement") or play.get("source_agreement"),
             "prob_intervals": advice.get("prob_intervals") or play.get("prob_intervals"),
             "residual_ev": advice.get("residual_ev") or play.get("residual_ev"),
@@ -706,6 +707,17 @@ def refresh_upcoming_odds(*, on_progress=None, archive: bool = True) -> dict:
             n_skip += 1
         if n and (i % 50 == 0 or i + 1 == n):
             emit(on_progress, 0.05 + 0.9 * ((i + 1) / n), f"Value {i + 1}/{n}…")
+
+    try:
+        from modules.advisor.stat_anomalies import enrich_upcoming_anomalies
+
+        an_info = enrich_upcoming_anomalies(out, write_cache=True, days_ahead=21)
+        print(
+            f"ritardi/anomalie: {an_info.get('n_with_anomalies', 0)}/{an_info.get('n_rows', 0)} partite",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"skip ritardi/anomalie: {exc}", flush=True)
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     freeze_info = _overlay_telegram_freeze(out)
@@ -1321,6 +1333,7 @@ def build_upcoming(
                 "markets": slim_markets,
                 "prediction": prediction,
                 "data_signal": prediction.get("data_signal"),
+                "stat_anomalies": prediction.get("stat_anomalies"),
                 "source_agreement": advice.get("source_agreement") or play.get("source_agreement"),
                 "prob_intervals": advice.get("prob_intervals") or play.get("prob_intervals"),
                 "residual_ev": advice.get("residual_ev") or play.get("residual_ev"),
@@ -1338,6 +1351,17 @@ def build_upcoming(
             print(f"FotMob details top picks: {fm_info['n_enriched']}/{fm_info.get('n_candidates', 0)}")
     except Exception as exc:
         print(f"skip FotMob details top-N: {exc}")
+
+    try:
+        from modules.advisor.stat_anomalies import enrich_upcoming_anomalies
+
+        an_info = enrich_upcoming_anomalies(rows, write_cache=True, days_ahead=21)
+        print(
+            f"ritardi/anomalie: {an_info.get('n_with_anomalies', 0)}/{an_info.get('n_rows', 0)} partite",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"skip ritardi/anomalie: {exc}", flush=True)
 
     from modules.progress_report import emit
 

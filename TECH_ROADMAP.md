@@ -10,6 +10,10 @@ Allineato a `PROJECT_BRIEF_football.md`. **Aggiornato: 2026-09-15** (freeze jour
 
 **ROI moneyway (Spread Raro):** alert AsianBetSoccer ≠ analisi → journal `telegram_spread_freeze.json`; settle in `settle_pending`; frase storico ROI nella notifica; metriche home separate dal ROI GIOCA.
 
+**Ritardi / anomalie (UI):** `stat_anomalies.py` su `matches.csv` + CSV FD (falli/tiri/corner/cartellini/gol) + assenze WhoScored → scheda Analisi + tab **Ritardi settimana**. Solo metriche scommettibili (**no xG**). Solo quadro/UI — **non** entra in EV/Kelly. Fase 2: player match stats (es. falli subiti a giocatore).
+
+**Promemoria bottoni sidebar:** `button_cadence.py` + `data/processed/button_cadence.json` — ultimo click e prossimo consigliato sotto ogni download; seed iniziale “oggi” per tutti tranne Pinnacle/Betfair.
+
 **Convenzione:** dopo ogni modifica al codice, aggiornare **questo file** e `PROJECT_BRIEF_football.md`.
 
 ---
@@ -87,6 +91,8 @@ Allineato a `PROJECT_BRIEF_football.md`. **Aggiornato: 2026-09-15** (freeze jour
 
 ## Chiusi (codice / recenti)
 
+- **Paper ROI home snella:** in home solo 3 totali (analisi / moneyway / ritardi); dettagli in tab **Paper ROI**; `ritardi_paper` = cohort GIOCA freeze con anomalie pre-match.
+- **Ritardi statistici UI:** motore `stat_anomalies` (avvio stagione / streak / rate drought / assenze) + scheda Slice-inspired in Analisi + tab Ritardi settimana; hook in `build_upcoming` / refresh odds; cache `stat_anomalies.json`. EV/Kelly invariati.
 - **ROI moneyway AsianBetSoccer:** freeze `telegram_spread_freeze.json` + settle in `settle_pending`; frase storico ROI nelle notifiche Spread Raro; metriche home separate dal ROI GIOCA/analisi.
 - **UI nascondi non giocabili:** default nasconde no-bet **e** N/D/invalidi (non solo no-bet).
 - **Tipo consiglio allineato:** finish-early su tutti i gruppi (scorer lazy); pick primario = corner o miglior playable; `advice_groups`/`best_by_group` in calendario; filtro UI su pick o gruppi secondari; no_bet soft sugli esplorativi.

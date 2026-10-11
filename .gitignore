@@ -27,12 +27,16 @@ data/processed/upcoming_predictions.json
 data/processed/telegram_alerts_sent.json
 data/processed/telegram_score_freeze.json
 data/processed/telegram_spread_freeze.json
+data/processed/telegram_ritardi_freeze.json
 data/processed/telegram_stale_settle_sent.json
 data/processed/notify_refresh.log
 data/processed/notify_refresh.lock
+data/processed/button_cadence.json
 data/processed/our_history.jsonl
 data/processed/our_history.sqlite
 data/processed/our_history.sqlite-*
+data/processed/our_history.merge_tmp.sqlite
+data/processed/our_history.sqlite.bak
 storico_giocate.csv
 storico_successo_mensile.csv
 storico_successo_mensile_largo.csv

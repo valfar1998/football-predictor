@@ -60,7 +60,7 @@ GROUP_LABEL = {
 st.markdown(
     """
     <style>
-      .block-container { padding-top: 1.2rem; max-width: 1280px; }
+      .block-container { padding-top: 1.0rem; max-width: 1280px; }
       .pick-code {
         font-size: 3.2rem; font-weight: 800; line-height: 1;
         letter-spacing: 0.04em; margin: 0;
@@ -68,9 +68,97 @@ st.markdown(
       .pick-name { font-size: 1.05rem; opacity: 0.85; margin-top: 0.25rem; }
       .score-wrap { display: flex; gap: 6px; margin: 0.8rem 0 0.3rem; }
       .score-cell { width: 20px; height: 9px; border-radius: 2px; background: rgba(250,250,250,0.12); }
-      .score-cell.on-hi { background: #3dd68c; }
-      .score-cell.on-mid { background: #e6c35c; }
-      .score-cell.on-lo { background: #e06c75; }
+      .score-cell.on-hi { background: #34d399; }
+      .score-cell.on-mid { background: #fbbf24; }
+      .score-cell.on-lo { background: #f87171; }
+      /* Sheet / ritardi: prodotto, non tabella grezza */
+      .fp-sheet {
+        border: 1px solid #243047; border-radius: 16px; overflow: hidden;
+        background: linear-gradient(165deg, #152038 0%, #0d1526 55%, #0b1220 100%);
+        margin: 0.25rem 0 1rem 0;
+      }
+      .fp-sheet-head {
+        padding: 1.1rem 1.25rem 0.85rem;
+        border-bottom: 1px solid #243047;
+        background: radial-gradient(120% 80% at 10% 0%, rgba(45,212,191,0.14), transparent 55%);
+      }
+      .fp-sheet-title {
+        margin: 0; font-size: 1.65rem; font-weight: 800; letter-spacing: -0.03em;
+        color: #f1f5f9; line-height: 1.15;
+      }
+      .fp-sheet-meta { margin: 0.35rem 0 0; color: #94a3b8; font-size: 0.9rem; }
+      .fp-chip {
+        display: inline-block; margin: 0.15rem 0.35rem 0 0; padding: 0.18rem 0.55rem;
+        border-radius: 999px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em;
+        background: rgba(45,212,191,0.14); color: #5eead4; border: 1px solid rgba(45,212,191,0.28);
+      }
+      .fp-chip.warn { background: rgba(251,146,60,0.14); color: #fdba74; border-color: rgba(251,146,60,0.3); }
+      .fp-grid {
+        display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0;
+      }
+      @media (max-width: 900px) {
+        .fp-grid { grid-template-columns: 1fr; }
+      }
+      .fp-panel {
+        padding: 1rem 1.15rem 1.15rem; border-right: 1px solid #243047;
+        min-height: 220px;
+      }
+      .fp-panel:last-child { border-right: none; }
+      .fp-panel h4 {
+        margin: 0 0 0.75rem; font-size: 0.72rem; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.08em; color: #64748b;
+      }
+      .fp-probs { display: flex; gap: 0.55rem; margin-bottom: 0.75rem; }
+      .fp-prob {
+        flex: 1; text-align: center; padding: 0.65rem 0.3rem;
+        border-radius: 12px; background: #10182a; border: 1px solid #243047;
+      }
+      .fp-prob.hot { border-color: rgba(45,212,191,0.55); background: rgba(45,212,191,0.08); }
+      .fp-prob .lab { display: block; font-size: 0.7rem; color: #94a3b8; font-weight: 600; }
+      .fp-prob .val { display: block; font-size: 1.35rem; font-weight: 800; color: #f8fafc; margin-top: 0.15rem; }
+      .fp-bar {
+        height: 6px; border-radius: 99px; background: #1e293b; overflow: hidden; margin: 0.35rem 0 0.85rem;
+      }
+      .fp-bar > span { display: block; height: 100%; background: linear-gradient(90deg, #2dd4bf, #38bdf8); }
+      .fp-stat-row {
+        display: flex; justify-content: space-between; align-items: baseline;
+        padding: 0.4rem 0; border-bottom: 1px solid rgba(36,48,71,0.85);
+        font-size: 0.92rem;
+      }
+      .fp-stat-row span { color: #94a3b8; }
+      .fp-stat-row strong { color: #f1f5f9; font-weight: 700; }
+      .fp-score {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 0.4rem 0.55rem; margin: 0.3rem 0; border-radius: 10px;
+        background: #10182a; border: 1px solid #243047; font-size: 0.88rem;
+      }
+      .fp-score strong { color: #e2e8f0; }
+      .fp-anom {
+        padding: 0.55rem 0.65rem; margin: 0.4rem 0; border-radius: 12px;
+        background: #10182a; border: 1px solid #243047; border-left: 3px solid #2dd4bf;
+      }
+      .fp-anom.hi { border-left-color: #fb923c; }
+      .fp-anom .t { margin: 0; font-size: 0.88rem; font-weight: 700; color: #f1f5f9; }
+      .fp-anom .d { margin: 0.2rem 0 0; font-size: 0.78rem; color: #94a3b8; line-height: 1.35; }
+      .fp-anom .tag {
+        display: inline-block; font-size: 0.65rem; font-weight: 700; color: #5eead4;
+        margin-bottom: 0.2rem; letter-spacing: 0.04em; text-transform: uppercase;
+      }
+      .fp-empty { color: #64748b; font-size: 0.88rem; margin: 0.4rem 0; }
+      .fp-rit-card {
+        border: 1px solid #243047; border-radius: 14px; padding: 0.9rem 1rem;
+        background: linear-gradient(160deg, #152038, #0d1526);
+        margin: 0 0 0.65rem 0;
+      }
+      .fp-rit-card .hdr {
+        display: flex; justify-content: space-between; gap: 0.75rem; align-items: flex-start;
+      }
+      .fp-rit-card .match { margin: 0; font-size: 1.05rem; font-weight: 800; color: #f1f5f9; }
+      .fp-rit-card .meta { margin: 0.2rem 0 0; color: #94a3b8; font-size: 0.8rem; }
+      .fp-sev {
+        flex-shrink: 0; font-size: 0.78rem; font-weight: 800; padding: 0.25rem 0.55rem;
+        border-radius: 999px; background: rgba(251,146,60,0.15); color: #fdba74;
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -431,6 +519,603 @@ def _render_sportly_sim(sim: dict | None, *, home: str = "Casa", away: str = "Tr
                 )
 
 
+def _pct_label(p: float | None) -> str:
+    if p is None:
+        return "—"
+    try:
+        return f"{float(p):.0%}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _resolve_stat_anomalies(
+    pred: dict | None,
+    calendar_row: dict | None = None,
+    *,
+    home: str | None = None,
+    away: str | None = None,
+    match_date: str | None = None,
+) -> dict:
+    """Ritardi da riga calendario / prediction, oppure calcolo on-demand."""
+    from modules.advisor.stat_anomalies import sanitize_anomaly_block
+
+    for src in (calendar_row, pred):
+        if isinstance(src, dict):
+            block = src.get("stat_anomalies")
+            if isinstance(block, dict) and (block.get("items") is not None or block.get("ready") is not None):
+                return sanitize_anomaly_block(block)
+            nested = src.get("prediction") if isinstance(src.get("prediction"), dict) else None
+            if nested and isinstance(nested.get("stat_anomalies"), dict):
+                return sanitize_anomaly_block(nested["stat_anomalies"])
+    h = home or (pred or {}).get("home") or (calendar_row or {}).get("home")
+    a = away or (pred or {}).get("away") or (calendar_row or {}).get("away")
+    day = match_date or (pred or {}).get("date") or (calendar_row or {}).get("date")
+    if not h or not a:
+        return {"ready": False, "items": [], "n": 0}
+    try:
+        from modules.advisor.stat_anomalies import match_anomalies
+
+        tac = (pred or {}).get("tactical") if isinstance(pred, dict) else None
+        return match_anomalies(
+            str(h),
+            str(a),
+            str(day)[:10] if day else None,
+            tactical=tac if isinstance(tac, dict) else None,
+        )
+    except Exception as exc:
+        return {"ready": False, "items": [], "n": 0, "error": str(exc)}
+
+
+def _row_anomaly_bits(row: dict | None) -> tuple[int, float | None, str]:
+    """(n, max_severity, top_title) da riga calendario."""
+    if not isinstance(row, dict):
+        return 0, None, ""
+    block = row.get("stat_anomalies")
+    if not isinstance(block, dict):
+        pred = row.get("prediction") if isinstance(row.get("prediction"), dict) else {}
+        block = pred.get("stat_anomalies") if isinstance(pred, dict) else None
+    if not isinstance(block, dict):
+        return 0, None, ""
+    try:
+        from modules.advisor.stat_anomalies import sanitize_anomaly_block
+
+        block = sanitize_anomaly_block(block)
+    except Exception:
+        pass
+    items = list(block.get("items") or [])
+    sev = block.get("max_severity")
+    if sev is None and items:
+        try:
+            sev = max(float(a.get("severity") or 0) for a in items)
+        except (TypeError, ValueError):
+            sev = None
+    title = str((items[0] or {}).get("title") or "") if items else ""
+    return len(items), (float(sev) if sev is not None else None), title
+
+
+def _enrich_df_anomalies(view: pd.DataFrame, upcoming_rows: list[dict]) -> pd.DataFrame:
+    """Aggiunge colonne Ritardi n / Severity / Top sulla vista calendario."""
+    out = view.copy()
+    by_key = {
+        (str(u.get("date")), str(u.get("home")), str(u.get("away"))): u
+        for u in upcoming_rows
+        if isinstance(u, dict)
+    }
+    ns, sevs, tops = [], [], []
+    for _, r in out.iterrows():
+        raw = by_key.get((str(r.get("date")), str(r.get("home")), str(r.get("away"))))
+        n, sev, top = _row_anomaly_bits(raw)
+        # fallback: colonna già presente nel df
+        if n == 0 and "stat_anomalies" in out.columns:
+            n, sev, top = _row_anomaly_bits({"stat_anomalies": r.get("stat_anomalies")})
+        ns.append(n)
+        sevs.append(sev)
+        tops.append(top)
+    out["anom_n"] = ns
+    out["anom_sev"] = sevs
+    out["anom_top"] = tops
+    return out
+
+
+def _esc(s: object) -> str:
+    from html import escape
+
+    return escape(str(s if s is not None else ""), quote=True)
+
+
+def _pct_num(p: object) -> float | None:
+    try:
+        if p is None:
+            return None
+        v = float(p)
+        if v > 1.5:  # già in percento
+            v = v / 100.0
+        return max(0.0, min(1.0, v))
+    except (TypeError, ValueError):
+        return None
+
+
+def _render_match_sheet(
+    advice: dict,
+    pred: dict | None = None,
+    *,
+    calendar_row: dict | None = None,
+) -> None:
+    """Scheda visuale: 3 pannelli previsioni / stats / ritardi (non EV/Kelly)."""
+    pred = pred if isinstance(pred, dict) else {}
+    row = calendar_row if isinstance(calendar_row, dict) else {}
+    mc = advice.get("montecarlo") or pred.get("montecarlo") or {}
+    if not isinstance(mc, dict):
+        mc = {}
+    ml = pred.get("model_probabilities") or {}
+    p1 = mc.get("home_win") if mc.get("home_win") is not None else (
+        ml.get("home_win") if ml.get("home_win") is not None else row.get("p_home")
+    )
+    px = mc.get("draw") if mc.get("draw") is not None else (
+        ml.get("draw") if ml.get("draw") is not None else row.get("p_draw")
+    )
+    p2 = mc.get("away_win") if mc.get("away_win") is not None else (
+        ml.get("away_win") if ml.get("away_win") is not None else row.get("p_away")
+    )
+    scores = list(advice.get("most_likely_scores") or mc.get("most_likely_scores") or [])[:3]
+    xg = advice.get("expected_goals") or pred.get("expected_goals") or {}
+    lam_h = mc.get("lambda_home") if mc.get("lambda_home") is not None else xg.get("home")
+    lam_a = mc.get("lambda_away") if mc.get("lambda_away") is not None else xg.get("away")
+    sim = advice.get("sportly_sim") or pred.get("sportly_sim") or {}
+    shots = (sim or {}).get("shots") or {}
+    sh = shots.get("home_n")
+    sa = shots.get("away_n")
+    lam_shots = mc.get("lambda_shots")
+    lam_corners = mc.get("lambda_corners")
+    home = str(advice.get("home") or pred.get("home") or row.get("home") or "Casa")
+    away = str(advice.get("away") or pred.get("away") or row.get("away") or "Trasferta")
+    day = str(pred.get("date") or row.get("date") or "")[:10]
+    league = str(pred.get("league") or row.get("league") or "")
+    time_s = str(row.get("time") or "").strip()
+    if time_s in {"", "nan", "None"}:
+        time_s = ""
+
+    n1, nx, n2 = _pct_num(p1), _pct_num(px), _pct_num(p2)
+    outcome = "—"
+    hot = None
+    if n1 is not None and nx is not None and n2 is not None:
+        triples = [("1", n1), ("X", nx), ("2", n2)]
+        triples.sort(key=lambda t: -t[1])
+        outcome, hot = triples[0][0], triples[0][0]
+
+    def prob_box(lab: str, val: float | None) -> str:
+        cls = "fp-prob hot" if hot == lab and val is not None else "fp-prob"
+        txt = "—" if val is None else f"{val:.0%}"
+        return f'<div class="{cls}"><span class="lab">{lab}</span><span class="val">{txt}</span></div>'
+
+    scores_html = ""
+    for s in scores:
+        code = s.get("score") or s.get("code") or "?"
+        pr = _pct_num(s.get("prob") if s.get("prob") is not None else s.get("probability"))
+        bar = int(round((pr or 0) * 100))
+        scores_html += (
+            f'<div class="fp-score"><strong>{_esc(code)}</strong>'
+            f"<span>{_esc(_pct_label(pr))}</span></div>"
+            f'<div class="fp-bar"><span style="width:{bar}%"></span></div>'
+        )
+    if not scores_html:
+        scores_html = '<p class="fp-empty">Risultati esatti non disponibili</p>'
+
+    def fmt_pair(a, b) -> str:
+        if a is None and b is None:
+            return "—"
+        return f"{a if a is not None else '—'} – {b if b is not None else '—'}"
+
+    tiri = fmt_pair(sh, sa) if (sh is not None or sa is not None) else (
+        f"{float(lam_shots):.1f} tot." if lam_shots is not None else "—"
+    )
+    corners = f"{float(lam_corners):.1f}" if lam_corners is not None else "—"
+    gol = fmt_pair(
+        round(float(lam_h), 2) if lam_h is not None else None,
+        round(float(lam_a), 2) if lam_a is not None else None,
+    )
+
+    block = _resolve_stat_anomalies(
+        pred,
+        calendar_row,
+        home=home,
+        away=away,
+        match_date=day or None,
+    )
+    items = list(block.get("items") or [])
+    kinds = {"season_start": "Avvio", "streak": "Streak", "rate_drought": "Rate", "absence": "Assenze"}
+    anom_html = ""
+    for a in items[:5]:
+        k = kinds.get(str(a.get("kind") or ""), str(a.get("kind") or "?"))
+        sev = a.get("severity")
+        sev_s = f"{float(sev):.0%}" if isinstance(sev, (int, float)) else "—"
+        hi = " hi" if isinstance(sev, (int, float)) and float(sev) >= 0.7 else ""
+        anom_html += (
+            f'<div class="fp-anom{hi}"><div class="tag">{_esc(k)} · {_esc(sev_s)}</div>'
+            f'<p class="t">{_esc(a.get("title") or "—")}</p>'
+            f'<p class="d">{_esc(a.get("detail") or "")}</p></div>'
+        )
+    if not anom_html:
+        anom_html = f'<p class="fp-empty">{_esc(block.get("error") or "Nessuna anomalia rilevante")}</p>'
+
+    act = row.get("action") or (advice.get("play") or {}).get("action")
+    pick = row.get("pick") or (advice.get("play") or {}).get("code")
+    chips = ""
+    if act:
+        warn = " warn" if act in {"no_bet", "n/d", "invalido"} else ""
+        chips += f'<span class="fp-chip{warn}">{_esc(act)}</span>'
+    if pick:
+        chips += f'<span class="fp-chip">pick {_esc(pick)}</span>'
+    chips += f'<span class="fp-chip">esito { _esc(outcome) }</span>'
+    meta = " · ".join(b for b in (day, time_s, league) if b)
+
+    html = f"""
+<div class="fp-sheet">
+  <div class="fp-sheet-head">
+    <p class="fp-sheet-title">{_esc(home)} vs {_esc(away)}</p>
+    <p class="fp-sheet-meta">{_esc(meta)}</p>
+    <div>{chips}</div>
+  </div>
+  <div class="fp-grid">
+    <div class="fp-panel">
+      <h4>Previsioni</h4>
+      <div class="fp-probs">{prob_box("1", n1)}{prob_box("X", nx)}{prob_box("2", n2)}</div>
+      <p class="fp-empty">Top risultati esatti (prob. assolute)</p>
+      {scores_html}
+    </div>
+    <div class="fp-panel">
+      <h4>Stats previste</h4>
+      <div class="fp-stat-row"><span>Gol attesi</span><strong>{_esc(gol)}</strong></div>
+      <div class="fp-stat-row"><span>Tiri attesi</span><strong>{_esc(tiri)}</strong></div>
+      <div class="fp-stat-row"><span>Corner attesi</span><strong>{_esc(corners)}</strong></div>
+      <p class="fp-empty" style="margin-top:0.75rem">Solo modello/MC · non EV/Kelly</p>
+    </div>
+    <div class="fp-panel">
+      <h4>Ritardi / anomalie</h4>
+      {anom_html}
+    </div>
+  </div>
+</div>
+"""
+    st.html(html)
+
+
+def _render_row_sheet(row: dict | None, *, compact: bool = False) -> None:
+    """Scheda da riga calendario (senza rieseguire advise)."""
+    if not isinstance(row, dict):
+        st.caption("Nessuna partita selezionata.")
+        return
+    pred = row.get("prediction") if isinstance(row.get("prediction"), dict) else {}
+    if not pred and not row.get("p_home") and not row.get("stat_anomalies"):
+        st.caption("Partita senza predizione: aggiorna il calendario.")
+        return
+    advice = {
+        "home": row.get("home"),
+        "away": row.get("away"),
+        "match": f"{row.get('home')} vs {row.get('away')}",
+        "montecarlo": (pred or {}).get("montecarlo") or {},
+        "expected_goals": (pred or {}).get("expected_goals") or {},
+        "most_likely_scores": ((pred or {}).get("montecarlo") or {}).get("most_likely_scores") or [],
+        "sportly_sim": (pred or {}).get("sportly_sim"),
+        "play": {
+            "action": row.get("action"),
+            "code": row.get("pick"),
+            "name": row.get("pick_name"),
+        },
+    }
+    if compact:
+        n, sev, top = _row_anomaly_bits(row)
+        with st.container(horizontal=True):
+            st.metric("1", _pct_label(row.get("p_home")), border=True)
+            st.metric("X", _pct_label(row.get("p_draw")), border=True)
+            st.metric("2", _pct_label(row.get("p_away")), border=True)
+            st.metric("Ritardi", str(n), delta=(f"max {sev:.0%}" if sev is not None else None), border=True)
+        if top:
+            st.caption(f"Top ritardo: {top}")
+        return
+    _render_match_sheet(advice, pred, calendar_row=row)
+
+
+def _pick_row_and_render_sheet(
+    rows: list[dict],
+    *,
+    key: str,
+    label: str = "Anteprima scheda partita",
+    limit: int = 80,
+) -> dict | None:
+    """Selectbox condiviso: scegli una riga upcoming e mostra la scheda nuova."""
+    opts: list[tuple[str, str, str]] = []
+    labels: dict[tuple[str, str, str], str] = {}
+    by_key: dict[tuple[str, str, str], dict] = {}
+    for u in rows:
+        if not isinstance(u, dict):
+            continue
+        k = (str(u.get("date") or ""), str(u.get("home") or ""), str(u.get("away") or ""))
+        if not k[1] or not k[2] or k in by_key:
+            continue
+        by_key[k] = u
+        n, sev, _ = _row_anomaly_bits(u)
+        act = u.get("action") or "—"
+        pick = u.get("pick") or "—"
+        rit = f" · {n} ritardi" if n else ""
+        if sev is not None and n:
+            rit += f" ({sev:.0%})"
+        labels[k] = (
+            f"{k[0]} · {u.get('league') or ''} · {k[1]} vs {k[2]} · {act} {pick}{rit}"
+        )
+        opts.append(k)
+        if len(opts) >= int(limit):
+            break
+    if not opts:
+        return None
+    chosen = st.selectbox(
+        label,
+        opts,
+        format_func=lambda k: labels.get(k, str(k)),
+        key=key,
+    )
+    raw = by_key.get(chosen) if chosen else None
+    if isinstance(raw, dict):
+        _render_row_sheet(raw)
+    return raw
+
+
+def _render_weekly_ritardi(upcoming_rows: list[dict]) -> None:
+    """Vista settimanale ritardi: card visuali + scheda, tabella in expander."""
+    st.html(
+        """
+        <div class="fp-sheet-head" style="border:1px solid #243047;border-radius:16px;margin-bottom:0.85rem;">
+          <p class="fp-sheet-title" style="font-size:1.45rem;">Ritardi della settimana</p>
+          <p class="fp-sheet-meta">Anomalie vs storico (avvio · streak · rate · assenze). Solo lettura — non tocca EV/Kelly.
+          Nel ROI ritardi entrano solo i GIOCA Telegram con severity ≥45% (sezione in home).</p>
+        </div>
+        """
+    )
+    if not upcoming_rows:
+        st.info("Nessun calendario.")
+        return
+
+    # Blocco chiaro: ritardi giocabili (indipendenti) vs resto quadro
+    roi_rows: list[dict] = []
+    try:
+        import importlib
+        from modules.advisor import ritardi_play as _rp
+
+        if not hasattr(_rp, "list_ritardi_playable"):
+            _rp = importlib.reload(_rp)
+        roi_rep = _rp.list_ritardi_playable(
+            upcoming_rows, strong_only=True, compute_missing=True
+        )
+        roi_rows = list(roi_rep.get("rows") or [])
+        if roi_rows:
+            with st.container(border=True):
+                st.markdown("**Da giocare · ritardi forti (ROI)**")
+                st.caption(
+                    (roi_rep.get("note") or "Solo i più forti — stesso campione ROI/Telegram.")
+                    + " Sotto: tutte le anomalie (quadro)."
+                )
+                st.dataframe(
+                    pd.DataFrame(
+                        [
+                            {
+                                "Data": r.get("date"),
+                                "Partita": f"{r.get('home')} vs {r.get('away')}",
+                                "Pick": r.get("pick_label") or r.get("pick") or "—",
+                                "Quota": r.get("odds"),
+                                "Giocab.": r.get("playability"),
+                                "EV": r.get("ev"),
+                                "Severity": r.get("severity"),
+                                "Ritardo": r.get("title") or "—",
+                            }
+                            for r in roi_rows
+                        ]
+                    ),
+                    width="stretch",
+                    hide_index=True,
+                )
+        else:
+            st.caption(
+                "Nessun ritardo **giocabile** in finestra (severity+quota). "
+                "Sotto: tutte le anomalie del calendario."
+            )
+    except Exception as exc:
+        st.caption(f"Candidati ritardi giocabili n/d: {exc}")
+
+    c1, c2, c3 = st.columns([1.1, 1.1, 1])
+    with c1:
+        days = st.slider("Finestra giorni", 3, 21, 14, key="ritardi_days")
+    with c2:
+        sev_band = st.segmented_control(
+            "Severity",
+            options=["Tutti ≥0.45", "Alti ≥0.60", "Critici ≥0.75"],
+            default="Tutti ≥0.45",
+            key="ritardi_sev_band",
+        )
+    with c3:
+        kind_filter = st.segmented_control(
+            "Tipo",
+            options=["Tutti", "Avvio", "Streak", "Rate", "Assenze"],
+            default="Tutti",
+            key="ritardi_kind_band",
+        )
+    thr_map = {"Tutti ≥0.45": 0.45, "Alti ≥0.60": 0.60, "Critici ≥0.75": 0.75}
+    thr = thr_map.get(sev_band or "Tutti ≥0.45", 0.45)
+    kind_map = {
+        "Avvio": "season_start",
+        "Streak": "streak",
+        "Rate": "rate_drought",
+        "Assenze": "absence",
+    }
+    kind_code = kind_map.get(kind_filter or "Tutti")
+
+    # Campionati: default Big5 + top, resto in expander (niente muro di pill)
+    leagues = sorted({str(r.get("league") or "") for r in upcoming_rows if r.get("league")})
+    preferred = [
+        lg
+        for lg in leagues
+        if any(
+            x in lg.lower()
+            for x in (
+                "serie a",
+                "premier",
+                "la liga",
+                "laliga",
+                "bundesliga",
+                "ligue 1",
+                "championship",
+                "eredivisie",
+                "primeira",
+            )
+        )
+    ]
+    default_lg = preferred or leagues[:12]
+    with st.expander("Filtra campionati", expanded=False):
+        sel_lg = st.multiselect(
+            "Campionati",
+            leagues,
+            default=default_lg,
+            key="ritardi_leagues",
+            label_visibility="collapsed",
+        )
+    pool = [r for r in upcoming_rows if not sel_lg or str(r.get("league") or "") in sel_lg]
+
+    b1, b2 = st.columns([1, 3])
+    with b1:
+        do_recompute = st.button(
+            "Ricalcola ritardi",
+            icon=":material/refresh:",
+            key="ritardi_recompute",
+            width="stretch",
+        )
+    need_compute = not any(isinstance(r.get("stat_anomalies"), dict) for r in pool[:30])
+    if need_compute or do_recompute:
+        with st.spinner("Calcolo anomalie da storico…"):
+            try:
+                from modules.advisor.stat_anomalies import enrich_upcoming_anomalies
+
+                info = enrich_upcoming_anomalies(pool, write_cache=True, days_ahead=int(days))
+                st.caption(
+                    f"Aggiornati: {info.get('n_with_anomalies', 0)}/{info.get('n_rows', 0)} con almeno un ritardo."
+                )
+            except Exception as exc:
+                st.warning(f"Calcolo ritardi non disponibile: {exc}")
+
+    try:
+        from modules.advisor.stat_anomalies import weekly_anomaly_table
+
+        flat = weekly_anomaly_table(pool, days=int(days), min_severity=float(thr), limit=40)
+    except Exception as exc:
+        st.error(f"Errore ritardi: {exc}")
+        return
+    if kind_code:
+        flat = [r for r in flat if r.get("kind") == kind_code]
+    if not flat:
+        st.info("Nessun ritardo sopra la soglia nella finestra scelta.")
+        return
+
+    roi_keyset = {
+        (str(r.get("date")), str(r.get("home")), str(r.get("away"))) for r in roi_rows
+    }
+
+    rit_keys = {(str(r.get("date")), str(r.get("home")), str(r.get("away"))) for r in flat}
+    rit_rows = []
+    seen_r: set[tuple[str, str, str]] = set()
+    for u in pool:
+        k = (str(u.get("date")), str(u.get("home")), str(u.get("away")))
+        if k not in rit_keys or k in seen_r:
+            continue
+        seen_r.add(k)
+        rit_rows.append(u)
+    if rit_rows:
+        _pick_row_and_render_sheet(
+            rit_rows, key="ritardi_sheet_pick", label="Apri scheda partita"
+        )
+
+    kinds_lbl = {
+        "season_start": "Avvio",
+        "streak": "Streak",
+        "rate_drought": "Rate",
+        "absence": "Assenze",
+    }
+    st.markdown("##### Tutti i ritardi (quadro)")
+    cards = []
+    for r in flat[:18]:
+        sev = r.get("severity")
+        sev_s = f"{float(sev):.0%}" if isinstance(sev, (int, float)) else "—"
+        klab = kinds_lbl.get(str(r.get("kind") or ""), str(r.get("kind") or "?"))
+        is_roi = (str(r.get("date")), str(r.get("home")), str(r.get("away"))) in roi_keyset
+        roi_badge = (
+            '<span style="display:inline-block;margin-left:0.35rem;padding:0.1rem 0.4rem;'
+            'border-radius:6px;background:#14532d;color:#bbf7d0;font-size:0.7rem;font-weight:700;">ROI</span>'
+            if is_roi
+            else ""
+        )
+        meta = " · ".join(
+            b
+            for b in (
+                str(r.get("date") or "")[:10],
+                str(r.get("time") or "").strip()
+                if str(r.get("time") or "").strip() not in {"", "nan", "None"}
+                else "",
+                str(r.get("league") or ""),
+                klab,
+            )
+            if b
+        )
+        cards.append(
+            f"""
+            <div class="fp-rit-card">
+              <div class="hdr">
+                <div>
+                  <p class="match">{_esc(r.get("home"))} vs {_esc(r.get("away"))}{roi_badge}</p>
+                  <p class="meta">{_esc(meta)}</p>
+                </div>
+                <span class="fp-sev">{_esc(sev_s)}</span>
+              </div>
+              <p class="t" style="margin:0.55rem 0 0;font-weight:700;color:#f1f5f9;">{_esc(r.get("title") or "—")}</p>
+              <p class="d" style="margin:0.25rem 0 0;color:#94a3b8;font-size:0.82rem;">{_esc(r.get("detail") or "")}</p>
+            </div>
+            """
+        )
+    st.html(f'<div style="margin-top:0.5rem">{"".join(cards)}</div>')
+
+    with st.expander("Tabella completa", expanded=False):
+        for r in flat:
+            r["roi"] = (
+                "sì"
+                if (str(r.get("date")), str(r.get("home")), str(r.get("away"))) in roi_keyset
+                else ""
+            )
+        show = pd.DataFrame(flat).rename(
+            columns={
+                "date": "Data",
+                "time": "Ora",
+                "league": "Campionato",
+                "home": "Casa",
+                "away": "Trasferta",
+                "kind": "Tipo",
+                "team": "Squadra",
+                "title": "Ritardo",
+                "detail": "Dettaglio",
+                "severity": "Severity",
+                "source": "Fonte",
+                "roi": "Da ROI",
+            }
+        )
+        if "Severity" in show.columns:
+            show["Severity"] = pd.to_numeric(show["Severity"], errors="coerce")
+        st.dataframe(
+            show,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Severity": st.column_config.NumberColumn("Severity", format="%.0%%"),
+            }
+            if "Severity" in show.columns
+            else None,
+        )
+
+
 def _pp(val: float | None) -> str | None:
     if val is None:
         return None
@@ -637,6 +1322,7 @@ def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
         "date", "time", "country", "league", "home", "away",
         "pick",
         "play_rank", "action", "ev_cons", "score_unified",
+        "anom_n", "anom_sev", "anom_top",
         "pick_name", "kelly_quarter", "edge_pp",
         "quota_pick", "fair_odds", "probability", "ev_sharp", "clv",
         "score_100", "score_band", "confidence_100", "risk_100", "priority_100",
@@ -734,6 +1420,9 @@ def _prepare_calendario_show(view: pd.DataFrame) -> pd.DataFrame:
             "risk_100": "Risk",
             "bet_rec_label": "Mercato consigliato",
             "score_unified": "Voto unificato",
+            "anom_n": "Ritardi n",
+            "anom_sev": "Ritardi sev.",
+            "anom_top": "Ritardo top",
             "score": "Voto mercato",
             "meta_label": "Qualità mix",
             "meta_note": "Dettaglio mix",
@@ -803,6 +1492,48 @@ def _batch(title: str):
     from modules.progress_report import StreamlitProgress
 
     return StreamlitProgress(title)
+
+
+def _cadence_line(key: str) -> None:
+    """Caption ultimo click / prossimo consigliato per un bottone sidebar."""
+    try:
+        from modules.data_update.button_cadence import status_caption
+
+        st.caption(status_caption(key))
+    except Exception:
+        pass
+
+
+def _cadence_mark(key: str) -> None:
+    try:
+        from modules.data_update.button_cadence import mark_pressed
+
+        mark_pressed(key)
+    except Exception:
+        pass
+
+
+def _cadence_promemoria() -> None:
+    """Riquadro sintetico: cosa è in scadenza / mai premuto."""
+    try:
+        from modules.data_update.button_cadence import due_summary, ensure_seeded
+
+        ensure_seeded()
+        due = due_summary(limit=10)
+        if not due:
+            st.caption("⏱ Promemoria bottoni: tutto in regola per ora.")
+            return
+        bits = []
+        for r in due:
+            if r["state"] == "never":
+                bits.append(f"{r['label']} (mai)")
+            elif r["state"] == "due":
+                bits.append(f"{r['label']} (ora)")
+            else:
+                bits.append(f"{r['label']} ({int(r['days_left'])}g)")
+        st.caption("⏱ Da fare / in scadenza: " + " · ".join(bits))
+    except Exception:
+        pass
 
 
 def _table(markets: list[dict]) -> None:
@@ -909,6 +1640,7 @@ def render_advice(
         if live_bits:
             st.caption("Solo info (non cambia la giocata): " + " · ".join(live_bits))
     render_vote_copy(advice, key=vote_copy_key)
+    _render_match_sheet(advice, pred if isinstance(pred, dict) else {}, calendar_row=freeze_row)
     left, right = st.columns([1.15, 1])
     with left:
         st.markdown(f"**{advice['match']}**")
@@ -1256,8 +1988,275 @@ def render_advice(
     )
 
 
+def _roi_total_triple() -> None:
+    """Home: solo ROI totali Analisi / Moneyway / Ritardi."""
+    from modules.advisor.paper_stats import paper_trading_report
+    from modules.advisor.spread_paper import spread_paper_report
+    from modules.advisor.ritardi_play import ritardi_alert_paper_report
+
+    a = m = r = None
+    try:
+        a = paper_trading_report()
+    except Exception as exc:
+        st.caption(f"ROI analisi n/d: {exc}")
+    try:
+        m = spread_paper_report()
+    except Exception as exc:
+        st.caption(f"ROI moneyway n/d: {exc}")
+    try:
+        r = ritardi_alert_paper_report()
+    except Exception as exc:
+        st.caption(f"ROI ritardi n/d: {exc}")
+
+    st.caption(
+        "Paper ROI totali · dettagli nella tab **Paper ROI**. "
+        "Analisi = GIOCA freeze · Moneyway = Spread Raro · Ritardi = alert ritardi (indipendenti)."
+    )
+    c1, c2, c3 = st.columns(3)
+    # Analisi
+    if a and a.get("ok"):
+        roi = a.get("kelly_roi")
+        if roi is None:
+            roi = a.get("odds_roi")
+        n = int(a.get("n") or 0)
+        pend = int(a.get("n_pending_score") or 0)
+        c1.metric(
+            "ROI analisi",
+            "n/d" if roi is None else f"{roi:+.1%}",
+            delta=f"n={n} ({pend})" + (f" · hit {a.get('hit_rate'):.0%}" if a.get("hit_rate") is not None and n else ""),
+            help="Telegram GIOCA settled, ROI Kelly-pesato (fallback @ quote).",
+        )
+    else:
+        c1.metric("ROI analisi", "n/d")
+    # Moneyway
+    if m and m.get("ok"):
+        roi = m.get("odds_roi")
+        n = int(m.get("n") or 0)
+        pend = int(m.get("n_pending") or 0)
+        c2.metric(
+            "ROI moneyway",
+            "n/d" if roi is None else f"{roi:+.1%}",
+            delta=f"n={n} ({pend})" + (f" · hit {m.get('hit_rate'):.0%}" if m.get("hit_rate") is not None and n else ""),
+            help="Alert Telegram Spread Raro AsianBetSoccer, ROI @ quote.",
+        )
+    else:
+        c2.metric("ROI moneyway", "n/d")
+    # Ritardi
+    if r and r.get("ok"):
+        roi = r.get("kelly_roi")
+        if roi is None:
+            roi = r.get("odds_roi")
+        n = int(r.get("n") or 0)
+        pend = int(r.get("n_pending") or 0)
+        c3.metric(
+            "ROI ritardi",
+            "n/d" if roi is None else f"{roi:+.1%}",
+            delta=f"n={n} ({pend})" + (f" · hit {r.get('hit_rate'):.0%}" if r.get("hit_rate") is not None and n else ""),
+            help="Solo ritardi forti (giocab.≥8, sev≥80%, EV≥6%), stessi del Telegram — indipendenti dal GIOCA.",
+        )
+    else:
+        c3.metric("ROI ritardi", "n/d")
+
+
+def _render_ritardi_roi_panel(
+    upcoming_rows: list[dict] | None = None,
+    *,
+    secondary: bool = True,
+) -> None:
+    """Pannello ritardi giocabili (indipendenti dal freeze GIOCA)."""
+    import importlib
+
+    try:
+        from modules.advisor import ritardi_play as _rp
+
+        if not hasattr(_rp, "list_ritardi_playable"):
+            _rp = importlib.reload(_rp)
+        list_ritardi_playable = _rp.list_ritardi_playable
+        MIN_ALERT = int(getattr(_rp, "MIN_ALERT_SCORE", 8))
+    except Exception as exc:
+        st.caption(f"Ritardi giocabili n/d (import): {exc}")
+        return
+
+    try:
+        # Stesso campione Telegram/ROI: top N più forti
+        rep = list_ritardi_playable(upcoming_rows, strong_only=True, compute_missing=True)
+        rows = list(rep.get("rows") or [])
+    except Exception as exc:
+        st.caption(f"Ritardi giocabili n/d: {exc}")
+        return
+    if not rep.get("ok"):
+        return
+    if secondary:
+        st.divider()
+    with st.container(border=True):
+        st.markdown(
+            "##### Secondario · Ritardi forti (ROI / Telegram)"
+            if secondary
+            else "##### Ritardi forti (ROI / Telegram)"
+        )
+        st.caption(
+            rep.get("note")
+            or f"Solo i più forti consigliati (giocab.≥{MIN_ALERT}). Su questi si calcola il ROI."
+        )
+        if not rows:
+            st.info("Nessun ritardo forte in finestra con le soglie attuali.")
+            return
+        show = pd.DataFrame(
+            [
+                {
+                    "Data": r.get("date"),
+                    "Ora": r.get("time") or "",
+                    "Partita": f"{r.get('home')} vs {r.get('away')}",
+                    "Campionato": r.get("league") or "",
+                    "Pick": r.get("pick_label") or r.get("pick") or "—",
+                    "Quota": r.get("odds") if r.get("odds") is not None else "—",
+                    "Giocab.": r.get("playability"),
+                    "EV": r.get("ev"),
+                    "Severity": r.get("severity"),
+                    "Ritardo": r.get("title") or "—",
+                }
+                for r in rows
+            ]
+        )
+        st.dataframe(
+            show,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Severity": st.column_config.NumberColumn("Severity", format="percent"),
+                "EV": st.column_config.NumberColumn("EV", format="percent"),
+                "Quota": st.column_config.NumberColumn("Quota", format="%.2f"),
+            },
+        )
+        st.caption(f"**{len(rows)}** ritardi forti · stesso campione ROI/Telegram")
+
+
+def _render_analisi_roi_detail() -> None:
+    """Dettaglio ROI analisi (GIOCA freeze) per tab Paper ROI."""
+    from modules.advisor.paper_stats import paper_trading_report
+
+    try:
+        rep = paper_trading_report()
+    except Exception as exc:
+        st.warning(f"ROI analisi non disponibile: {exc}")
+        return
+    if not rep.get("ok"):
+        st.caption(rep.get("error") or "Report analisi non disponibile")
+        return
+    n = int(rep.get("n") or 0)
+    pend = int(rep.get("n_pending_score") or 0)
+    roi = rep.get("kelly_roi")
+    if roi is None:
+        roi = rep.get("odds_roi")
+    votes = rep.get("by_vote") or {}
+    st.subheader("ROI analisi — Telegram GIOCA (voto freeze)")
+    st.caption("Solo alert GIOCA settled · quota+Kelly freeze · ROI Kelly-pesato.")
+    hc1, hc2, hc3, hc4, hc5, hc6 = st.columns(6)
+    hc1.metric("Campione ROI", f"{n} ({pend})")
+    hc2.metric(
+        "ROI Kelly-pesato",
+        "n/d" if roi is None else f"{roi:+.1%}",
+        delta=f"hit {rep.get('hit_rate', 0):.0%}" if n else None,
+    )
+    br = rep.get("bankroll_pnl_pct")
+    stake = rep.get("stake_pct_br")
+    hc3.metric(
+        "P&L bankroll",
+        "n/d" if br is None else f"{br:+.1%}",
+        delta=None if stake is None else f"stake {stake:.1%} BR",
+        delta_color="off",
+    )
+    for col, vote in ((hc4, "8"), (hc5, "9"), (hc6, "10")):
+        vs = votes.get(vote) or {}
+        vroi = vs.get("kelly_roi")
+        if vroi is None:
+            vroi = vs.get("odds_roi")
+        col.metric(
+            f"ROI voto {vote}",
+            "n/d" if vroi is None else f"{vroi:+.1%}",
+            delta=f"n={int(vs.get('n') or 0)} ({int(vs.get('pending') or 0)})",
+        )
+
+
+def _render_ritardi_roi_detail() -> None:
+    """Dettaglio ROI ritardi: journal alert indipendenti (+ opzionale cohort GIOCA)."""
+    from modules.advisor.ritardi_play import ritardi_alert_paper_report
+
+    try:
+        rep = ritardi_alert_paper_report()
+    except Exception as exc:
+        st.warning(f"ROI ritardi non disponibile: {exc}")
+        return
+    if not rep.get("ok"):
+        st.caption(rep.get("error") or "Report ritardi non disponibile")
+        return
+    st.subheader("ROI ritardi — solo consigli forti")
+    st.caption(rep.get("note") or "")
+    n = int(rep.get("n") or 0)
+    pend = int(rep.get("n_pending") or 0)
+    roi = rep.get("odds_roi")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Campione forti", f"{n} ({pend})")
+    c2.metric(
+        "ROI @ quote",
+        "n/d" if roi is None else f"{roi:+.1%}",
+        delta=f"hit {rep.get('hit_rate'):.0%}" if rep.get("hit_rate") is not None and n else None,
+    )
+    c3.metric(
+        "Journal forti",
+        f"{int(rep.get('n_journal_strong') or 0)}/{int(rep.get('n_journal') or 0)}",
+    )
+    live = (rep.get("live_playable") or {}).get("n")
+    c4.metric("Live forti", f"{int(live or 0)}")
+    votes = rep.get("by_vote") or {}
+    cols = st.columns(3)
+    for col, vote in zip(cols, ("8", "9", "10")):
+        vs = votes.get(vote) or {}
+        col.metric(
+            f"ROI giocab. {vote}",
+            "n/d" if vs.get("odds_roi") is None else f"{vs.get('odds_roi'):+.1%}",
+            delta=f"n={int(vs.get('n') or 0)} ({int(vs.get('pending') or 0)})",
+        )
+    pending_rows = rep.get("pending_rows") or []
+    if pending_rows:
+        with st.expander(f"Pending freeze ritardi ({len(pending_rows)})", expanded=True):
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "Data": r.get("date"),
+                            "Partita": f"{r.get('home')} vs {r.get('away')}",
+                            "Pick": r.get("pick_label") or r.get("pick"),
+                            "Quota": r.get("odds"),
+                            "Giocab.": r.get("playability"),
+                            "Ritardo": r.get("title"),
+                        }
+                        for r in pending_rows
+                    ]
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+    with st.expander("Cohort legacy: GIOCA freeze ∩ ritardi (solo lettura)", expanded=False):
+        try:
+            from modules.advisor.ritardi_paper import ritardi_paper_report
+
+            legacy = ritardi_paper_report(max_scan=200)
+            st.caption(legacy.get("note") or "")
+            st.write(
+                {
+                    "n": legacy.get("n"),
+                    "odds_roi": legacy.get("odds_roi"),
+                    "kelly_roi": legacy.get("kelly_roi"),
+                    "hit_rate": legacy.get("hit_rate"),
+                }
+            )
+        except Exception as exc:
+            st.caption(f"Legacy n/d: {exc}")
+
+
 def _render_moneyway_roi_block(*, compact: bool = False) -> None:
-    """ROI alert Telegram moneyway / Spread Raro AsianBetSoccer (sempre visibile)."""
+    """ROI alert Telegram moneyway / Spread Raro AsianBetSoccer."""
     from modules.advisor.spread_paper import spread_outcome_phrase, spread_paper_report
 
     try:
@@ -1277,7 +2276,7 @@ def _render_moneyway_roi_block(*, compact: bool = False) -> None:
     votes = rep.get("by_vote") or {}
 
     if not compact:
-        st.subheader("Paper ROI (moneyway AsianBetSoccer · Spread Raro)")
+        st.subheader("ROI moneyway — AsianBetSoccer Spread Raro")
     st.caption(
         "Campione **separato** dal ROI analisi/GIOCA: solo alert Telegram **moneyway** "
         "(Spread Raro AsianBetSoccer). Settle su gol da storico; ROI @ quote unitario sul lato *Segui*."
@@ -1378,61 +2377,11 @@ st.caption(
     "**fonti extra** (quadro). Understat e meteo entrano nelle λ, non nell'EV. A sinistra basta **Aggiorna dati + modello**. "
     "Dopo alert Telegram il pick/voto/quota sono **freeze** (pending settle); il live resta solo informativo."
 )
-try:
-    from modules.advisor.paper_stats import paper_trading_report
-
-    _home_roi = paper_trading_report()
-    if _home_roi.get("ok"):
-        _hn = int(_home_roi.get("n") or 0)
-        _hp = int(_home_roi.get("n_pending_score") or 0)
-        _hroi = _home_roi.get("kelly_roi")
-        if _hroi is None:
-            _hroi = _home_roi.get("odds_roi")
-        _hvotes = _home_roi.get("by_vote") or {}
-        st.caption("ROI analisi — alert Telegram GIOCA (voto freeze)")
-        hc1, hc2, hc3, hc4, hc5, hc6 = st.columns(6)
-        hc1.metric(
-            "Campione ROI",
-            f"{_hn} ({_hp})",
-            help=(
-                "Solo alert Telegram GIOCA settled (quota+Kelly freeze). "
-                "Tra parentesi: freeze ancora in attesa di settle."
-            ),
-        )
-        hc2.metric(
-            "ROI Kelly-pesato",
-            "n/d" if _hroi is None else f"{_hroi:+.1%}",
-            delta=f"hit {_home_roi.get('hit_rate', 0):.0%}" if _hn else None,
-        )
-        _h_br_pnl = _home_roi.get("bankroll_pnl_pct")
-        _h_stake_br = _home_roi.get("stake_pct_br")
-        hc3.metric(
-            "P&L bankroll",
-            "n/d" if _h_br_pnl is None else f"{_h_br_pnl:+.1%}",
-            delta=None if _h_stake_br is None else f"stake {_h_stake_br:.1%} BR",
-            delta_color="off",
-            help=(
-                "PnL in frazione della bankroll iniziale: Σ(Kelly×ritorno). "
-                "Delta = somma stake Kelly / bankroll (BR)."
-            ),
-        )
-        for _col, _vote in ((hc4, "8"), (hc5, "9"), (hc6, "10")):
-            _vs = _hvotes.get(_vote) or {}
-            _vroi = _vs.get("kelly_roi")
-            if _vroi is None:
-                _vroi = _vs.get("odds_roi")
-            _vn = int(_vs.get("n") or 0)
-            _vp = int(_vs.get("pending") or 0)
-            _col.metric(
-                f"ROI voto {_vote}",
-                "n/d" if _vroi is None else f"{_vroi:+.1%}",
-                delta=f"n={_vn} ({_vp})" if (_vn or _vp) else "n=0",
-            )
-except Exception as _home_roi_exc:
-    st.caption(f"ROI analisi non disponibile: {_home_roi_exc}")
-
-st.caption("ROI moneyway — alert Telegram AsianBetSoccer Spread Raro (giocabilità)")
-_render_moneyway_roi_block(compact=True)
+_roi_total_triple()
+st.caption(
+    "Sotto, in tab **Calendario**: tabella principale + pannello secondario "
+    "**Ritardi da giocare (ROI)** — entrambi visibili insieme."
+)
 with st.expander("Come funziona — cosa fa ogni pezzo", expanded=False):
     st.markdown(
         """
@@ -1582,6 +2531,7 @@ with st.sidebar:
         else:
             st.success("Dati aggiornati")
             st.rerun()
+    _cadence_line("solo_quote")
     if st.button("Solo quote e calendario", width="stretch"):
         prog = _batch("Solo quote e calendario")
         try:
@@ -1590,6 +2540,7 @@ with st.sidebar:
             info = refresh_odds_pipeline(on_progress=prog)
             n = int(info.get("n_upcoming") or 0)
             prog.done(f"OK · {n} partite")
+            _cadence_mark("solo_quote")
             st.success(f"Quote e calendario aggiornati · {n} partite")
             st.rerun()
         except Exception as exc:
@@ -1598,6 +2549,7 @@ with st.sidebar:
         "Leggero: fd + Asian + **Kambi** (corner/tiri) + Pinnacle/Betfair se cache scaduta. "
         "Dopo il click i pick `CORN*` possono diventare primari. Coppe/mondiale/tipster: expander sotto."
     )
+    _cadence_promemoria()
     try:
         from modules.data_update.history import history_summary
 
@@ -1669,6 +2621,7 @@ with st.sidebar:
             st.caption("Token impostato.")
         else:
             st.caption("Senza token le coppe UEFA non entrano in calendario.")
+        _cadence_line("cups")
         if st.button("Scarica coppe", width="stretch"):
             if not org_token_configured():
                 st.error("Incolla prima il token.")
@@ -1689,6 +2642,7 @@ with st.sidebar:
                         n = info.get("n_cup_fixtures") or 0
                         comps = ", ".join(info.get("competitions") or []) or "nessuna coppa in finestra"
                         prog.done("OK")
+                        _cadence_mark("cups")
                         st.success(
                             f"Coppe: {n} match · {comps} · calendario {upcoming_n} "
                             f"(riuso predizioni dove possibile)"
@@ -1700,6 +2654,7 @@ with st.sidebar:
             "Dopo il download non rifà Monte Carlo su tutto: riusa le predizioni già in calendario "
             "e calcola solo le partite nuove."
         )
+        _cadence_line("world")
         if st.button("Scarica calendario mondiale", width="stretch"):
             prog = _batch("Calendario mondiale")
             try:
@@ -1717,6 +2672,7 @@ with st.sidebar:
                 n = int(info.get("n_world_fixtures") or 0)
                 errs = info.get("errors") or []
                 prog.done("OK")
+                _cadence_mark("world")
                 msg = f"Mondiale: {n} partite · calendario {upcoming_n}"
                 if errs:
                     msg += f" · avvisi: {len(errs)}"
@@ -1740,6 +2696,7 @@ with st.sidebar:
         if odds_api_key.strip():
             _save_pinn_key(odds_api_key.strip())
             st.caption("Chiave salvata.")
+        _cadence_line("pinnacle")
         if st.button("Scarica quote Pinnacle", width="stretch"):
             if not bool(_pinn_key()):
                 st.error("Incolla prima la chiave API.")
@@ -1757,6 +2714,7 @@ with st.sidebar:
                     refresh = refresh_upcoming_odds(on_progress=prog)
                     rem = pinn.get("remaining")
                     prog.done("OK")
+                    _cadence_mark("pinnacle")
                     st.success(
                         f"Pinnacle: {pinn.get('n_events', 0)} partite · "
                         f"chiamate rimanenti {rem if rem is not None else 'n/d'} · "
@@ -1789,6 +2747,7 @@ with st.sidebar:
         if bf_user.strip() and bf_pwd.strip():
             save_credentials(bf_user.strip(), bf_pwd.strip())
             st.caption("Credenziali salvate nel .env.")
+        _cadence_line("betfair")
         if st.button("Scarica quote Betfair", width="stretch"):
             if not login_configured():
                 st.error("Inserisci username e password Betfair, poi riprova.")
@@ -1804,6 +2763,7 @@ with st.sidebar:
                     prog(0.35, "Ricalcolo EV/Kelly (senza ML/MC)…")
                     refresh = refresh_upcoming_odds(on_progress=prog)
                     prog.done("OK")
+                    _cadence_mark("betfair")
                     st.success(
                         f"Betfair: {bf.get('n_events', 0)} partite · "
                         f"value {refresh.get('n_refreshed', 0)}/{refresh.get('n_upcoming', 0)} (leggero)"
@@ -1816,12 +2776,14 @@ with st.sidebar:
             "Entrambi aggiornano il value sul calendario esistente senza rifare Monte Carlo "
             "(per partite fd nuove: Solo quote; per coppe/mondo: expander Coppe e calendario extra)."
         )
+        _cadence_line("asian")
         if st.button("Scarica quote AsianBetSoccer", width="stretch"):
             with st.spinner("Scarico Asian + ricalcolo value (leggero)…"):
                 proc = _run_cli("--asian-odds")
             if proc.returncode != 0:
                 st.error(proc.stderr[-1500:] or proc.stdout[-1500:] or "Errore quote Asian")
             else:
+                _cadence_mark("asian")
                 st.success("Quote AsianBetSoccer aggiornate (value leggero)")
                 st.rerun()
         if st.button("Test notifica Telegram", width="stretch"):
@@ -1833,12 +2795,14 @@ with st.sidebar:
                 st.success("Ping inviato sullo stesso bot delle offerte.")
             else:
                 st.error(telegram_status())
+        _cadence_line("tipster")
         if st.button("Scarica pronostici tipster", width="stretch"):
             with st.spinner("Scarico tipster + ricalcolo value (leggero)…"):
                 proc = _run_cli("--tipsters")
             if proc.returncode != 0:
                 st.error(proc.stderr[-1500:] or proc.stdout[-1500:] or "Errore tipster")
             else:
+                _cadence_mark("tipster")
                 st.success("Tipster aggiornati (value leggero)")
                 st.rerun()
         if st.button("Calibra probabilità (backtest)", width="stretch"):
@@ -1860,8 +2824,9 @@ with st.sidebar:
     with st.expander("Contesto extra (non entra in EV)"):
         st.caption(
             "Quadro e voto. Barra % + log live: se avanza, sta lavorando; se resta fermo a lungo su un passo, "
-            "probabilmente è bloccato dalla rete/scraping."
+            "probabilmente è bloccato dalla rete/scraping. Sotto ogni bottone: ultimo click e quando ripremerlo."
         )
+        _cadence_line("fbref")
         if st.button("FBref", width="stretch"):
             prog = _batch("FBref")
             from modules.data_update.upcoming import build_upcoming
@@ -1872,8 +2837,10 @@ with st.sidebar:
             else:
                 prog.done(f"{info.get('n_teams', 0)} squadre")
                 upcoming_n = len(build_upcoming())
+                _cadence_mark("fbref")
                 st.success(f"FBref: {info.get('n_teams', 0)} squadre · calendario {upcoming_n}")
                 st.rerun()
+        _cadence_line("fd_rates")
         if st.button("FD cards/corners", width="stretch"):
             prog = _batch("FD cards/corners")
             from modules.data_update.side_rates import build_fd_side_rates
@@ -1885,8 +2852,10 @@ with st.sidebar:
             else:
                 prog.done(f"{info.get('n_teams', 0)} squadre")
                 upcoming_n = len(build_upcoming())
+                _cadence_mark("fd_rates")
                 st.success(f"FD rates: {info.get('n_teams', 0)} squadre · calendario {upcoming_n}")
                 st.rerun()
+        _cadence_line("fbref_logs")
         if st.button("FBref match logs (lento)", width="stretch"):
             prog = _batch("FBref match logs")
             from modules.data_update.fbref_context import download_fbref_match_logs
@@ -1898,11 +2867,13 @@ with st.sidebar:
             else:
                 prog.done(f"{info.get('n_teams', 0)} squadre")
                 upcoming_n = len(build_upcoming())
+                _cadence_mark("fbref_logs")
                 st.success(
                     f"Match logs: {info.get('n_teams', 0)} squadre "
                     f"(cards={info.get('has_cards')} corners={info.get('has_corners')}) · cal {upcoming_n}"
                 )
                 st.rerun()
+        _cadence_line("understat")
         if st.button("Understat xG", width="stretch"):
             prog = _batch("Understat")
             from modules.data_update.upcoming import build_upcoming
@@ -1914,8 +2885,10 @@ with st.sidebar:
                 pl = (info.get("players") or {}).get("n_players", 0)
                 prog.done(f"{info.get('n_teams', 0)} squadre")
                 upcoming_n = len(build_upcoming())
+                _cadence_mark("understat")
                 st.success(f"Understat: {info.get('n_teams', 0)} squadre, {pl} player · calendario {upcoming_n}")
                 st.rerun()
+        _cadence_line("statsbomb")
         if st.button("StatsBomb open data", width="stretch"):
             prog = _batch("StatsBomb")
             from modules.data_update.upcoming import build_upcoming
@@ -1926,10 +2899,12 @@ with st.sidebar:
             else:
                 prog.done(f"{info.get('n_teams', 0)} squadre")
                 upcoming_n = len(build_upcoming())
+                _cadence_mark("statsbomb")
                 st.success(
                     f"StatsBomb: {info.get('n_teams', 0)} squadre · calendario {upcoming_n}"
                 )
                 st.rerun()
+        _cadence_line("sofascore")
         if st.button("Sofascore classifica", width="stretch"):
             prog = _batch("Sofascore")
             from modules.data_update.upcoming import build_upcoming
@@ -1942,8 +2917,10 @@ with st.sidebar:
                 st.error(f"Sofascore: {info['error']}")
             else:
                 prog.done(f"{info.get('n_teams', 0)} squadre")
+                _cadence_mark("sofascore")
                 st.success(f"Sofascore: {info.get('n_teams', 0)} squadre · calendario {upcoming_n}")
                 st.rerun()
+        _cadence_line("fotmob")
         if st.button("FotMob (classifica + match)", width="stretch"):
             prog = _batch("FotMob")
             from modules.data_update.upcoming import build_upcoming
@@ -1957,6 +2934,7 @@ with st.sidebar:
                 upcoming_n = len(build_upcoming())
                 xg = info.get("xg") or {}
                 prog.done("OK")
+                _cadence_mark("fotmob")
                 st.success(
                     f"FotMob: {info.get('n_teams', 0)} squadre · "
                     f"{info.get('n_matches', 0)} partite · "
@@ -1964,12 +2942,15 @@ with st.sidebar:
                     f"calendario {upcoming_n}"
                 )
                 st.rerun()
+        _cadence_line("geocode")
         if st.button("Geocode stadi (batch)", width="stretch"):
             prog = _batch("Geocode")
             from modules.data_update.weather import geocode_batch_venues
 
             info = geocode_batch_venues(max_n=80, on_progress=prog)
+            _cadence_mark("geocode")
             st.write(info)
+        _cadence_line("whoscored")
         if st.button("WhoScored assenze (lento)", width="stretch"):
             prog = _batch("WhoScored")
             from modules.data_update.upcoming import build_upcoming
@@ -1983,6 +2964,7 @@ with st.sidebar:
                 st.error(f"WhoScored: {info['error']}")
             else:
                 prog.done(f"{info.get('n_missing', 0)} assenze")
+                _cadence_mark("whoscored")
                 st.success(
                     f"WhoScored: {info.get('n_missing', 0)} assenze · "
                     f"{info.get('n_games', 0)} preview · calendario {upcoming_n}"
@@ -1995,8 +2977,16 @@ upcoming = _load_upcoming_enriched(
     if (ROOT / "data" / "raw" / "asian_odds.json").exists()
     else 0.0,
 )
-tab_cal, tab_analisi, tab_mkt, tab_one, tab_eval = st.tabs(
-    ["Calendario", "Analisi partita", "Tutti i mercati", "Singola partita", "Valutazione"]
+tab_cal, tab_analisi, tab_ritardi, tab_roi, tab_mkt, tab_one, tab_eval = st.tabs(
+    [
+        "Calendario",
+        "Analisi partita",
+        "Ritardi settimana",
+        "Paper ROI",
+        "Tutti i mercati",
+        "Singola partita",
+        "Valutazione",
+    ]
 )
 
 with tab_cal:
@@ -2158,13 +3148,23 @@ with tab_cal:
         if min_rank > 0 and "movement_level" in view.columns:
             view = view[view["movement_level"].map(MOVE_RANK).fillna(0) >= min_rank]
         view = _sort_calendario(view, sort_mode)
+        view = _enrich_df_anomalies(view, upcoming if isinstance(upcoming, list) else [])
 
         st.write(f"{len(view)} partite dopo i filtri (su {len(df)})")
         st.caption(
-            "Colonne chiave dopo le squadre: **Gioca · Indice gioca · Azione · EV cons. · Voto unificato · Mercato · Kelly**. "
-            "L'**Indice gioca** (0–100) unifica tutto per l'ordinamento. "
-            "**Tipo consiglio** include anche gruppi secondari (`advice_groups`), non solo il pick primario."
+            "Colonne chiave dopo le squadre: **Gioca · Indice gioca · Azione · EV · Voto · Ritardi · Kelly**. "
+            "Scheda sotto: previsioni / stats / ritardi (non tocca EV/Kelly)."
         )
+        # Scheda nuova UI sul filtro corrente
+        cal_rows = []
+        by_fx = {
+            (str(u.get("date")), str(u.get("home")), str(u.get("away"))): u
+            for u in (upcoming if isinstance(upcoming, list) else [])
+        }
+        for _, r in view.head(80).iterrows():
+            raw = by_fx.get((str(r.get("date")), str(r.get("home")), str(r.get("away"))))
+            if isinstance(raw, dict):
+                cal_rows.append(raw)
         if hide_nbet and (n_nbet or n_nd_pre or n_inv_pre):
             st.caption(
                 f"Nascoste **{n_nbet} no-bet** ({n_nbet_uni} con voto), **{n_nd_pre} N/D**, **{n_inv_pre} invalidi**. "
@@ -2184,12 +3184,14 @@ with tab_cal:
                 f"Di cui {n_inv} pick **invalidi** (quote assenti): senza book non si calcolano "
                 "edge, EV, Kelly, quota equa, CLV."
             )
+        st.markdown("##### Principale · Calendario")
         st.dataframe(
             _prepare_calendario_show(view),
             width="stretch",
             hide_index=True,
             column_config={
                 "EV cons.": st.column_config.NumberColumn("EV cons.", format="percent"),
+                "Ritardi sev.": st.column_config.NumberColumn("Ritardi sev.", format="percent"),
                 "Edge pp": st.column_config.NumberColumn("Edge pp", format="percent"),
                 "EV sharp": st.column_config.NumberColumn("EV sharp", format="percent"),
                 "Kelly ¼": st.column_config.NumberColumn("Kelly ¼", format="percent"),
@@ -2204,6 +3206,8 @@ with tab_cal:
                 "Priorità": st.column_config.NumberColumn("Priorità", format="%.0f"),
             },
         )
+        # Secondario: ritardi GIOCA→ROI, stessa tab, sotto la tabella
+        _render_ritardi_roi_panel(upcoming if isinstance(upcoming, list) else [], secondary=True)
         # CSV: percentuali leggibili (ordinamento numerico resta sul selettore UI)
         csv_show = _prepare_calendario_show(view).copy()
         for col in ("EV cons.", "Edge pp", "EV sharp", "Kelly ¼", "CLV vs apertura", "Prob."):
@@ -2376,12 +3380,33 @@ with tab_cal:
                             hide_index=True,
                         )
 
-        # Vista volutamente tabellare: niente passaggi extra obbligatori.
+        # Scheda in fondo: tabella + ritardi ROI restano sopra
+        if cal_rows:
+            st.divider()
+            _pick_row_and_render_sheet(
+                cal_rows, key="cal_sheet_pick", label="Scheda partita (filtro corrente)"
+            )
+
+with tab_ritardi:
+    st.subheader("Ritardi della settimana")
+    _render_weekly_ritardi(upcoming if isinstance(upcoming, list) else [])
+
+with tab_roi:
+    st.caption(
+        "Dettaglio paper trading: **analisi** (GIOCA freeze), **moneyway** (Spread Raro), "
+        "**ritardi** (alert indipendenti severity+quota). In home restano solo i tre ROI totali."
+    )
+    _render_analisi_roi_detail()
+    st.divider()
+    _render_moneyway_roi_block(compact=False)
+    st.divider()
+    _render_ritardi_roi_detail()
 
 with tab_analisi:
     st.caption(
         "Scegli una partita del calendario: l'algoritmo riesegue l'analisi completa "
-        "(modello, quote, quadro fonti, Asian, tipster) e mostra cosa pensa."
+        "(modello, quote, quadro fonti, Asian, tipster) e mostra cosa pensa. "
+        "In cima: scheda previsioni / stats / ritardi (non tocca EV/Kelly)."
     )
     if not upcoming:
         st.info("Nessun calendario. Premi **Aggiorna dati + modello** nella colonna a sinistra.")
@@ -2610,6 +3635,28 @@ with tab_mkt:
         else:
             filt = filt.sort_values(["ev_num", "Voto"], ascending=False, na_position="last")
         st.write(f"{len(filt)} mercati dopo i filtri")
+        # Scheda UI sulle partite presenti nei mercati filtrati
+        if not filt.empty:
+            mkt_keys = set(
+                zip(filt["Data"].astype(str).tolist(), filt["Partita"].astype(str).tolist())
+            )
+            mkt_rows = []
+            seen_m: set[tuple[str, str, str]] = set()
+            for u in upcoming if isinstance(upcoming, list) else []:
+                partita = f"{u.get('home')} vs {u.get('away')}"
+                if (str(u.get("date")), partita) not in mkt_keys:
+                    continue
+                k = (str(u.get("date")), str(u.get("home")), str(u.get("away")))
+                if k in seen_m:
+                    continue
+                seen_m.add(k)
+                mkt_rows.append(u)
+                if len(mkt_rows) >= 80:
+                    break
+            if mkt_rows:
+                _pick_row_and_render_sheet(
+                    mkt_rows, key="mkt_sheet_pick", label="Scheda partita (mercati filtrati)"
+                )
         hide = {"group", "match_source", "prob_num", "value_num", "ev_num", "odds_real"}
         st.dataframe(
             filt.drop(columns=[c for c in hide if c in filt.columns]),
@@ -2638,6 +3685,17 @@ with tab_mkt:
                     render_vote_copy(raw_m, key="mkt_voto_copy")
 
 with tab_one:
+    st.caption(
+        "Dopo **Calcola predizione** compare la stessa scheda (previsioni / stats / ritardi) "
+        "usata in Analisi e Calendario, poi EV/Kelly."
+    )
+    if upcoming:
+        with st.expander("Anteprima da calendario (senza ricalcolare)", expanded=False):
+            _pick_row_and_render_sheet(
+                upcoming if isinstance(upcoming, list) else [],
+                key="one_sheet_pick",
+                label="Scheda da calendario",
+            )
     teams = list_known_teams() if (ROOT / "data" / "processed" / "features.csv").exists() else []
     if not teams:
         st.info("Allena prima il modello con **Aggiorna dati + modello**.")
@@ -2726,6 +3784,49 @@ with tab_one:
 with tab_eval:
     cal = load_calibration()
     summary = cal.get("backtest_summary") or {}
+
+    # --- Scheda / ritardi settimana (stesso UI delle altre tab) ---
+    st.subheader("Scheda & ritardi (calendario live)")
+    st.caption("Stessa scheda previsioni/stats/ritardi delle altre tab — non modifica il paper ROI.")
+    if upcoming:
+        try:
+            from modules.advisor.stat_anomalies import weekly_anomaly_table
+
+            _eval_flat = weekly_anomaly_table(
+                upcoming if isinstance(upcoming, list) else [],
+                days=14,
+                min_severity=0.45,
+                limit=20,
+            )
+        except Exception:
+            _eval_flat = []
+        if _eval_flat:
+            st.caption(
+                f"Top ritardi prossimi 14 gg: **{_eval_flat[0].get('title')}** "
+                f"({_eval_flat[0].get('home')} vs {_eval_flat[0].get('away')})"
+            )
+            _eval_keys = {
+                (str(r.get("date")), str(r.get("home")), str(r.get("away"))) for r in _eval_flat
+            }
+            _eval_rows = [
+                u
+                for u in (upcoming if isinstance(upcoming, list) else [])
+                if (str(u.get("date")), str(u.get("home")), str(u.get("away"))) in _eval_keys
+            ]
+            if _eval_rows:
+                _pick_row_and_render_sheet(
+                    _eval_rows[:40],
+                    key="eval_sheet_pick",
+                    label="Scheda partita (ritardi settimana)",
+                )
+        else:
+            _pick_row_and_render_sheet(
+                upcoming[:40] if isinstance(upcoming, list) else [],
+                key="eval_sheet_pick",
+                label="Scheda partita (calendario)",
+            )
+    else:
+        st.caption("Nessun calendario: aggiorna i dati per vedere la scheda qui.")
 
     # --- Paper ROI in evidenza (solo Telegram GIOCA, pesato Kelly freeze) ---
     from modules.advisor.paper_stats import paper_trading_report

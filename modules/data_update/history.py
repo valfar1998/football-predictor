@@ -3010,6 +3010,22 @@ def settle_pending(*, learn: bool = True, learn_only_if_settled: bool = False) -
     except Exception as exc:
         summary["spread_settle_error"] = str(exc)
     try:
+        from modules.advisor.ritardi_play import settle_ritardi_journal
+
+        rp = settle_ritardi_journal()
+        summary["ritardi_settle"] = {
+            "settled": rp.get("settled"),
+            "pending": rp.get("pending"),
+            "n": rp.get("n"),
+        }
+        if rp.get("settled"):
+            print(
+                f"telegram ritardi: {rp.get('settled')} chiusi, "
+                f"{rp.get('pending')} pending (journal {rp.get('n')})"
+            )
+    except Exception as exc:
+        summary["ritardi_settle_error"] = str(exc)
+    try:
         summary["plays_csv"] = export_plays_csv()
     except Exception as exc:
         summary["plays_csv_error"] = str(exc)

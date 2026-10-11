@@ -1,8 +1,10 @@
-"""Avvisi Telegram: GIOCA (voto ≥8 + action gioca), da guardare (voto ≥8 + no bet), spread Raro (giocabilità ≥8).
+"""Avvisi Telegram: GIOCA (voto ≥8 + action gioca), da guardare (voto ≥8 + no bet),
+spread Raro (giocabilità ≥8), ritardi succulenti (giocabilità ≥8, indipendenti dal freeze).
 
 Al primo invio di un alert voto (gioca/watch) il score_unified e la quota vengono
 congelati in our_history: i refresh successivi non li sovrascrivono (ROI = notifica).
 Gli alert Spread Raro congelano follow/giocabilità in telegram_spread_freeze.json (ROI dedicato).
+I ritardi giocabili congelano pick/quota in telegram_ritardi_freeze.json (ROI dedicato).
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ SENT = ROOT / "data" / "processed" / "telegram_alerts_sent.json"
 MIN_UNIFIED = 8
 RARE_LINE = 1.0
 MIN_SPREAD_PLAYABILITY = 8  # giocabilità ≥ 8
+MIN_RITARDI_PLAYABILITY = 8  # ritardi “succulenti” (allineato a MIN_ALERT_SCORE)
 KEEP_DAYS = 21
 CHUNK = 10
 BRAND = "FOOTBALL PREDICTOR"
@@ -484,6 +487,81 @@ def _spread_alerts(upcoming: list[dict], asian: list[dict]) -> list[dict]:
     return out
 
 
+def _ritardi_alerts(upcoming: list[dict]) -> list[dict]:
+    """Ritardi indipendenti dal GIOCA: severity + quota → pick dedicato."""
+    try:
+        from modules.advisor.ritardi_play import (
+            MAX_TELEGRAM_PER_RUN,
+            MIN_ALERT_EV,
+            MIN_ALERT_SCORE,
+            MIN_ALERT_SEVERITY,
+            attach_ritardi_play,
+            evaluate_row,
+        )
+    except Exception:
+        return []
+    try:
+        attach_ritardi_play(upcoming, compute_missing=False)
+    except Exception:
+        pass
+    from datetime import date as date_cls
+
+    today = date_cls.today().isoformat()
+    out: list[dict] = []
+    seen: set[str] = set()
+    for row in upcoming:
+        day = str(row.get("date") or "")[:10]
+        if day and day < today:
+            continue
+        play = row.get("ritardi_play") if isinstance(row.get("ritardi_play"), dict) else None
+        if not play:
+            try:
+                play = evaluate_row(row, compute_missing=False)
+            except Exception:
+                play = None
+        if not play or str(play.get("action") or "") != "gioca":
+            continue
+        score = int(play.get("playability") or 0)
+        sev = float(play.get("severity") or 0)
+        ev = float(play.get("ev") or 0)
+        if score < max(MIN_RITARDI_PLAYABILITY, MIN_ALERT_SCORE):
+            continue
+        if sev < float(MIN_ALERT_SEVERITY) or ev < float(MIN_ALERT_EV):
+            continue
+        face = _face_key(row)
+        if face in seen:
+            continue
+        seen.add(face)
+        aid = str(play.get("id") or f"ritardi|{face}")
+        q = _fmt_quota(_as_quota(play.get("odds")))
+        body = [
+            _header(row),
+            f"🔥 Ritardo succulento · {score}/10",
+            f"Pick: {play.get('pick_label') or play.get('pick')}",
+        ]
+        if q:
+            body.append(f"Quota {q}")
+        body.append(f"EV euristico {ev:+.0%} · severity {sev:.0%}")
+        if play.get("title"):
+            body.append(str(play["title"]))
+        if play.get("detail"):
+            body.append(str(play["detail"])[:220])
+        body.append("Indipendente dal GIOCA freeze · ROI ritardi dedicato")
+        out.append(
+            {
+                "id": aid,
+                "kind": "ritardi",
+                "text": "\n".join(body),
+                "sort": -score * 1000 - int(ev * 1000) - int(sev * 100),
+                "score": score,
+                "play": play,
+                "row": row,
+            }
+        )
+    out.sort(key=lambda r: (r.get("sort") or 0, r.get("id") or ""))
+    return out[: int(MAX_TELEGRAM_PER_RUN)]
+
+
 def _pack(title: str, items: list[dict]) -> list[tuple[str, list[str]]]:
     if not items:
         return []
@@ -514,6 +592,7 @@ def collect_alerts(upcoming: list[dict] | None = None) -> dict:
         asian = []
     scores = _score_alerts(rows)
     rares = _spread_alerts(rows, asian)
+    ritardi = _ritardi_alerts(rows)
     gioca = scores["gioca"]
     watch = scores["watch"]
     return {
@@ -521,10 +600,12 @@ def collect_alerts(upcoming: list[dict] | None = None) -> dict:
         "watch": watch,
         "voto": gioca + watch,
         "spread": rares,
+        "ritardi": ritardi,
         "n_gioca": len(gioca),
         "n_watch": len(watch),
         "n_voto": len(gioca) + len(watch),
         "n_spread": len(rares),
+        "n_ritardi": len(ritardi),
     }
 
 
@@ -534,16 +615,22 @@ def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False
     fresh_gioca = [a for a in found["gioca"] if a["id"] not in sent_ids]
     fresh_watch = [a for a in found["watch"] if a["id"] not in sent_ids]
     fresh_spread = [a for a in found["spread"] if a["id"] not in sent_ids]
+    fresh_ritardi = [a for a in found.get("ritardi") or [] if a["id"] not in sent_ids]
     messages = _pack(f"🎯 GIOCA · voto ≥{MIN_UNIFIED}", fresh_gioca)
     messages += _pack(f"👀 Da guardare · voto ≥{MIN_UNIFIED} · NO BET", fresh_watch)
     messages += _pack(
         f"📈 AsianBetSoccer · moneyway / spread Raro · giocabilità ≥{MIN_SPREAD_PLAYABILITY} (min {MIN_SPREAD_PLAYABILITY}/10)",
         fresh_spread,
     )
+    messages += _pack(
+        f"🔥 Ritardi giocabili · giocabilità ≥{MIN_RITARDI_PLAYABILITY}/10 (indipendenti dal GIOCA)",
+        fresh_ritardi,
+    )
 
     sent_n = 0
     freeze_info: dict = {}
     spread_freeze: dict = {}
+    ritardi_freeze: dict = {}
     if dry_run:
         for msg, _ids in messages:
             print(msg)
@@ -595,20 +682,36 @@ def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False
                 except Exception as exc:
                     spread_freeze = {"ok": False, "error": str(exc)}
                     print(f"telegram freeze spread skip: {exc}")
+            to_rit = [a for a in fresh_ritardi if a.get("id") in set(sent_alert_ids)]
+            if to_rit:
+                try:
+                    from modules.advisor.ritardi_play import record_ritardi_freezes
+
+                    ritardi_freeze = record_ritardi_freezes(to_rit)
+                    print(
+                        f"telegram freeze ritardi: {ritardi_freeze.get('added', 0)} nuovi, "
+                        f"{ritardi_freeze.get('skipped', 0)} già in journal"
+                    )
+                except Exception as exc:
+                    ritardi_freeze = {"ok": False, "error": str(exc)}
+                    print(f"telegram freeze ritardi skip: {exc}")
 
     info = {
         "n_gioca": found["n_gioca"],
         "n_watch": found["n_watch"],
         "n_voto": found["n_voto"],
         "n_spread": found["n_spread"],
+        "n_ritardi": found.get("n_ritardi") or 0,
         "n_new_gioca": len(fresh_gioca),
         "n_new_watch": len(fresh_watch),
         "n_new_voto": len(fresh_gioca) + len(fresh_watch),
         "n_new_spread": len(fresh_spread),
+        "n_new_ritardi": len(fresh_ritardi),
         "n_messages": len(messages),
         "n_sent": sent_n,
         "score_freeze": freeze_info,
         "spread_freeze": spread_freeze,
+        "ritardi_freeze": ritardi_freeze,
         "dry_run": dry_run,
         "status": telegram_status(),
     }
@@ -616,6 +719,7 @@ def dispatch_alerts(upcoming: list[dict] | None = None, *, dry_run: bool = False
         f"telegram avvisi: gioca {info['n_new_gioca']}/{info['n_gioca']} nuovi, "
         f"watch {info['n_new_watch']}/{info['n_watch']} nuovi, "
         f"spread {info['n_new_spread']}/{info['n_spread']} nuovi, "
+        f"ritardi {info['n_new_ritardi']}/{info['n_ritardi']} nuovi, "
         f"inviati {sent_n}"
     )
     return info
@@ -666,5 +770,6 @@ def ping_bot() -> bool:
         "Bot collegato.\n"
         f"Avvisi: 🎯 GIOCA (voto ≥{MIN_UNIFIED} + action gioca), "
         f"👀 da guardare (voto ≥{MIN_UNIFIED} + no bet), "
-        f"spread Raro / moneyway con giocabilità ≥{MIN_SPREAD_PLAYABILITY} (min {MIN_SPREAD_PLAYABILITY}/10)."
+        f"spread Raro / moneyway ≥{MIN_SPREAD_PLAYABILITY}/10, "
+        f"🔥 ritardi giocabili ≥{MIN_RITARDI_PLAYABILITY}/10."
     )
