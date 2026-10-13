@@ -402,14 +402,47 @@ def _upsert(conn: sqlite3.Connection, rec: dict[str, Any], now: str, *, keep_res
     )
 
 
+# Cache di processo: invalida automaticamente quando cambia mtime/size del DB.
+_HISTORY_CACHE: tuple[float, int, list[dict[str, Any]]] | None = None
+
+
+def clear_history_cache() -> None:
+    global _HISTORY_CACHE
+    _HISTORY_CACHE = None
+
+
 def load_history() -> list[dict[str, Any]]:
+    """Carica lo storico (cache in-process su mtime SQLite)."""
+    global _HISTORY_CACHE
+    try:
+        st = DB.stat()
+        mtime = float(st.st_mtime)
+        size = int(st.st_size)
+    except OSError:
+        mtime, size = 0.0, 0
+    if (
+        _HISTORY_CACHE is not None
+        and _HISTORY_CACHE[0] == mtime
+        and _HISTORY_CACHE[1] == size
+    ):
+        return _HISTORY_CACHE[2]
+
     conn = _connect()
     try:
         _migrate_jsonl(conn)
         rows = conn.execute("SELECT * FROM matches ORDER BY date, home").fetchall()
-        return [_row_to_dict(r) for r in rows]
+        out = [_row_to_dict(r) for r in rows]
     finally:
         conn.close()
+
+    try:
+        st = DB.stat()
+        mtime = float(st.st_mtime)
+        size = int(st.st_size)
+    except OSError:
+        pass
+    _HISTORY_CACHE = (mtime, size, out)
+    return out
 
 
 def _action_label(action: Any) -> str:
@@ -2629,6 +2662,7 @@ def manual_settle(
             ),
         )
         conn.commit()
+        clear_history_cache()
         try:
             export_plays_csv()
         except Exception:

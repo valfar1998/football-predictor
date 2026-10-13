@@ -293,6 +293,132 @@ def _settle_entry(entry: dict[str, Any], hg: int, ag: int) -> dict[str, Any]:
     return out
 
 
+def manual_settle_spread(
+    entry_id: str,
+    *,
+    home_goals: int | None = None,
+    away_goals: int | None = None,
+    hit: int | None = None,
+) -> dict[str, Any]:
+    """Chiude una entry moneyway a mano (FT oppure Presa/Non presa)."""
+    data = _load_journal()
+    key = str(entry_id)
+    entry = data.get(key)
+    if entry is None:
+        # fallback: match_key
+        for k, v in data.items():
+            if str(v.get("match_key") or "") == key or str(v.get("id") or "") == key:
+                key, entry = k, v
+                break
+    if entry is None:
+        return {"ok": False, "error": "entry moneyway non trovata"}
+    if entry.get("settled_at") and entry.get("hit") is not None:
+        return {
+            "ok": False,
+            "error": "già settled",
+            "id": key,
+            "hit": entry.get("hit"),
+        }
+
+    if hit is not None:
+        try:
+            final_hit = 1 if int(hit) == 1 else 0
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "hit non valido"}
+        odds = _f(entry.get("odds"))
+        pnl = None
+        if odds is not None and odds > 1.01:
+            pnl = round(odds - 1.0, 4) if final_hit == 1 else -1.0
+        else:
+            pnl = 1.0 if final_hit == 1 else -1.0
+        out = dict(entry)
+        out.update(
+            {
+                "hit": final_hit,
+                "push": 0,
+                "pnl": pnl,
+                "settled_at": _now(),
+            }
+        )
+        if home_goals is not None:
+            out["home_goals"] = int(home_goals)
+        if away_goals is not None:
+            out["away_goals"] = int(away_goals)
+        data[key] = out
+        _save_journal(data)
+        return {
+            "ok": True,
+            "id": key,
+            "hit": final_hit,
+            "pnl": pnl,
+            "presa": "Sì" if final_hit == 1 else "No",
+            "source": "moneyway",
+        }
+
+    if home_goals is None or away_goals is None:
+        return {"ok": False, "error": "servono gol FT oppure hit esplicito"}
+    try:
+        hg_i, ag_i = int(home_goals), int(away_goals)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "gol non validi"}
+
+    out = _settle_entry(entry, hg_i, ag_i)
+    if out.get("hit") is None and not out.get("push"):
+        return {"ok": False, "error": "impossibile calcolare hit (bet sconosciuto)"}
+    data[key] = out
+    _save_journal(data)
+    return {
+        "ok": True,
+        "id": key,
+        "home_goals": hg_i,
+        "away_goals": ag_i,
+        "hit": out.get("hit"),
+        "push": out.get("push"),
+        "pnl": out.get("pnl"),
+        "presa": (
+            "Push"
+            if out.get("push")
+            else ("Sì" if out.get("hit") == 1 else "No" if out.get("hit") == 0 else "n/d")
+        ),
+        "source": "moneyway",
+    }
+
+
+def list_pending_spread() -> list[dict[str, Any]]:
+    """Tutte le entry moneyway non settled (senza limite)."""
+    today = datetime.now(timezone.utc).date()
+    out: list[dict[str, Any]] = []
+    for key, r in _load_journal().items():
+        if r.get("settled_at"):
+            continue
+        day_s = str(r.get("date") or "")[:10]
+        try:
+            age = (today - datetime.fromisoformat(day_s).date()).days
+        except ValueError:
+            age = None
+        out.append(
+            {
+                "source": "moneyway",
+                "id": str(r.get("id") or key),
+                "journal_key": key,
+                "match_key": r.get("match_key"),
+                "date": day_s,
+                "home": r.get("home"),
+                "away": r.get("away"),
+                "league": r.get("league"),
+                "pick": r.get("bet"),
+                "pick_label": r.get("bet_label") or r.get("follow"),
+                "odds": r.get("odds"),
+                "playability": r.get("playability"),
+                "age_days": age,
+                "needs_corners": False,
+                "needs_shots": False,
+            }
+        )
+    out.sort(key=lambda x: (int(x.get("age_days") or 0), str(x.get("date") or "")), reverse=True)
+    return out
+
+
 def settle_spread_journal() -> dict[str, Any]:
     """Aggancia gol da our_history e chiude le entry pending."""
     from modules.data_update.history import load_history
@@ -302,43 +428,51 @@ def settle_spread_journal() -> dict[str, Any]:
     if not data:
         return {"ok": True, "settled": 0, "pending": 0, "n": 0}
 
+    pending_items = [(k, e) for k, e in data.items() if not e.get("settled_at")]
+    if not pending_items:
+        return {
+            "ok": True,
+            "settled": 0,
+            "pending": 0,
+            "n": len(data),
+            "path": str(JOURNAL),
+        }
+
+    # Solo i giorni dei pending: evita resolve su tutto lo storico.
+    needed_days = {
+        str(e.get("date") or "")[:10] for _, e in pending_items if str(e.get("date") or "")[:10]
+    }
     by_face: dict[str, dict] = {}
     for r in load_history():
         day = str(r.get("date") or "")[:10]
-        home = resolve_known_team(r.get("home") or "") or r.get("home")
-        away = resolve_known_team(r.get("away") or "") or r.get("away")
+        if needed_days and day not in needed_days:
+            continue
         if r.get("home_goals") is None or r.get("away_goals") is None:
             continue
-        key = _face_key(day, str(home), str(away))
-        by_face[key] = r
-        # anche nomi raw
+        home = resolve_known_team(r.get("home") or "") or r.get("home")
+        away = resolve_known_team(r.get("away") or "") or r.get("away")
+        by_face[_face_key(day, str(home), str(away))] = r
         by_face[_face_key(day, str(r.get("home") or ""), str(r.get("away") or ""))] = r
 
     settled = 0
-    pending = 0
     changed = False
-    for key, entry in list(data.items()):
-        if entry.get("settled_at"):
-            continue
+    for key, entry in pending_items:
         day = str(entry.get("date") or "")[:10]
         home = str(entry.get("home") or "")
         away = str(entry.get("away") or "")
         face = entry.get("match_key") or _face_key(day, home, away)
         hist = by_face.get(face) or by_face.get(_face_key(day, home, away))
         if not hist:
-            pending += 1
             continue
         try:
             hg = int(hist["home_goals"])
             ag = int(hist["away_goals"])
         except (TypeError, ValueError, KeyError):
-            pending += 1
             continue
         data[key] = _settle_entry(entry, hg, ag)
         settled += 1
         changed = True
 
-    # recount pending after
     pending = sum(1 for e in data.values() if not e.get("settled_at"))
     if changed:
         _save_journal(data)
@@ -428,8 +562,11 @@ def spread_paper_report() -> dict[str, Any]:
         stats = _subset_roi(items)
         by_market.append({"key": k, **stats})
 
-    def _row_view(r: dict[str, Any]) -> dict[str, Any]:
+    def _row_view(r: dict[str, Any], key: str = "") -> dict[str, Any]:
         return {
+            "id": str(r.get("id") or key),
+            "journal_key": key,
+            "match_key": r.get("match_key"),
             "date": r.get("date"),
             "home": r.get("home"),
             "away": r.get("away"),
@@ -462,12 +599,12 @@ def spread_paper_report() -> dict[str, Any]:
         "by_vote": by_vote,
         "by_market": by_market,
         "pending_rows": sorted(
-            (_row_view(r) for r in pending),
+            (_row_view(v, k) for k, v in data.items() if not v.get("settled_at")),
             key=lambda r: str(r.get("date") or ""),
             reverse=True,
         )[:30],
         "recent": sorted(
-            (_row_view(r) for r in settled),
+            (_row_view(v, k) for k, v in data.items() if v.get("settled_at")),
             key=lambda r: str(r.get("date") or ""),
             reverse=True,
         )[:15],

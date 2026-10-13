@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import functools
 import re
 import unicodedata
 from typing import Iterable
@@ -316,13 +317,12 @@ def _token_hit(key: str, index: dict[str, str]) -> str | None:
     return None
 
 
-def resolve_known_team(name: str, known: Iterable[str] | dict[str, str] | None = None) -> str | None:
+def _resolve_known_team_uncached(
+    raw: str, known: Iterable[str] | dict[str, str] | None
+) -> str | None:
     """Allinea il nome API/openfootball/org allo spelling football-data.co.uk."""
     from modules.dataset_loader.loader import normalize_team
 
-    raw = str(name or "").strip()
-    if not raw:
-        return None
     aliased = _alias_target(raw)
     fallback = aliased or normalize_team(raw)
 
@@ -360,6 +360,23 @@ def resolve_known_team(name: str, known: Iterable[str] | dict[str, str] | None =
     return None if known is not None else fallback
 
 
+@functools.lru_cache(maxsize=16384)
+def _resolve_known_team_cached(raw: str) -> str | None:
+    """Hot path: stesso risultato di resolve senza `known` custom."""
+    return _resolve_known_team_uncached(raw, None)
+
+
+def resolve_known_team(name: str, known: Iterable[str] | dict[str, str] | None = None) -> str | None:
+    """Allinea il nome API/openfootball/org allo spelling football-data.co.uk."""
+    raw = str(name or "").strip()
+    if not raw:
+        return None
+    if known is None:
+        return _resolve_known_team_cached(raw)
+    return _resolve_known_team_uncached(raw, known)
+
+
 def reset_known_index_cache() -> None:
     global _KNOWN_IDX
     _KNOWN_IDX = None
+    _resolve_known_team_cached.cache_clear()

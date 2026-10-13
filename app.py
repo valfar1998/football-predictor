@@ -902,6 +902,13 @@ def _render_weekly_ritardi(upcoming_rows: list[dict]) -> None:
                                 "Partita": f"{r.get('home')} vs {r.get('away')}",
                                 "Pick": r.get("pick_label") or r.get("pick") or "—",
                                 "Quota": r.get("odds"),
+                                "Equa": r.get("odds_fair")
+                                if r.get("odds_fair") is not None
+                                else (
+                                    round(1.0 / float(r["p_fair"]), 3)
+                                    if r.get("p_fair")
+                                    else None
+                                ),
                                 "Giocab.": r.get("playability"),
                                 "EV": r.get("ev"),
                                 "Severity": r.get("severity"),
@@ -912,6 +919,16 @@ def _render_weekly_ritardi(upcoming_rows: list[dict]) -> None:
                     ),
                     width="stretch",
                     hide_index=True,
+                    column_config={
+                        "Quota": st.column_config.NumberColumn("Quota", format="%.2f"),
+                        "Equa": st.column_config.NumberColumn(
+                            "Equa",
+                            help="Quota equa analisi ritardi (1/p_fair). Sotto = EV negativo.",
+                            format="%.2f",
+                        ),
+                        "EV": st.column_config.NumberColumn("EV", format="percent"),
+                        "Severity": st.column_config.NumberColumn("Severity", format="percent"),
+                    },
                 )
         else:
             st.caption(
@@ -1988,28 +2005,66 @@ def render_advice(
     )
 
 
+def _roi_files_mtime_key() -> tuple[float, ...]:
+    """Chiavi cache ROI home: invalida quando cambiano storico/journal."""
+    paths = (
+        ROOT / "data" / "processed" / "our_history.sqlite",
+        ROOT / "data" / "processed" / "telegram_spread_freeze.json",
+        ROOT / "data" / "processed" / "telegram_ritardi_freeze.json",
+        ROOT / "data" / "processed" / "telegram_alerts_sent.json",
+        ROOT / "data" / "processed" / "local_settles.json",
+    )
+    out: list[float] = []
+    for p in paths:
+        try:
+            out.append(float(p.stat().st_mtime) if p.is_file() else 0.0)
+        except OSError:
+            out.append(0.0)
+    return tuple(out)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_roi_home_reports(_mtime_key: tuple[float, ...]) -> dict:
+    """Stessa logica ROI, ma riusata tra rerun Streamlit finché i file non cambiano."""
+    from modules.advisor.paper_stats import paper_trading_report
+    from modules.advisor.ritardi_play import ritardi_alert_paper_report
+    from modules.advisor.spread_paper import spread_paper_report
+
+    out: dict = {"analisi": None, "moneyway": None, "ritardi": None, "errors": {}}
+    try:
+        out["analisi"] = paper_trading_report()
+    except Exception as exc:
+        out["errors"]["analisi"] = str(exc)
+    try:
+        out["moneyway"] = spread_paper_report()
+    except Exception as exc:
+        out["errors"]["moneyway"] = str(exc)
+    try:
+        # Home: niente scan live upcoming (stessi metric ROI/pending).
+        out["ritardi"] = ritardi_alert_paper_report(include_live=False)
+    except Exception as exc:
+        out["errors"]["ritardi"] = str(exc)
+    return out
+
+
 def _roi_total_triple() -> None:
     """Home: solo ROI totali Analisi / Moneyway / Ritardi."""
-    from modules.advisor.paper_stats import paper_trading_report
-    from modules.advisor.spread_paper import spread_paper_report
-    from modules.advisor.ritardi_play import ritardi_alert_paper_report
-
-    a = m = r = None
-    try:
-        a = paper_trading_report()
-    except Exception as exc:
-        st.caption(f"ROI analisi n/d: {exc}")
-    try:
-        m = spread_paper_report()
-    except Exception as exc:
-        st.caption(f"ROI moneyway n/d: {exc}")
-    try:
-        r = ritardi_alert_paper_report()
-    except Exception as exc:
-        st.caption(f"ROI ritardi n/d: {exc}")
+    bag = _cached_roi_home_reports(_roi_files_mtime_key())
+    a = bag.get("analisi")
+    m = bag.get("moneyway")
+    r = bag.get("ritardi")
+    errs = bag.get("errors") or {}
+    if a is None and errs.get("analisi"):
+        st.caption(f"ROI analisi n/d: {errs['analisi']}")
+    if m is None and errs.get("moneyway"):
+        st.caption(f"ROI moneyway n/d: {errs['moneyway']}")
+    if r is None and errs.get("ritardi"):
+        st.caption(f"ROI ritardi n/d: {errs['ritardi']}")
 
     st.caption(
         "Paper ROI totali · dettagli nella tab **Paper ROI**. "
+        "Pending aperti → tab **Pending settle** (FT manuale). "
+        "Quando punti sul serio → tab **Giocate reali** (quota/stake effettivi; paper resta invariato). "
         "Analisi = GIOCA freeze · Moneyway = Spread Raro · Ritardi = Telegram ritardi (quote freeze)."
     )
     c1, c2, c3 = st.columns(3)
@@ -2109,7 +2164,14 @@ def _render_ritardi_roi_panel(
                     "Partita": f"{r.get('home')} vs {r.get('away')}",
                     "Campionato": r.get("league") or "",
                     "Pick": r.get("pick_label") or r.get("pick") or "—",
-                    "Quota": r.get("odds") if r.get("odds") is not None else "—",
+                    "Quota": r.get("odds"),
+                    "Equa": r.get("odds_fair")
+                    if r.get("odds_fair") is not None
+                    else (
+                        round(1.0 / float(r["p_fair"]), 3)
+                        if r.get("p_fair")
+                        else None
+                    ),
                     "Giocab.": r.get("playability"),
                     "EV": r.get("ev"),
                     "Severity": r.get("severity"),
@@ -2126,9 +2188,17 @@ def _render_ritardi_roi_panel(
                 "Severity": st.column_config.NumberColumn("Severity", format="percent"),
                 "EV": st.column_config.NumberColumn("EV", format="percent"),
                 "Quota": st.column_config.NumberColumn("Quota", format="%.2f"),
+                "Equa": st.column_config.NumberColumn(
+                    "Equa",
+                    help="Quota equa analisi ritardi (1/p_fair). Se trovi meno → EV negativo.",
+                    format="%.2f",
+                ),
             },
         )
-        st.caption(f"**{len(rows)}** ritardi forti · candidati Telegram (ROI = quote freeze post-invio)")
+        st.caption(
+            f"**{len(rows)}** ritardi forti · candidati Telegram (ROI = quote freeze post-invio). "
+            "**Equa** = soglia value: sotto quella quota l’EV euristico diventa negativo."
+        )
 
 
 def _render_analisi_roi_detail() -> None:
@@ -2250,6 +2320,431 @@ def _render_ritardi_roi_detail() -> None:
             )
         except Exception as exc:
             st.caption(f"Legacy n/d: {exc}")
+
+
+def _render_pending_settle_tab() -> None:
+    """Tab: pending dei tre ROI + inserimento manuale risultati."""
+    from modules.advisor.pending_settle import list_all_roi_pending, settle_roi_pending
+
+    st.caption(
+        "Partite ancora aperte nei paper ROI (**analisi** GIOCA, **moneyway** Spread Raro, "
+        "**ritardi** Telegram) — **anche le future** (non ancora chiudibili). "
+        "Per chiudere: FT (e corner/tiri se serve) oppure Presa/Non presa. "
+        "Con i gol, gli altri journal sulla stessa partita si chiudono se matchano."
+    )
+    try:
+        bag = list_all_roi_pending()
+    except Exception as exc:
+        st.warning(f"Pending n/d: {exc}")
+        return
+
+    rows = list(bag.get("rows") or [])
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Totale pending", int(bag.get("n") or 0))
+    c2.metric("Analisi", int(bag.get("n_analisi") or 0))
+    c3.metric("Moneyway", int(bag.get("n_moneyway") or 0))
+    c4.metric("Ritardi", int(bag.get("n_ritardi") or 0))
+    c5.metric(
+        "Chiudibili",
+        f"{int(bag.get('n_closable') or 0)}",
+        delta=f"future {int(bag.get('n_future') or 0)}",
+        delta_color="off",
+    )
+
+    if not rows:
+        st.info("Nessun pending ROI: tutto settled o nessun freeze ancora.")
+        return
+
+    src_filter = st.multiselect(
+        "Filtra sorgente",
+        options=["analisi", "moneyway", "ritardi"],
+        default=["analisi", "moneyway", "ritardi"],
+        key="pending_settle_src",
+    )
+    show_future = st.checkbox("Mostra anche partite future", value=True, key="pending_show_future")
+    filtered = [r for r in rows if r.get("source") in src_filter] if src_filter else list(rows)
+    if not show_future:
+        filtered = [r for r in filtered if r.get("closable")]
+    if not filtered:
+        st.info("Nessun pending con i filtri scelti.")
+        return
+
+    show = pd.DataFrame(
+        [
+            {
+                "Stato": r.get("status") or ("Chiudibile" if r.get("closable") else "Futura"),
+                "ROI": r.get("source"),
+                "Età g": r.get("age_days"),
+                "Data": r.get("date"),
+                "Partita": f"{r.get('home')} vs {r.get('away')}",
+                "Campionato": r.get("league") or "",
+                "Pick": r.get("pick_label") or r.get("pick") or "—",
+                "Quota": r.get("odds"),
+                "Voto/Giocab.": r.get("playability")
+                if r.get("playability") is not None
+                else r.get("score_unified"),
+            }
+            for r in filtered
+        ]
+    )
+    st.dataframe(
+        show,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Quota": st.column_config.NumberColumn("Quota", format="%.2f"),
+        },
+    )
+
+    st.subheader("Chiudi a mano")
+    labels = {
+        f"{r.get('source')}|{r.get('journal_key') or r.get('id')}": (
+            f"[{r.get('source')}|{r.get('status') or '?'}] "
+            f"{('+' if int(r.get('age_days') or 0) >= 0 else '')}{r.get('age_days')}g · "
+            f"{r.get('date')} · {r.get('home')} vs {r.get('away')} · "
+            f"{r.get('pick_label') or r.get('pick')}"
+        )
+        for r in filtered
+    }
+    choice = st.selectbox(
+        "Partita pending",
+        options=list(labels.keys()),
+        format_func=lambda k: labels.get(k, k),
+        key="pending_settle_choice",
+    )
+    sel = next(
+        (
+            r
+            for r in filtered
+            if f"{r.get('source')}|{r.get('journal_key') or r.get('id')}" == choice
+        ),
+        None,
+    )
+    if not sel:
+        return
+
+    if not sel.get("closable", True):
+        st.info(
+            "Partita **ancora da giocare** (compaiono nel ROI pending home). "
+            "Puoi comunque forzare una chiusura manuale se vuoi."
+        )
+
+    mode = st.radio(
+        "Come chiudere",
+        ["FT + stats (calcola presa)", "Solo Presa / Non presa"],
+        horizontal=True,
+        key="pending_settle_mode",
+    )
+    if mode.startswith("FT"):
+        g1, g2 = st.columns(2)
+        with g1:
+            hg = st.number_input("Gol casa", min_value=0, max_value=20, value=0, step=1, key="pend_hg")
+        with g2:
+            ag = st.number_input("Gol ospite", min_value=0, max_value=20, value=0, step=1, key="pend_ag")
+        ch = ca = sh = sa = None
+        if sel.get("needs_corners"):
+            c1, c2 = st.columns(2)
+            with c1:
+                ch = st.number_input("Corner casa", min_value=0, max_value=40, value=0, step=1, key="pend_ch")
+            with c2:
+                ca = st.number_input("Corner ospite", min_value=0, max_value=40, value=0, step=1, key="pend_ca")
+        if sel.get("needs_shots"):
+            s1, s2 = st.columns(2)
+            with s1:
+                sh = st.number_input("Tiri casa", min_value=0, max_value=60, value=0, step=1, key="pend_sh")
+            with s2:
+                sa = st.number_input("Tiri ospite", min_value=0, max_value=60, value=0, step=1, key="pend_sa")
+        if st.button("Chiudi con FT", type="primary", key="pend_close_ft"):
+            out = settle_roi_pending(
+                source=str(sel.get("source")),
+                entry_id=str(sel.get("journal_key") or sel.get("id") or ""),
+                date=str(sel.get("date") or "")[:10] or None,
+                home=str(sel.get("home") or "") or None,
+                away=str(sel.get("away") or "") or None,
+                home_goals=int(hg),
+                away_goals=int(ag),
+                corners_home=int(ch) if ch is not None else None,
+                corners_away=int(ca) if ca is not None else None,
+                shots_home=int(sh) if sh is not None else None,
+                shots_away=int(sa) if sa is not None else None,
+            )
+            if out.get("ok"):
+                extra = ""
+                closed = (out.get("cascade") or {}).get("closed") or []
+                if closed:
+                    extra = " · anche: " + ", ".join(
+                        f"{c.get('source')}={c.get('presa')}" for c in closed
+                    )
+                st.success(f"Chiusa: {out.get('presa')} · hit={out.get('hit')}{extra}")
+                st.rerun()
+            else:
+                st.error(out.get("error") or out)
+    else:
+        presa = st.radio("Esito scommessa", ["Presa", "Non presa"], horizontal=True, key="pend_hit")
+        if st.button("Chiudi con esito", type="primary", key="pend_close_hit"):
+            out = settle_roi_pending(
+                source=str(sel.get("source")),
+                entry_id=str(sel.get("journal_key") or sel.get("id") or ""),
+                date=str(sel.get("date") or "")[:10] or None,
+                home=str(sel.get("home") or "") or None,
+                away=str(sel.get("away") or "") or None,
+                hit=1 if presa == "Presa" else 0,
+            )
+            if out.get("ok"):
+                st.success(f"Chiusa: {out.get('presa')}")
+                st.rerun()
+            else:
+                st.error(out.get("error") or out)
+
+
+def _render_real_plays_tab() -> None:
+    """Tab: log quota/stake reali — ROI personale (paper intatto)."""
+    from modules.advisor.real_plays import (
+        candidate_plays_from_paper,
+        delete_real_play,
+        real_plays_report,
+        upsert_real_play,
+    )
+
+    st.caption(
+        "Qui logghi **solo quando punti davvero**: quota presa al book + stake. "
+        "Il **paper ROI** in home resta sulle quote freeze Telegram (crescita macchina). "
+        "Ora puoi lasciare vuoto: la tab è pronta per dopo."
+    )
+    try:
+        rep = real_plays_report()
+    except Exception as exc:
+        st.warning(f"Giocate reali n/d: {exc}")
+        return
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Giocate settled", int(rep.get("n") or 0))
+    c2.metric("Pending esito", int(rep.get("n_pending") or 0))
+    c3.metric(
+        "ROI reale",
+        "n/d" if rep.get("roi") is None else f"{rep.get('roi'):+.1%}",
+        help="PnL / stake sulle quote che hai loggato.",
+    )
+    c4.metric("PnL (u)", "n/d" if not rep.get("n") else f"{float(rep.get('pnl') or 0):+.2f}")
+    c5.metric(
+        "Hit rate",
+        "—" if rep.get("hit_rate") is None else f"{rep.get('hit_rate'):.0%}",
+    )
+    if rep.get("note"):
+        st.info(rep["note"])
+
+    by_src = rep.get("by_source") or {}
+    if by_src:
+        with st.expander("ROI reale per sorgente", expanded=False):
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "Sorgente": k,
+                            "n": v.get("n"),
+                            "pending": v.get("pending"),
+                            "ROI": v.get("roi"),
+                            "PnL": v.get("pnl"),
+                            "Stake": v.get("stake"),
+                        }
+                        for k, v in by_src.items()
+                    ]
+                ),
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "ROI": st.column_config.NumberColumn("ROI", format="percent"),
+                },
+            )
+
+    st.subheader("Registra giocata")
+    try:
+        cands = candidate_plays_from_paper(limit=50)
+    except Exception as exc:
+        cands = []
+        st.caption(f"Candidati paper n/d: {exc}")
+
+    mode = st.radio(
+        "Origine",
+        ["Da alert paper", "Manuale"],
+        horizontal=True,
+        key="real_play_mode",
+    )
+    sel = None
+    if mode.startswith("Da") and cands:
+        labels = {
+            f"{c.get('source')}|{c.get('id')}": (
+                f"[{c.get('source')}|{c.get('status')}] {c.get('date')} · "
+                f"{c.get('home')} vs {c.get('away')} · {c.get('pick_label') or c.get('pick')} · "
+                f"paper {c.get('odds_paper') or '—'}"
+            )
+            for c in cands
+        }
+        choice = st.selectbox(
+            "Pick paper",
+            options=list(labels.keys()),
+            format_func=lambda k: labels.get(k, k),
+            key="real_play_cand",
+        )
+        sel = next(
+            (c for c in cands if f"{c.get('source')}|{c.get('id')}" == choice),
+            None,
+        )
+    elif mode.startswith("Da"):
+        st.caption("Nessun candidato paper libero (già loggati o nessun freeze). Usa Manuale.")
+
+    src = "manual"
+    mk = home = away = date = league = pick = pick_label = None
+    odds_paper = None
+    hit_default = None
+    if sel:
+        src = str(sel.get("source") or "manual")
+        mk = str(sel.get("match_key") or sel.get("id") or "")
+        home, away = sel.get("home"), sel.get("away")
+        date, league = sel.get("date"), sel.get("league")
+        pick = sel.get("pick")
+        pick_label = sel.get("pick_label") or pick
+        odds_paper = sel.get("odds_paper")
+        hit_default = sel.get("hit")
+        st.caption(
+            f"Paper: **{pick_label}** @ {odds_paper if odds_paper is not None else '—'} · "
+            f"esito paper: {'presa' if hit_default == 1 else 'non presa' if hit_default == 0 else 'pending'}"
+        )
+    else:
+        g1, g2, g3 = st.columns(3)
+        with g1:
+            date = st.text_input("Data (YYYY-MM-DD)", key="real_man_date")
+            home = st.text_input("Casa", key="real_man_home")
+        with g2:
+            away = st.text_input("Ospite", key="real_man_away")
+            pick_label = st.text_input("Pick", key="real_man_pick")
+        with g3:
+            league = st.text_input("Campionato", key="real_man_league")
+            odds_paper = st.number_input(
+                "Quota paper (opz.)",
+                min_value=1.0,
+                max_value=50.0,
+                value=1.0,
+                step=0.05,
+                key="real_man_paper",
+            )
+            if odds_paper <= 1.01:
+                odds_paper = None
+        pick = pick_label
+        mk = f"{str(date or '')[:10]}|{home or ''}|{away or ''}"
+        src = "manual"
+
+    r1, r2, r3 = st.columns(3)
+    with r1:
+        odds_played = st.number_input(
+            "Quota giocata",
+            min_value=1.01,
+            max_value=50.0,
+            value=float(odds_paper) if odds_paper and float(odds_paper) > 1.01 else 1.90,
+            step=0.05,
+            format="%.2f",
+            key="real_odds_played",
+            help="Quota effettiva al book (può essere diversa dal freeze).",
+        )
+    with r2:
+        stake = st.number_input(
+            "Stake (unità)",
+            min_value=0.01,
+            max_value=100.0,
+            value=1.0,
+            step=0.25,
+            key="real_stake",
+        )
+    with r3:
+        hit_opt = st.selectbox(
+            "Esito",
+            options=["pending / sync paper", "Presa", "Non presa"],
+            key="real_hit_opt",
+            help="Se pending, l’esito si aggancia quando il paper settle chiude la partita.",
+        )
+    notes = st.text_input("Note (opz.)", key="real_notes")
+
+    if st.button("Salva giocata reale", type="primary", key="real_save"):
+        hit_val = None
+        if hit_opt == "Presa":
+            hit_val = 1
+        elif hit_opt == "Non presa":
+            hit_val = 0
+        elif hit_default is not None and mode.startswith("Da"):
+            hit_val = int(hit_default)
+        if not mk or not str(mk).strip("|"):
+            st.error("Servono almeno data/squadre o un candidato paper.")
+        else:
+            out = upsert_real_play(
+                source=src,
+                match_key=mk,
+                date=str(date or "")[:10] or None,
+                home=home,
+                away=away,
+                league=league,
+                pick=str(pick or "") or None,
+                pick_label=str(pick_label or pick or "") or None,
+                odds_paper=float(odds_paper) if odds_paper else None,
+                odds_played=float(odds_played),
+                stake_units=float(stake),
+                hit=hit_val,
+                notes=notes or None,
+                entry_id=str(sel.get("id")) if sel and sel.get("id") else None,
+            )
+            if out.get("ok"):
+                st.success("Giocata salvata (paper ROI invariato).")
+                st.rerun()
+            else:
+                st.error(out.get("error") or out)
+
+    rows = list(rep.get("rows") or [])
+    if rows:
+        st.subheader("Journal giocate reali")
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "Data": r.get("date"),
+                        "ROI": r.get("source"),
+                        "Partita": f"{r.get('home')} vs {r.get('away')}",
+                        "Pick": r.get("pick_label") or r.get("pick"),
+                        "Paper": r.get("odds_paper"),
+                        "Giocata": r.get("odds_played"),
+                        "Stake": r.get("stake_units"),
+                        "Hit": r.get("hit"),
+                        "PnL": r.get("pnl"),
+                        "Note": r.get("notes") or "",
+                    }
+                    for r in rows
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Paper": st.column_config.NumberColumn("Paper", format="%.2f"),
+                "Giocata": st.column_config.NumberColumn("Giocata", format="%.2f"),
+                "PnL": st.column_config.NumberColumn("PnL", format="%.2f"),
+            },
+        )
+        with st.expander("Elimina una giocata", expanded=False):
+            del_opts = {
+                str(r.get("id")): (
+                    f"{r.get('date')} · {r.get('home')} vs {r.get('away')} · "
+                    f"{r.get('pick_label') or r.get('pick')}"
+                )
+                for r in rows
+                if r.get("id")
+            }
+            if del_opts:
+                del_id = st.selectbox(
+                    "Giocata",
+                    options=list(del_opts.keys()),
+                    format_func=lambda k: del_opts.get(k, k),
+                    key="real_del_id",
+                )
+                if st.button("Elimina", key="real_del_btn"):
+                    st.write(delete_real_play(del_id))
+                    st.rerun()
 
 
 def _render_moneyway_roi_block(*, compact: bool = False) -> None:
@@ -2974,12 +3469,14 @@ upcoming = _load_upcoming_enriched(
     if (ROOT / "data" / "raw" / "asian_odds.json").exists()
     else 0.0,
 )
-tab_cal, tab_analisi, tab_ritardi, tab_roi, tab_mkt, tab_one, tab_eval = st.tabs(
+tab_cal, tab_analisi, tab_ritardi, tab_roi, tab_pending, tab_real, tab_mkt, tab_one, tab_eval = st.tabs(
     [
         "Calendario",
         "Analisi partita",
         "Ritardi settimana",
         "Paper ROI",
+        "Pending settle",
+        "Giocate reali",
         "Tutti i mercati",
         "Singola partita",
         "Valutazione",
@@ -3391,13 +3888,22 @@ with tab_ritardi:
 with tab_roi:
     st.caption(
         "Dettaglio paper trading: **analisi** (GIOCA freeze), **moneyway** (Spread Raro), "
-        "**ritardi** (Telegram freeze · ROI @ quote congelate). In home restano solo i tre ROI totali."
+        "**ritardi** (Telegram freeze · ROI @ quote congelate). In home restano solo i tre ROI totali. "
+        "Per chiudere a mano le partite aperte usa la tab **Pending settle**."
     )
     _render_analisi_roi_detail()
     st.divider()
     _render_moneyway_roi_block(compact=False)
     st.divider()
     _render_ritardi_roi_detail()
+
+with tab_pending:
+    st.subheader("Pending settle — ROI aperti")
+    _render_pending_settle_tab()
+
+with tab_real:
+    st.subheader("Giocate reali — quota & stake effettivi")
+    _render_real_plays_tab()
 
 with tab_analisi:
     st.caption(
@@ -3993,7 +4499,8 @@ with tab_eval:
 
         st.caption(
             f"Se l’auto-settle non chiude entro **{STALE_DAYS} giorni**, arriva un alert Telegram. "
-            "Qui inserisci FT (e corner/tiri se il pick li richiede) oppure solo Presa/Non presa."
+            "Preferisci la tab **Pending settle** (tutti i ROI). "
+            "Qui restano i pending analisi: FT (e corner/tiri se serve) oppure Presa/Non presa."
         )
         c_stale1, c_stale2 = st.columns(2)
         with c_stale1:

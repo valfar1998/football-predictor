@@ -534,13 +534,29 @@ def _ritardi_alerts(upcoming: list[dict]) -> list[dict]:
         seen.add(face)
         aid = str(play.get("id") or f"ritardi|{face}")
         q = _fmt_quota(_as_quota(play.get("odds")))
+        q_fair = None
+        try:
+            from modules.advisor.ritardi_play import odds_fair_of
+
+            q_fair = _fmt_quota(_as_quota(odds_fair_of(play)))
+        except Exception:
+            pf = play.get("p_fair")
+            try:
+                if pf is not None and float(pf) > 0:
+                    q_fair = _fmt_quota(1.0 / float(pf))
+            except (TypeError, ValueError):
+                q_fair = None
         body = [
             _header(row),
             f"🔥 Ritardo succulento · {score}/10",
             f"Pick: {play.get('pick_label') or play.get('pick')}",
         ]
-        if q:
+        if q and q_fair:
+            body.append(f"Quota book {q} · equa {q_fair} (sotto equa = EV−)")
+        elif q:
             body.append(f"Quota {q}")
+        elif q_fair:
+            body.append(f"Quota equa {q_fair}")
         body.append(f"EV euristico {ev:+.0%} · severity {sev:.0%}")
         if play.get("title"):
             body.append(str(play["title"]))

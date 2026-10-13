@@ -149,6 +149,17 @@ def _p_fair(sev: float, *, family: str, baseline: float | None, observed: float 
     return max(0.42, min(0.58, base + boost + gap))
 
 
+def odds_fair_of(play: dict[str, Any]) -> float | None:
+    """Quota equa = 1 / p_fair (soglia sotto cui l'EV euristico diventa negativo)."""
+    of = _f(play.get("odds_fair"))
+    if of is not None and of > 1.01:
+        return round(of, 3)
+    pf = _f(play.get("p_fair"))
+    if pf is not None and pf > 0:
+        return round(1.0 / pf, 3)
+    return None
+
+
 def _play_score(
     *,
     sev: float,
@@ -220,6 +231,7 @@ def evaluate_anomaly_on_row(row: dict[str, Any], anom: dict[str, Any]) -> dict[s
     # tiri = proxy debole
     if "tiri" in str(anom.get("title") or "").lower():
         p_fair = max(0.38, p_fair - 0.04)
+    odds_fair = round(1.0 / p_fair, 3) if p_fair and p_fair > 0 else None
     ev = p_fair * odd - 1.0
     score = _play_score(sev=sev, odds=odd, ev=ev, family=family)
     action = "gioca" if score >= MIN_PLAY_SCORE and ev >= MIN_EV else "no_bet"
@@ -236,6 +248,7 @@ def evaluate_anomaly_on_row(row: dict[str, Any], anom: dict[str, Any]) -> dict[s
         "pick_label": label,
         "family": family,
         "odds": round(float(odd), 3),
+        "odds_fair": odds_fair,
         "line": line,
         "p_fair": round(p_fair, 3),
         "ev": round(ev, 3),
@@ -416,6 +429,7 @@ def snapshot_from_play(
         "family": play.get("family"),
         "odds": odds,
         "odds_frozen": odds,
+        "odds_fair": odds_fair_of(play),
         "line": _f(play.get("line")),
         "p_fair": _f(play.get("p_fair")),
         "ev": _f(play.get("ev")),
@@ -572,6 +586,40 @@ def backfill_ritardi_freezes_from_sent(
     else:
         return {"ok": False, "error": "sent bad shape", "added": 0}
 
+    data = _load_journal()
+    # Patch odds_frozen legacy senza toccare upcoming (88MB).
+    patched = 0
+    for key, ent in list(data.items()):
+        if _f(ent.get("odds_frozen")) is None and _f(ent.get("odds")) is not None:
+            ent = dict(ent)
+            ent["odds_frozen"] = _f(ent.get("odds"))
+            data[key] = ent
+            patched += 1
+
+    missing_ids: list[tuple[str, str]] = []
+    skipped = 0
+    for aid, when in sent.items():
+        meta = _parse_sent_ritardi_id(aid)
+        if not meta:
+            continue
+        if aid in data and data[aid].get("alert_frozen_at"):
+            skipped += 1
+            continue
+        missing_ids.append((aid, when))
+
+    if not missing_ids:
+        if patched:
+            _save_journal(data)
+        return {
+            "ok": True,
+            "added": 0,
+            "skipped": skipped,
+            "missing": 0,
+            "patched": patched,
+            "n_journal": len(data),
+            "path": str(JOURNAL),
+        }
+
     rows = upcoming
     if rows is None:
         rows = []
@@ -591,20 +639,10 @@ def backfill_ritardi_freezes_from_sent(
         if day and home and away:
             by_face[f"{day}|{home}|{away}"] = r
 
-    data = _load_journal()
-    added = skipped = missing = patched = 0
-    for aid, when in sent.items():
+    added = missing = 0
+    for aid, when in missing_ids:
         meta = _parse_sent_ritardi_id(aid)
         if not meta:
-            continue
-        if aid in data and data[aid].get("alert_frozen_at"):
-            # garantisci odds_frozen su entry legacy
-            ent = data[aid]
-            if _f(ent.get("odds_frozen")) is None and _f(ent.get("odds")) is not None:
-                ent["odds_frozen"] = _f(ent.get("odds"))
-                data[aid] = ent
-                patched += 1
-            skipped += 1
             continue
         face = f"{meta['date']}|{meta['home_key']}|{meta['away_key']}"
         row = by_face.get(face)
@@ -619,7 +657,6 @@ def backfill_ritardi_freezes_from_sent(
         if "T" not in str(frozen_at):
             frozen_at = _now()
         else:
-            # normalizza a Z
             frozen_at = str(frozen_at).replace("+00:00", "Z")
         snap = snapshot_from_play(play, frozen_at=frozen_at, force_id=aid)
         if not snap:
@@ -627,12 +664,6 @@ def backfill_ritardi_freezes_from_sent(
             continue
         data[aid] = snap
         added += 1
-    # anche entry già in journal ma senza odds_frozen (fuori da sent match)
-    for key, ent in list(data.items()):
-        if _f(ent.get("odds_frozen")) is None and _f(ent.get("odds")) is not None:
-            ent["odds_frozen"] = _f(ent.get("odds"))
-            data[key] = ent
-            patched += 1
     if added or patched:
         _save_journal(data)
     return {
@@ -649,6 +680,7 @@ def backfill_ritardi_freezes_from_sent(
 def _corners_from_hist(hist: dict[str, Any]) -> tuple[int | None, int | None]:
     for hk, ak in (
         ("home_corners", "away_corners"),
+        ("corners_home", "corners_away"),
         ("HC", "AC"),
     ):
         try:
@@ -768,6 +800,149 @@ def _settle_entry(entry: dict[str, Any], hist: dict[str, Any]) -> dict[str, Any]
     return out
 
 
+def manual_settle_ritardi(
+    entry_id: str,
+    *,
+    home_goals: int | None = None,
+    away_goals: int | None = None,
+    corners_home: int | None = None,
+    corners_away: int | None = None,
+    hit: int | None = None,
+) -> dict[str, Any]:
+    """Chiude una entry ritardi a mano (FT/corner oppure Presa/Non presa)."""
+    data = _load_journal()
+    key = str(entry_id)
+    entry = data.get(key)
+    if entry is None:
+        for k, v in data.items():
+            if str(v.get("id") or "") == key or str(v.get("match_key") or "") == key:
+                key, entry = k, v
+                break
+    if entry is None:
+        return {"ok": False, "error": "entry ritardi non trovata"}
+    if entry.get("settled_at") and entry.get("hit") is not None:
+        return {
+            "ok": False,
+            "error": "già settled",
+            "id": key,
+            "hit": entry.get("hit"),
+        }
+
+    if hit is not None:
+        try:
+            final_hit = 1 if int(hit) == 1 else 0
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "hit non valido"}
+        odds = _frozen_odds(entry)
+        pnl = None
+        if odds is not None and odds > 1.01:
+            pnl = round(odds - 1.0, 4) if final_hit == 1 else -1.0
+        else:
+            pnl = 1.0 if final_hit == 1 else -1.0
+        out = dict(entry)
+        out.update(
+            {
+                "hit": final_hit,
+                "push": 0,
+                "pnl": pnl,
+                "settled_at": _now(),
+            }
+        )
+        if home_goals is not None:
+            out["home_goals"] = int(home_goals)
+        if away_goals is not None:
+            out["away_goals"] = int(away_goals)
+        if corners_home is not None:
+            out["corners_home"] = int(corners_home)
+        if corners_away is not None:
+            out["corners_away"] = int(corners_away)
+        data[key] = out
+        _save_journal(data)
+        return {
+            "ok": True,
+            "id": key,
+            "hit": final_hit,
+            "pnl": pnl,
+            "presa": "Sì" if final_hit == 1 else "No",
+            "source": "ritardi",
+        }
+
+    if home_goals is None or away_goals is None:
+        return {"ok": False, "error": "servono gol FT oppure hit esplicito"}
+    try:
+        hg_i, ag_i = int(home_goals), int(away_goals)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "gol non validi"}
+
+    hist: dict[str, Any] = {"home_goals": hg_i, "away_goals": ag_i}
+    if corners_home is not None and corners_away is not None:
+        hist["home_corners"] = int(corners_home)
+        hist["away_corners"] = int(corners_away)
+        hist["corners_home"] = int(corners_home)
+        hist["corners_away"] = int(corners_away)
+
+    upd = _settle_entry(entry, hist)
+    if not upd:
+        pick = str(entry.get("pick") or "").upper()
+        if pick.startswith("CORN") and (corners_home is None or corners_away is None):
+            return {"ok": False, "error": "pick corner: servono corners_home/away"}
+        return {"ok": False, "error": "impossibile calcolare hit (stats o pick)"}
+    data[key] = upd
+    _save_journal(data)
+    return {
+        "ok": True,
+        "id": key,
+        "home_goals": hg_i,
+        "away_goals": ag_i,
+        "hit": upd.get("hit"),
+        "push": upd.get("push"),
+        "pnl": upd.get("pnl"),
+        "presa": (
+            "Push"
+            if upd.get("push")
+            else ("Sì" if upd.get("hit") == 1 else "No" if upd.get("hit") == 0 else "n/d")
+        ),
+        "source": "ritardi",
+    }
+
+
+def list_pending_ritardi() -> list[dict[str, Any]]:
+    """Tutte le entry ritardi non settled (senza limite)."""
+    today = datetime.now(timezone.utc).date()
+    out: list[dict[str, Any]] = []
+    for key, r in _load_journal().items():
+        if r.get("settled_at"):
+            continue
+        day_s = str(r.get("date") or "")[:10]
+        try:
+            age = (today - datetime.fromisoformat(day_s).date()).days
+        except ValueError:
+            age = None
+        pick = str(r.get("pick") or "").upper()
+        out.append(
+            {
+                "source": "ritardi",
+                "id": str(r.get("id") or key),
+                "journal_key": key,
+                "match_key": r.get("match_key"),
+                "date": day_s,
+                "home": r.get("home"),
+                "away": r.get("away"),
+                "league": r.get("league"),
+                "pick": r.get("pick"),
+                "pick_label": r.get("pick_label") or r.get("pick"),
+                "odds": _frozen_odds(r),
+                "playability": r.get("playability"),
+                "title": r.get("title"),
+                "age_days": age,
+                "needs_corners": pick.startswith("CORN"),
+                "needs_shots": pick.startswith("SHOT"),
+            }
+        )
+    out.sort(key=lambda x: (int(x.get("age_days") or 0), str(x.get("date") or "")), reverse=True)
+    return out
+
+
 def settle_ritardi_journal() -> dict[str, Any]:
     from modules.data_update.history import load_history
     from modules.data_update.team_names import resolve_known_team
@@ -776,21 +951,34 @@ def settle_ritardi_journal() -> dict[str, Any]:
     if not data:
         return {"ok": True, "settled": 0, "pending": 0, "n": 0}
 
+    pending_items = [(k, e) for k, e in data.items() if not e.get("settled_at")]
+    if not pending_items:
+        return {
+            "ok": True,
+            "settled": 0,
+            "pending": 0,
+            "n": len(data),
+            "path": str(JOURNAL),
+        }
+
+    needed_days = {
+        str(e.get("date") or "")[:10] for _, e in pending_items if str(e.get("date") or "")[:10]
+    }
     by_face: dict[str, dict] = {}
     for r in load_history():
         day = str(r.get("date") or "")[:10]
-        home = resolve_known_team(r.get("home") or "") or r.get("home")
-        away = resolve_known_team(r.get("away") or "") or r.get("away")
+        if needed_days and day not in needed_days:
+            continue
         if r.get("home_goals") is None or r.get("away_goals") is None:
             continue
+        home = resolve_known_team(r.get("home") or "") or r.get("home")
+        away = resolve_known_team(r.get("away") or "") or r.get("away")
         by_face[_face_key(day, str(home), str(away))] = r
         by_face[_face_key(day, str(r.get("home") or ""), str(r.get("away") or ""))] = r
 
     settled = 0
     changed = False
-    for key, entry in list(data.items()):
-        if entry.get("settled_at"):
-            continue
+    for key, entry in pending_items:
         face = entry.get("match_key") or _face_key(
             str(entry.get("date") or ""), str(entry.get("home") or ""), str(entry.get("away") or "")
         )
@@ -829,8 +1017,11 @@ def _subset_roi(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def ritardi_alert_paper_report() -> dict[str, Any]:
-    """ROI journal Telegram ritardi: campione = freeze inviati, PnL su quote freezate."""
+def ritardi_alert_paper_report(*, include_live: bool = True) -> dict[str, Any]:
+    """ROI journal Telegram ritardi: campione = freeze inviati, PnL su quote freezate.
+
+    ``include_live=False`` salta il scan upcoming (utile in home: stessi n/ROI/pending).
+    """
     backfill = backfill_ritardi_freezes_from_sent()
     settle_info = settle_ritardi_journal()
     data = _load_journal()
@@ -847,8 +1038,11 @@ def ritardi_alert_paper_report() -> dict[str, Any]:
             "pending": sum(1 for r in pending if int(r.get("playability") or 0) == v),
         }
 
-    def _row_view(r: dict[str, Any]) -> dict[str, Any]:
+    def _row_view(r: dict[str, Any], key: str = "") -> dict[str, Any]:
         return {
+            "id": str(r.get("id") or key),
+            "journal_key": key,
+            "match_key": r.get("match_key"),
             "date": r.get("date"),
             "home": r.get("home"),
             "away": r.get("away"),
@@ -866,7 +1060,11 @@ def ritardi_alert_paper_report() -> dict[str, Any]:
             "alert_frozen_at": r.get("alert_frozen_at"),
         }
 
-    live = list_ritardi_playable(strong_only=True, compute_missing=False)
+    live = (
+        list_ritardi_playable(strong_only=True, compute_missing=False)
+        if include_live
+        else {"ok": True, "n": 0, "rows": []}
+    )
     return {
         "ok": True,
         "roi_mode": "ritardi_telegram_freeze_odds",
@@ -885,12 +1083,16 @@ def ritardi_alert_paper_report() -> dict[str, Any]:
         "odds_pnl": overall["odds_pnl"],
         "by_vote": by_score,
         "pending_rows": sorted(
-            (_row_view(r) for r in pending),
+            (_row_view(v, k) for k, v in data.items() if not v.get("settled_at")),
             key=lambda r: str(r.get("date") or ""),
             reverse=True,
         )[:30],
         "recent": sorted(
-            (_row_view(r) for r in settled),
+            (
+                _row_view(v, k)
+                for k, v in data.items()
+                if v.get("settled_at") and v.get("hit") is not None
+            ),
             key=lambda r: str(r.get("settled_at") or ""),
             reverse=True,
         )[:15],

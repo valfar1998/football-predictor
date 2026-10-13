@@ -12938,7 +12938,7 @@
     }
   },
   "5795465": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5795465",
       "xg_home": 2.33,
@@ -12987,7 +12987,7 @@
     }
   },
   "5795466": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5795466",
       "xg_home": 2.28,
@@ -13036,7 +13036,7 @@
     }
   },
   "5795467": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5795467",
       "xg_home": 1.1,
@@ -13085,7 +13085,7 @@
     }
   },
   "5795471": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5795471",
       "xg_home": 1.15,
@@ -13134,7 +13134,7 @@
     }
   },
   "5795474": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5795474",
       "xg_home": 0.72,
@@ -13183,7 +13183,7 @@
     }
   },
   "5795473": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5795473",
       "xg_home": 0.8,
@@ -13232,7 +13232,7 @@
     }
   },
   "5881179": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5881179",
       "xg_home": 2.37,
@@ -13281,7 +13281,7 @@
     }
   },
   "5881183": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5881183",
       "xg_home": 0.93,
@@ -13330,11 +13330,11 @@
     }
   },
   "5881184": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5881184",
-      "xg_home": 2.87,
-      "xg_away": 1.69,
+      "xg_home": 3.13,
+      "xg_away": 2.09,
       "poss_home": 47.0,
       "poss_away": 53.0,
       "shots_home": 23.0,
@@ -13379,7 +13379,7 @@
     }
   },
   "5881185": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5881185",
       "xg_home": 1.96,
@@ -13428,7 +13428,7 @@
     }
   },
   "5881187": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5881187",
       "xg_home": 1.13,
@@ -13477,7 +13477,7 @@
     }
   },
   "5881186": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5881186",
       "xg_home": 4.03,
@@ -13526,7 +13526,7 @@
     }
   },
   "5868088": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5868088",
       "xg_home": 0.02,
@@ -13575,7 +13575,7 @@
     }
   },
   "5868081": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5868081",
       "xg_home": 1.3,
@@ -13624,7 +13624,7 @@
     }
   },
   "5868084": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5868084",
       "xg_home": 1.93,
@@ -13673,7 +13673,7 @@
     }
   },
   "5868089": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5868089",
       "xg_home": 1.43,
@@ -13722,11 +13722,11 @@
     }
   },
   "5802948": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5802948",
-      "xg_home": 1.19,
-      "xg_away": 1.3,
+      "xg_home": 1.26,
+      "xg_away": 1.28,
       "poss_home": 47.0,
       "poss_away": 53.0,
       "shots_home": 5.0,
@@ -13771,7 +13771,7 @@
     }
   },
   "5802946": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5802946",
       "xg_home": 3.82,
@@ -13820,7 +13820,7 @@
     }
   },
   "5802949": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5802949",
       "xg_home": 0.55,
@@ -13869,7 +13869,7 @@
     }
   },
   "5802950": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5802950",
       "xg_home": 1.17,
@@ -13918,7 +13918,7 @@
     }
   },
   "5802952": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5802952",
       "xg_home": 4.25,
@@ -13967,7 +13967,7 @@
     }
   },
   "5749693": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5749693",
       "xg_home": 1.46,
@@ -14016,7 +14016,7 @@
     }
   },
   "5749694": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5749694",
       "xg_home": 2.42,
@@ -14065,7 +14065,7 @@
     }
   },
   "5749697": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5749697",
       "xg_home": 3.12,
@@ -14114,7 +14114,7 @@
     }
   },
   "5881180": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5881180",
       "xg_home": 2.31,
@@ -14163,7 +14163,7 @@
     }
   },
   "5868086": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5868086",
       "xg_home": 0.69,
@@ -14212,7 +14212,7 @@
     }
   },
   "5802947": {
-    "fetched_at": "2026-10-11T07:31:40.001077+00:00",
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
     "details": {
       "match_id": "5802947",
       "xg_home": 1.34,
@@ -14258,6 +14258,888 @@
       "cards_away": 1.0,
       "corners_home": 7.0,
       "corners_away": 4.0
+    }
+  },
+  "6112247": {
+    "fetched_at": "2026-10-13T07:22:41.795658+00:00",
+    "details": {
+      "match_id": "6112247",
+      "xg_home": null,
+      "xg_away": null,
+      "poss_home": null,
+      "poss_away": null,
+      "shots_home": null,
+      "shots_away": null,
+      "has_lineup": true,
+      "lineup_home": [
+        "Samuel Soares",
+        "Alexander Bah",
+        "Alessandro Circati",
+        "Tomás Araújo",
+        "Samuel Dahl",
+        "Leandro Barreiro",
+        "João Palhinha",
+        "Rafa Silva",
+        "Gianluca Prestianni",
+        "Andreas Schjelderup",
+        "Vangelis Pavlidis"
+      ],
+      "lineup_away": [
+        "Viljami Sinisalo",
+        "Colby Donovan",
+        "Dane Murray",
+        "Liam Scales",
+        "Kieran Tierney",
+        "Callum McGregor",
+        "Mika Baur",
+        "Camilo Durán",
+        "Benjamin Nygren",
+        "Sebastian Tounekti",
+        "Kasper Waarts Høgh"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": false,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 0,
+      "cards_home": null,
+      "cards_away": null,
+      "corners_home": null,
+      "corners_away": null
+    }
+  },
+  "5795469": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5795469",
+      "xg_home": 2.41,
+      "xg_away": 3.34,
+      "poss_home": 43.0,
+      "poss_away": 57.0,
+      "shots_home": 13.0,
+      "shots_away": 24.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Walter Benítez",
+        "Jefferson Lerma",
+        "Chris Richards",
+        "Jaydee Canvot",
+        "Anan Khalaili",
+        "Adam Wharton",
+        "Quinten Timber",
+        "Tyrick Mitchell",
+        "Daichi Kamada",
+        "Yéremi Pino",
+        "Jørgen Strand Larsen"
+      ],
+      "lineup_away": [
+        "Matz Sels",
+        "Ola Aina",
+        "Ousmane Diomande",
+        "Murillo",
+        "Daniel Muñoz",
+        "Xaver Schlager",
+        "James McAtee",
+        "Neco Williams",
+        "Morgan Gibbs-White",
+        "Dan Ndoye",
+        "Liam Delap"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 37,
+      "cards_home": 2.0,
+      "cards_away": 2.0,
+      "corners_home": 5.0,
+      "corners_away": 8.0
+    }
+  },
+  "5795470": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5795470",
+      "xg_home": 1.33,
+      "xg_away": 1.68,
+      "poss_home": 35.0,
+      "poss_away": 65.0,
+      "shots_home": 9.0,
+      "shots_away": 15.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Konstantinos Tzolakis",
+        "Semi Ajayi",
+        "John Egan",
+        "Nobel Mendy",
+        "Lewie Coyle",
+        "Ryan Giles",
+        "Joe Gelhardt",
+        "Matt Crooks",
+        "Regan Slater",
+        "Sorba Thomas",
+        "Oli McBurnie"
+      ],
+      "lineup_away": [
+        "Jordan Pickford",
+        "Ainsley Maitland-Niles",
+        "James Tarkowski",
+        "Michael Keane",
+        "Jarrad Branthwaite",
+        "James Garner",
+        "Harrison Armstrong",
+        "Brennan Johnson",
+        "Kiernan Dewsbury-Hall",
+        "Jack Grealish",
+        "Thierno Barry"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 24,
+      "cards_home": 2.0,
+      "cards_away": 0.0,
+      "corners_home": 7.0,
+      "corners_away": 6.0
+    }
+  },
+  "5795472": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5795472",
+      "xg_home": 0.94,
+      "xg_away": 1.28,
+      "poss_home": 35.0,
+      "poss_away": 65.0,
+      "shots_home": 13.0,
+      "shots_away": 15.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Alisson Becker",
+        "Ronald Araujo",
+        "Jérémy Jacquet",
+        "Virgil van Dijk",
+        "Miloš Kerkez",
+        "Ryan Gravenberch",
+        "Alexis Mac Allister",
+        "Víctor Muñoz",
+        "Florian Wirtz",
+        "Bradley Barcola",
+        "Lewis Koumas"
+      ],
+      "lineup_away": [
+        "Gianluigi Donnarumma",
+        "Matheus Nunes",
+        "Rúben Dias",
+        "Marc Guéhi",
+        "Nico O'Reilly",
+        "Elliot Anderson",
+        "Iliman Ndiaye",
+        "Rayan Cherki",
+        "Enzo Fernández",
+        "Antoine Semenyo",
+        "Erling Haaland"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 28,
+      "cards_home": 2.0,
+      "cards_away": 2.0,
+      "corners_home": 5.0,
+      "corners_away": 6.0
+    }
+  },
+  "5881181": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5881181",
+      "xg_home": 1.32,
+      "xg_away": 1.17,
+      "poss_home": 48.0,
+      "poss_away": 52.0,
+      "shots_home": 19.0,
+      "shots_away": 16.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Marvin Schwäbe",
+        "Sebastian Sebulonsen",
+        "Jahmai Simpson-Pusey",
+        "Luka Lochoshvili",
+        "Borna Sosa",
+        "Ísak Jóhannesson",
+        "Ellyes Skhiri",
+        "Linton Maina",
+        "Mikey Moore",
+        "Marius Bülter",
+        "Saïd El Mala"
+      ],
+      "lineup_away": [
+        "Moritz Nicolas",
+        "Daiki Hashioka",
+        "Kevin Diks",
+        "Jan Leszczyński",
+        "Joseph Scally",
+        "Philipp Sander",
+        "Florian Neuhaus",
+        "Lukas Ullrich",
+        "Hugo Bolin",
+        "Robin Hack",
+        "Isac Lidberg"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 35,
+      "cards_home": 1.0,
+      "cards_away": 3.0,
+      "corners_home": 6.0,
+      "corners_away": 6.0
+    }
+  },
+  "5881182": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5881182",
+      "xg_home": 1.15,
+      "xg_away": 0.32,
+      "poss_home": 51.0,
+      "poss_away": 49.0,
+      "shots_home": 10.0,
+      "shots_away": 5.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Mio Backhaus",
+        "Philipp Treu",
+        "Matthias Ginter",
+        "Philipp Lienhart",
+        "Jordy Makengo",
+        "Maximilian Eggestein",
+        "Yannik Engelhardt",
+        "Jan-Niklas Beste",
+        "Yuito Suzuki",
+        "Derry Scherhant",
+        "Igor Matanović"
+      ],
+      "lineup_away": [
+        "Loris Karius",
+        "Hasan Kuruçay",
+        "Nikola Katić",
+        "Maximilian Wöber",
+        "Adrian Gantenbein",
+        "Soufian El-Faouzi",
+        "Satoshi Tanaka",
+        "Robin Gosens",
+        "Moussa Sylla",
+        "Kenan Karaman",
+        "Chukwubuike Adamu"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 15,
+      "cards_home": 1.0,
+      "cards_away": 1.0,
+      "corners_home": 7.0,
+      "corners_away": 2.0
+    }
+  },
+  "5868083": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5868083",
+      "xg_home": 0.78,
+      "xg_away": 0.47,
+      "poss_home": 67.0,
+      "poss_away": 33.0,
+      "shots_home": 13.0,
+      "shots_away": 7.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Matías Dituro",
+        "Rubén Sánchez",
+        "Víctor Chust",
+        "Javi Morcillo",
+        "Roy Revivo",
+        "Gonzalo Villar",
+        "Marc Aguado",
+        "Thomas Lemar",
+        "Tete Morente",
+        "Fer Niño",
+        "Germán Valera"
+      ],
+      "lineup_away": [
+        "Ionuț Radu",
+        "Álvaro Núñez",
+        "Yoel Lago",
+        "Marcos Alonso",
+        "Javi Rueda",
+        "Ilaix Moriba",
+        "Aleix Febas",
+        "Javi Galán",
+        "Ferrán Jutglà",
+        "Pablo Durán",
+        "Hugo Álvarez"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 20,
+      "cards_home": 1.0,
+      "cards_away": 3.0,
+      "corners_home": 5.0,
+      "corners_away": 2.0
+    }
+  },
+  "5868090": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5868090",
+      "xg_home": 1.44,
+      "xg_away": 2.13,
+      "poss_home": 40.0,
+      "poss_away": 60.0,
+      "shots_home": 12.0,
+      "shots_away": 21.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Alex Remiro",
+        "Pablo Marín",
+        "Jon Martín",
+        "Mamadou Sarr",
+        "Sergio Gómez",
+        "Ander Barrenetxea",
+        "Yangel Herrera",
+        "Carlos Soler",
+        "Gonçalo Guedes",
+        "Luka Sučić",
+        "Arsen Zakharyan"
+      ],
+      "lineup_away": [
+        "Leo Román",
+        "Ximo Navarro",
+        "José Giménez",
+        "Bright Ede",
+        "Giacomo Quagliata",
+        "Diego Villares",
+        "Mario Soriano",
+        "David Mella",
+        "Luismi Cruz",
+        "Yeremay Hernández",
+        "Bil Nsongo"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 33,
+      "cards_home": 1.0,
+      "cards_away": 2.0,
+      "corners_home": 7.0,
+      "corners_away": 10.0
+    }
+  },
+  "5868082": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5868082",
+      "xg_home": 2.89,
+      "xg_away": 1.94,
+      "poss_home": 52.0,
+      "poss_away": 48.0,
+      "shots_home": 20.0,
+      "shots_away": 11.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Álvaro Vallés",
+        "Héctor Bellerín",
+        "Diego Llorente",
+        "Natan",
+        "Fran García",
+        "Marc Roca",
+        "Pablo Fornals",
+        "Rodrigo Riquelme",
+        "Isco",
+        "Abdessamad Ezzalzouli",
+        "Juan Hernández"
+      ],
+      "lineup_away": [
+        "Aitor Fernández",
+        "Iñigo Arguibide",
+        "Alejandro Catena",
+        "Unai Santos",
+        "Abel Bretones",
+        "Rubén Garcia",
+        "Jon Moncayola",
+        "Lucas Torró",
+        "Moi Gómez",
+        "Ante Budimir",
+        "Raúl García"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 32,
+      "cards_home": 2.0,
+      "cards_away": 5.0,
+      "corners_home": 8.0,
+      "corners_away": 4.0
+    }
+  },
+  "5868087": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5868087",
+      "xg_home": 1.28,
+      "xg_away": 1.8,
+      "poss_home": 54.0,
+      "poss_away": 46.0,
+      "shots_home": 20.0,
+      "shots_away": 10.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Julen Agirrezabala",
+        "Álvaro Mantilla",
+        "Pablo Ramón",
+        "Jeanuël Belocian",
+        "Jorge Salinas",
+        "Matteo Prati",
+        "Sergio Canales",
+        "Iván Martin",
+        "André Almeida",
+        "Iñigo Vicente",
+        "Yassir Zabiri"
+      ],
+      "lineup_away": [
+        "Stole Dimitrievski",
+        "Mouctar Diakhaby",
+        "Pepelu",
+        "Justin De Haas",
+        "Pablo Maffeo",
+        "José Gayà",
+        "Dani Raba",
+        "Filip Ugrinic",
+        "Guido Rodríguez",
+        "Javier Guerra",
+        "Hugo Duro"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 30,
+      "cards_home": 3.0,
+      "cards_away": 3.0,
+      "corners_home": 8.0,
+      "corners_away": 3.0
+    }
+  },
+  "5802951": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5802951",
+      "xg_home": 1.25,
+      "xg_away": 0.63,
+      "poss_home": 46.0,
+      "poss_away": 54.0,
+      "shots_home": 11.0,
+      "shots_away": 11.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Yéhvann Diouf",
+        "Mohamed Abdelmonem",
+        "Youssouf Ndayishimiye",
+        "Xavier Mandza",
+        "Jonathan Clauss",
+        "Djibril Coulibaly",
+        "Axel Witsel",
+        "Niels Nkounkou",
+        "Gauthier Hein",
+        "Mohamed Amoura",
+        "Elye Wahi"
+      ],
+      "lineup_away": [
+        "Filip Jörgensen",
+        "Genesis Antwi",
+        "Jeyland Mitchell",
+        "Karim Coulibaly",
+        "Oso",
+        "Pape Demba Diop",
+        "Dário Essugo",
+        "Gessime Yassine",
+        "Diogo Sousa",
+        "Samuel Amo-Ameyaw",
+        "Conrad Harder"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 23,
+      "cards_home": 1.0,
+      "cards_away": 1.0,
+      "corners_home": 2.0,
+      "corners_away": 3.0
+    }
+  },
+  "5802953": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5802953",
+      "xg_home": 2.56,
+      "xg_away": 1.76,
+      "poss_home": 59.0,
+      "poss_away": 41.0,
+      "shots_home": 21.0,
+      "shots_away": 12.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Brice Samba",
+        "Bryan Reynolds",
+        "Charlie Cresswell",
+        "Anthony Rouault",
+        "Mahamadou Nagida",
+        "Adrien Thomasson",
+        "Valentin Rongier",
+        "Mahdi Camara",
+        "Mousa Tamari",
+        "Estéban Lepaul",
+        "Issa Soumaré"
+      ],
+      "lineup_away": [
+        "Mamadou Diop",
+        "Arthur Piedfort",
+        "Axel Tuanzebe",
+        "Clément Akpa",
+        "Lamine Sy",
+        "Naouirou Ahamada",
+        "Kévin Danois",
+        "Fredrik Oppegård",
+        "Romain Faivre",
+        "Danny Namaso",
+        "Cameron Archer"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 33,
+      "cards_home": 4.0,
+      "cards_away": 0.0,
+      "corners_home": 12.0,
+      "corners_away": 5.0
+    }
+  },
+  "5802954": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5802954",
+      "xg_home": 1.06,
+      "xg_away": 1.3,
+      "poss_home": 36.0,
+      "poss_away": 64.0,
+      "shots_home": 15.0,
+      "shots_away": 5.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Patrick Beach",
+        "Lucas Maronnier",
+        "Adrien Monfray",
+        "Michel Diaz",
+        "Paolo Gozzi",
+        "Mouhamed Diop",
+        "Dermane Karim",
+        "Antoine Mille",
+        "Iron Gomis",
+        "Kandet Diawara",
+        "Jérémy Le Douaron"
+      ],
+      "lineup_away": [
+        "Jeffrey De Lange",
+        "Kelyann Bezahaf",
+        "CJ Egan-Riley",
+        "Nayef Aguerd",
+        "Emerson",
+        "Nouhoum Kamissoko",
+        "Himad Abdelli",
+        "Amine Harit",
+        "Angel Gomes",
+        "Igor Paixão",
+        "Amine Gouiri"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 20,
+      "cards_home": 4.0,
+      "cards_away": 1.0,
+      "corners_home": 6.0,
+      "corners_away": 3.0
+    }
+  },
+  "5749692": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5749692",
+      "xg_home": 1.35,
+      "xg_away": 1.08,
+      "poss_home": 66.0,
+      "poss_away": 34.0,
+      "shots_home": 19.0,
+      "shots_away": 9.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Jean Butez",
+        "Yan Couto",
+        "Jacobo Ramón",
+        "Trevoh Chalobah",
+        "Kaiki",
+        "Máximo Perrone",
+        "Lucas Da Cunha",
+        "Assane Diao",
+        "Nico Paz",
+        "Maxence Caqueret",
+        "Anastasios Douvikas"
+      ],
+      "lineup_away": [
+        "Pierluigi Gollini",
+        "Gianluca Mancini",
+        "Evan N'Dicka",
+        "Mario Hermoso",
+        "Nahuel Molina",
+        "Marten de Roon",
+        "Manu Koné",
+        "Wesley",
+        "Paulo Dybala",
+        "Lorenzo Pellegrini",
+        "Donyell Malen"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 28,
+      "cards_home": 2.0,
+      "cards_away": 3.0,
+      "corners_home": 6.0,
+      "corners_away": 2.0
+    }
+  },
+  "5749695": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5749695",
+      "xg_home": 1.84,
+      "xg_away": 1.84,
+      "poss_home": 65.0,
+      "poss_away": 35.0,
+      "shots_home": 17.0,
+      "shots_away": 14.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Christos Mandas",
+        "Romano Floriani Mussolini",
+        "Danilho Doekhi",
+        "Oliver Provstgaard",
+        "Nuno Tavares",
+        "Davide Frattesi",
+        "Reda Belahyane",
+        "Kenneth Taylor",
+        "Gustav Isaksen",
+        "Tijjani Noslin",
+        "Mattia Zaccagni"
+      ],
+      "lineup_away": [
+        "Noel Törnqvist",
+        "Eddy Kouadio",
+        "Lorenzo Lucchesi",
+        "Andrea Carboni",
+        "Samuele Birindelli",
+        "Michael Folorunsho",
+        "Ebenezer Akinsanmiro",
+        "Ricardo Mangas",
+        "Cyril Ngonge",
+        "Exequiel Zeballos",
+        "Gustavo Varela"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 31,
+      "cards_home": 3.0,
+      "cards_away": 1.0,
+      "corners_home": 7.0,
+      "corners_away": 6.0
+    }
+  },
+  "5749696": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5749696",
+      "xg_home": 1.49,
+      "xg_away": 2.0,
+      "poss_home": 57.0,
+      "poss_away": 43.0,
+      "shots_home": 19.0,
+      "shots_away": 10.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Wladimiro Falcone",
+        "Danilo Veiga",
+        "Jamil Siebert",
+        "Tiago Gabriel",
+        "Antonino Gallo",
+        "Lassana Coulibaly",
+        "Ivan Ilić",
+        "Youssef Maleh",
+        "Santiago Pierotti",
+        "Paco Esteban",
+        "Amar Fatah"
+      ],
+      "lineup_away": [
+        "Massimo Pessina",
+        "Matteo Darmian",
+        "Nicolò Casale",
+        "Torbjørn Heggem",
+        "Nadir Zortea",
+        "Lewis Ferguson",
+        "Tommaso Pobega",
+        "Juan Miranda",
+        "Riccardo Orsolini",
+        "Roberto Piccoli",
+        "Nicolò Cambiaghi"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 29,
+      "cards_home": 3.0,
+      "cards_away": 2.0,
+      "corners_home": 10.0,
+      "corners_away": 3.0
+    }
+  },
+  "5749698": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5749698",
+      "xg_home": 1.19,
+      "xg_away": 1.18,
+      "poss_home": 41.0,
+      "poss_away": 59.0,
+      "shots_home": 10.0,
+      "shots_away": 11.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Arijanet Murić",
+        "Ignace Van Der Brempt",
+        "Duje Ćaleta-Car",
+        "Fedde Leysen",
+        "Josh Doig",
+        "Vasilije Adžić",
+        "Nemanja Matić",
+        "Darryl Bakola",
+        "Domenico Berardi",
+        "Sebastiano Esposito",
+        "Armand Laurienté"
+      ],
+      "lineup_away": [
+        "Mike Maignan",
+        "Mario Gila",
+        "Matteo Gabbia",
+        "Strahinja Pavlović",
+        "Samuel Chukwueze",
+        "Yunus Musah",
+        "Adrien Rabiot",
+        "Pervis Estupinán",
+        "Christian Pulisic",
+        "Diego Moreira",
+        "Gonçalo Ramos"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 21,
+      "cards_home": 1.0,
+      "cards_away": 4.0,
+      "corners_home": 3.0,
+      "corners_away": 5.0
+    }
+  },
+  "5749691": {
+    "fetched_at": "2026-10-12T08:51:00.368516+00:00",
+    "details": {
+      "match_id": "5749691",
+      "xg_home": 0.52,
+      "xg_away": 1.95,
+      "poss_home": 28.0,
+      "poss_away": 72.0,
+      "shots_home": 4.0,
+      "shots_away": 22.0,
+      "has_lineup": true,
+      "lineup_home": [
+        "Elia Caprile",
+        "Zé Pedro",
+        "Yerry Mina",
+        "Juan Rodríguez",
+        "Adam Obert",
+        "Yanis Massolin",
+        "Harry Winks",
+        "Alessandro Romano",
+        "Michel Ndary Adopo",
+        "Daniel Maldini",
+        "Paul Mendy"
+      ],
+      "lineup_away": [
+        "Guglielmo Vicario",
+        "Pierre Kalulu",
+        "Gleison Bremer",
+        "Jhon Lucumí",
+        "Zeki Çelik",
+        "Pape Sarr",
+        "Douglas Luiz",
+        "Francisco Conceição",
+        "Weston McKennie",
+        "Nicolás González",
+        "Randal Kolo Muani"
+      ],
+      "n_starters_home": 11,
+      "n_starters_away": 11,
+      "has_momentum": true,
+      "has_shotmap": true,
+      "momentum_avg": null,
+      "shotmap_n": 26,
+      "cards_home": 2.0,
+      "cards_away": 1.0,
+      "corners_home": 1.0,
+      "corners_away": 9.0
     }
   }
 }
